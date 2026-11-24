@@ -379,10 +379,6 @@ impl ResponsesRequestPolicy {
     }
 
     /// Builds an explicit closed policy from admitted route/model facts.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "these fields are the closed Responses request-delta table"
-    )]
     #[must_use]
     pub(crate) const fn new(
         max_output_tokens: MaxOutputTokensPolicy,
@@ -1128,10 +1124,6 @@ pub fn is_native_compaction_request(request: &ModelRequest) -> bool {
 ///
 /// Fails closed on unsupported options/content, incomplete protected tool
 /// groups, incompatible replay, or malformed continuation data.
-#[allow(
-    clippy::too_many_lines,
-    reason = "the ordered top-level Responses request shape remains auditable in one function"
-)]
 pub fn lower_responses_request(
     request: &ModelRequest,
     config: ResponsesRequestConfig<'_>,

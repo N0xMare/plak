@@ -346,10 +346,6 @@ impl LiveOccupancy {
 /// Refreshes occupancy during a running turn. Every prepared request
 /// publishes its own parts, so the breakdown is the current request's, never a
 /// held one that would need an age.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the live reading is its estimate and whether a provider count anchors it"
-)]
 pub(super) fn emit_live_context_projection<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     projection: &ContextProjection,

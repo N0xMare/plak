@@ -78,10 +78,6 @@ pub fn selected_coding_provider_configuration(
     clippy::needless_pass_by_value,
     reason = "the public selection boundary owns its model identity; changing it to a borrow would change the API contract"
 )]
-#[allow(
-    clippy::too_many_lines,
-    reason = "Native configuration selection maps each provider capability, reasoning effort, tool mode, composition, and service tier without fallback."
-)]
 ///
 /// # Errors
 /// Refuses an unavailable route, unsupported processing tier, or invalid provider/model
@@ -352,10 +348,6 @@ pub(crate) async fn api_session_runtime_binding_for(
     .await
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "API session construction preserves the supplied tool owner, frozen route evidence, and topology lease through runtime preparation."
-)]
 pub(crate) async fn api_session_runtime_binding_with_owner(
     parent: &ApiTopologyParent,
     opening_durable_session: bool,
@@ -554,10 +546,6 @@ pub(in crate::agent) const fn native_provider_kind(provider: NativeProvider) -> 
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Native runtime construction preserves provider-specific tool compilation, composition attachment, admission, and topology lease cleanup."
-)]
 pub(in crate::agent) async fn coding_session_runtime_binding_for(
     spec: ProductAgentSpec,
     stderr: &mut (dyn Write + Send),

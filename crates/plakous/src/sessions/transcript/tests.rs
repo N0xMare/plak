@@ -147,10 +147,6 @@ where
         .unwrap()
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "complete canonical and durable composition fixture"
-)]
 fn source(name: &str, retain_owner: bool) -> SessionTranscriptSource {
     let parent = id(1);
     let mut calls = Vec::new();
@@ -761,10 +757,6 @@ fn retained_effects_are_ordered_deduplicated_and_charge_tail_item_and_byte_bound
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "offline evidence corruption and redaction cases share one fixture"
-)]
 fn effect_projection_skips_malformed_oversized_and_pruned_evidence_and_redacts_previews() {
     use plakous_agent::internal::facade_support::history_nested_tools;
     let original = ledger_only_source();

@@ -91,10 +91,6 @@ pub(super) fn authority_target(
     .map(ResponsesAttemptTarget)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the target identity is the complete closed admitted service tuple"
-)]
 pub(super) fn target_identity(
     protocol: &str,
     route: &str,
@@ -135,10 +131,6 @@ pub(super) fn target_identity(
     .map_err(|_| ResponsesAttemptBuildError::Binding)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "canonical identity covers the complete closed dialect behavior table"
-)]
 pub(super) fn dialect_execution_identity(
     dialect_revision: u32,
     target: ResponsesAttemptTarget,
@@ -308,10 +300,6 @@ pub(super) fn lowered_replay_safety(
     Ok(safety)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear host step whose ordering is the invariant"
-)]
 pub(super) fn physical_request_digest(
     physical: &ResponsesPhysicalRequestBinding,
     credential_authority: &ResponsesCredentialAuthority,

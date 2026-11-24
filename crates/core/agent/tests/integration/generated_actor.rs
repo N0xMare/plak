@@ -336,10 +336,6 @@ fn assert_unique_dispatch(plans: &[ValidatedRequestPlan]) -> TestResult {
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the generated actor schedule keeps admission, controls, observation, and joined invariant checks in one auditable case"
-)]
 async fn run_fault_schedule(
     command_codes: Vec<u8>,
     fault_codes: Vec<u8>,
@@ -643,10 +639,6 @@ fn success_scenario(
     ))
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the exact identity-bound success schedule keeps all four plakous_test_support::ScriptedModel request boundaries auditable together"
-)]
 async fn run_success_schedule(follow_first: bool, attach_after_controls: bool) -> TestResult {
     let descriptor = descriptor()?;
     let configuration = provider_configuration(&descriptor)?;

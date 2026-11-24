@@ -497,10 +497,6 @@ impl CapacityCertificate {
     ///
     /// Returns an error when the labels, input-only rule, authenticated
     /// authority, finite freshness, or reconstructive identity is invalid.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the exact evidence receipt is reconstructive"
-    )]
     pub fn reference_client_envelope(
         _authority: &StandardIntegrationAuthority,
         evidence_id: impl Into<String>,
@@ -568,10 +564,6 @@ impl CapacityCertificate {
         )
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the private constructor hashes every reconstructive evidence axis"
-    )]
     fn with_evidence_class(
         evidence_id: String,
         revision: String,
@@ -809,10 +801,6 @@ impl MeasurementCertificate {
     ///
     /// Returns an error for invalid labels, evidence/source mismatch,
     /// unscoped discovery, or digest construction.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the reconstruction-complete certificate"
-    )]
     pub fn new(
         certificate_id: impl Into<String>,
         revision: impl Into<String>,
@@ -843,10 +831,6 @@ impl MeasurementCertificate {
     /// # Errors
     ///
     /// Rejects custom evidence kinds and invalid or inconsistent certificate facts.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the reconstruction-complete certificate"
-    )]
     pub fn standard(
         _authority: &StandardIntegrationAuthority,
         certificate_id: impl Into<String>,
@@ -873,10 +857,6 @@ impl MeasurementCertificate {
         )
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the reconstruction-complete certificate"
-    )]
     fn build(
         certificate_id: impl Into<String>,
         revision: impl Into<String>,

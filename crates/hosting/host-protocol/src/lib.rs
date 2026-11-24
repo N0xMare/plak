@@ -96,6 +96,12 @@
 //! and tool receipts. [`topology::TopologyErrorCode`] is the closed refusal
 //! vocabulary; its wire spelling is `snake_case`.
 
+#![deny(
+    missing_docs,
+    rustdoc::broken_intra_doc_links,
+    rustdoc::private_intra_doc_links
+)]
+
 pub mod channel;
 pub mod client;
 pub mod envelope;

@@ -9,11 +9,6 @@ use super::{
 use crate::runtime::checkpoint::candidate::{SuccessorFacts, successor_candidate};
 use crate::runtime::durable::RecoveryPublicationOwner;
 
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "the recovery publisher consumes the exact immutable source/store tuple"
-)]
 pub(in crate::runtime) async fn recover_root_turn_publication(
     store: &Arc<dyn SessionStore>,
     lease: &mut BranchLease,

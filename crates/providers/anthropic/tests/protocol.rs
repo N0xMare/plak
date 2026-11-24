@@ -1605,10 +1605,6 @@ fn billing_prompt(id: u128, text: &str, provenance: Provenance) -> TestResult<Co
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one fixture walks the prompt, continuation and diagnostics attribution in order"
-)]
 fn oauth_billing_carries_truthful_prompt_and_previous_request_before_attestation() -> TestResult {
     let resolved = oauth_resolved()?;
     let selected = serde_json::from_value(serde_json::to_value(Digest::sha256(
@@ -1748,10 +1744,6 @@ fn oauth_billing_carries_truthful_prompt_and_previous_request_before_attestation
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one fixture checks wake attribution before and after steering"
-)]
 fn oauth_wake_billing_omits_stale_human_prompt_identity() -> TestResult {
     let resolved = oauth_resolved()?;
     let selected = serde_json::from_value(serde_json::to_value(Digest::sha256(

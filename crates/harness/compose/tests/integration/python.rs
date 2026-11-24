@@ -108,10 +108,6 @@ fn registry(
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the positive contract test intentionally verifies every public axis together"
-)]
 fn structured_projection_is_exact_ordered_and_backend_independent() -> Result<(), TestError> {
     let registry = registry([
         registration("read-local", "test.read.v1", true, true)?,

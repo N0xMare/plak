@@ -224,10 +224,6 @@ pub struct ResponsesReplayContext<'a> {
 impl<'a> ResponsesReplayContext<'a> {
     /// Creates borrowed replay data. Structural validation occurs at lowering.
     #[must_use]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the context borrows independent closed authority tables without allocating"
-    )]
     const fn new(
         authority: &'a ResponsesRequestAuthority,
         output_item: ResponsesReplayKind<'a>,
@@ -332,10 +328,6 @@ impl ResponsesArtifactReplayBridge {
         )
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one linear host step whose ordering is the invariant"
-    )]
     fn from_latest_artifact(
         artifact: &ResponsesArtifact,
         request: &ModelRequest,

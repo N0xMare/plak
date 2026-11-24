@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Artifact finalization tests compare provider families and forge foreign replay bindings without dispatching recovery work"
-)]
-
 use super::*;
 use crate::runtime::durable::turn_recovery::local_terminal_recovery_fold;
 

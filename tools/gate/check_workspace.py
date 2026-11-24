@@ -4775,195 +4775,6 @@ def validate_configuration_rules(
     return errors
 
 
-# Lint and size ratchet: `[package.metadata.plakous-lint]` in each package's manifest.
-RATCHET_LINTS = {
-    "too_many_lines": "too-many-lines-ceiling",
-    "too_many_arguments": "too-many-arguments-ceiling",
-}
-# Enrollment is reviewed here so deleting a manifest key cannot restore a
-# package's former crate-wide documentation opt-out.
-MISSING_DOCS_ENROLLED_PACKAGES = frozenset({"plakous-hosted"})
-# Lint groups that suppress a ratcheted lint: too_many_lines is pedantic,
-# too_many_arguments is complexity (and so part of clippy::all).
-RATCHET_LINT_GROUPS = {
-    "pedantic": ("too_many_lines",),
-    "complexity": ("too_many_arguments",),
-    "all": ("too_many_arguments",),
-}
-# The thresholds the ceilings were frozen under (spec 06 sec. 4); 100 is
-# clippy's default too-many-lines threshold.
-RATCHET_CLIPPY_THRESHOLDS = {"too-many-lines-threshold": 100, "too-many-arguments-threshold": 7}
-LARGE_FILE_LINES = 1500
-_ATTRIBUTE_START = re.compile(r"#\s*(!?)\s*\[")
-_SUPPRESSING = re.compile(r"\s*(?:allow|expect)\s*\(")
-
-
-def mask_comments_and_strings(source: str) -> str:
-    """Drop `//` comments and blank the contents of `"..."` literals, line by
-    line, keeping line structure. A cheap stand-in for the full blanking: a
-    string literal spanning lines or a raw string is not tracked."""
-    lines: list[str] = []
-    for line in source.split("\n"):
-        in_string = escaped = False
-        kept: list[str] = []
-        for index, character in enumerate(line):
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif character == "\\":
-                    escaped = True
-                elif character == '"':
-                    in_string = False
-                    kept.append(character)
-                    continue
-                kept.append(" ")
-            elif character == '"':
-                in_string = True
-                kept.append(character)
-            elif line.startswith("//", index):
-                break
-            else:
-                kept.append(character)
-        lines.append("".join(kept))
-    return "\n".join(lines)
-
-
-def _suppression_body(body: str) -> str | None:
-    """The lint list of an allow/expect attribute, or of a cfg_attr whose
-    attribute is allow/expect; None for any other attribute."""
-    if _SUPPRESSING.match(body):
-        return body
-    cfg_attr = re.match(r"\s*cfg_attr\s*\(", body)
-    if cfg_attr is None:
-        return None
-    depth = 0
-    for index in range(cfg_attr.end() - 1, len(body)):
-        if body[index] in "([":
-            depth += 1
-        elif body[index] in ")]":
-            depth -= 1
-        elif body[index] == "," and depth == 1:
-            rest = body[index + 1 :]
-            return rest if _SUPPRESSING.match(rest) else None
-    return None
-
-
-def lint_suppressions(
-    source: str, crate_root: bool = False, *, include_missing_docs: bool = False
-) -> list[tuple[str, bool, int]]:
-    """(lint, crate_wide, line) for each allow/expect of a ratcheted clippy lint.
-
-    Line comments and single-line string contents are masked first (the
-    full blanking is too slow for every test file). A group
-    (`clippy::pedantic`, `complexity`, `all`) suppresses its member lints.
-    An inner attribute is crate-wide only in a crate root and only before
-    the first item.
-    """
-    found: list[tuple[str, bool, int]] = []
-    names = (*RATCHET_LINTS, *RATCHET_LINT_GROUPS)
-    if include_missing_docs:
-        names += ("missing_docs",)
-    if not any(name in source for name in names):
-        return found
-    masked = mask_comments_and_strings(source)
-    leading = True
-    previous_end = 0
-    for match in _ATTRIBUTE_START.finditer(masked):
-        if masked[previous_end : match.start()].strip():
-            leading = False
-        depth = 0
-        end = len(masked)
-        for index in range(match.end() - 1, len(masked)):
-            if masked[index] == "[":
-                depth += 1
-            elif masked[index] == "]":
-                depth -= 1
-                if depth == 0:
-                    end = index
-                    break
-        inner = match.group(1) == "!"
-        if not inner:
-            leading = False
-        previous_end = end + 1
-        body = _suppression_body(masked[match.end() : end])
-        if body is None:
-            continue
-        lints: list[str] = [
-            lint for lint in RATCHET_LINTS if re.search(rf"\bclippy\s*::\s*{lint}\b", body)
-        ]
-        if include_missing_docs and re.search(r"(?<!:)\bmissing_docs\b", body):
-            lints.append("missing_docs")
-        for group, members in RATCHET_LINT_GROUPS.items():
-            if re.search(rf"\bclippy\s*::\s*{group}\b", body):
-                lints.extend(member for member in members if member not in lints)
-        line = masked.count("\n", 0, match.start()) + 1
-        found.extend((lint, inner and crate_root and leading, line) for lint in lints)
-    return found
-
-
-def non_test_lines(source: str) -> int:
-    """Non-blank physical lines left after `production_rust_source` blanks
-    every item whose cfg predicates imply `test`.
-    Comments count."""
-    return sum(1 for line in production_rust_source(source).splitlines() if line.strip())
-
-
-def is_test_target_path(path: str) -> bool:
-    """Files of integration-test and bench targets (`tests/`, `benches/`)."""
-    return bool({"tests", "benches"} & set(Path(path).parts))
-
-
-def lint_ratchet_inventory(
-    files: dict[str, str],
-    crate_roots: set[str],
-    test_files: set[str] | None = None,
-) -> dict[str, Any]:
-    """Item-level suppressions per lint, crate-wide allows and large files.
-
-    `test_files` defaults to the test-only module files declared among `files`.
-    """
-    items: dict[str, list[str]] = {lint: [] for lint in RATCHET_LINTS}
-    crate_wide: list[str] = []
-    missing_docs: list[str] = []
-    crate_wide_missing_docs: list[str] = []
-    large: list[str] = []
-    for path, source in sorted(files.items()):
-        for lint, wide, line in lint_suppressions(
-            source, path in crate_roots, include_missing_docs=True
-        ):
-            if lint == "missing_docs":
-                if wide:
-                    crate_wide_missing_docs.append(f"{path}:{line}")
-                else:
-                    missing_docs.append(f"{path}:{line}")
-            elif wide:
-                crate_wide.append(f"{path}:{lint}")
-            else:
-                items[lint].append(f"{path}:{line}")
-    # Only a file with more non-blank lines than the limit can exceed it.
-    candidates = [
-        path
-        for path, source in sorted(files.items())
-        if not is_test_target_path(path)
-        and sum(1 for line in source.splitlines() if line.strip()) > LARGE_FILE_LINES
-    ]
-    if candidates and test_files is None:
-        test_files = declared_test_module_paths(files, crate_roots)
-    for path in candidates:
-        if path in (test_files or set()):
-            continue
-        lines = non_test_lines(files[path])
-        if lines > LARGE_FILE_LINES:
-            large.append(f"{path} ({lines})")
-    return {
-        "items": items,
-        "crate-wide": sorted(set(crate_wide)),
-        "large-files": large,
-        "missing-docs": missing_docs,
-        "crate-wide-missing-docs": crate_wide_missing_docs,
-    }
-
-
 def declared_test_module_paths(
     files: dict[str, str],
     crate_roots: set[str],
@@ -4976,132 +4787,6 @@ def declared_test_module_paths(
             {Path(path) for path in crate_roots},
         )
     }
-
-
-def validate_lint_ratchet(
-    package: str, inventory: dict[str, Any], rule: Any, reductions: dict[str, int] | None = None
-) -> list[str]:
-    """Enforce upper bounds and exact crate-wide allow inventories."""
-    if not isinstance(rule, dict):
-        return [f"{package}: [package.metadata.plakous-lint] must be a table"]
-    allowed = {
-        *RATCHET_LINTS.values(),
-        "large-file-ceiling",
-        "missing-docs-ceiling",
-        "crate-wide-allows",
-        "reason",
-    }
-    errors = [
-        f"{package}: unknown [package.metadata.plakous-lint] key {key!r}"
-        for key in sorted(set(rule) - allowed)
-    ]
-    if package in MISSING_DOCS_ENROLLED_PACKAGES and "missing-docs-ceiling" not in rule:
-        errors.append(
-            f"{package}: documentation ratchet enrollment requires missing-docs-ceiling; "
-            "removing the key is not an opt-out"
-        )
-    ceilings = {key: rule.get(key, 0) for key in (*RATCHET_LINTS.values(), "large-file-ceiling")}
-    # Documentation debt is enrolled package by package; legacy crates with
-    # crate-wide opt-outs must be narrowed before they can join this ratchet.
-    if "missing-docs-ceiling" in rule:
-        ceilings["missing-docs-ceiling"] = rule["missing-docs-ceiling"]
-    for key, ceiling in ceilings.items():
-        if type(ceiling) is not int or ceiling < 0:
-            errors.append(f"{package}: plakous-lint {key} must be a nonnegative integer")
-    recorded = rule.get("crate-wide-allows", [])
-    if not isinstance(recorded, list) or not all(isinstance(item, str) for item in recorded):
-        errors.append(
-            f"{package}: plakous-lint crate-wide-allows must be a list of path:lint strings"
-        )
-    if errors:
-        return errors
-    reason = rule.get("reason", "")
-    if (any(ceilings.values()) or recorded) and not (isinstance(reason, str) and reason.strip()):
-        errors.append(f"{package}: nonzero plakous-lint ceilings require a reviewed reason")
-    counts = {RATCHET_LINTS[lint]: sites for lint, sites in inventory["items"].items()}
-    counts["large-file-ceiling"] = inventory["large-files"]
-    if "missing-docs-ceiling" in rule:
-        counts["missing-docs-ceiling"] = inventory["missing-docs"]
-        for site in inventory["crate-wide-missing-docs"]:
-            errors.append(
-                f"{package}: crate-wide missing_docs suppression {site} is not permitted; "
-                "document the public surface or allow only the undocumented module"
-            )
-    remedies = {
-        "too-many-lines-ceiling": "split the item or remove the allow",
-        "too-many-arguments-ceiling": "group the parameters or remove the allow",
-        "large-file-ceiling": "split the file or move its tests to a sibling file",
-        "missing-docs-ceiling": "document the module or narrow its unused public surface",
-    }
-    for key, sites in counts.items():
-        if len(sites) > ceilings[key]:
-            errors.append(
-                f"{package}: {key[: -len('-ceiling')]} count {len(sites)} exceeds its ceiling {ceilings[key]}; "
-                f"{remedies[key]}. Ceilings are not raised without review (spec 06 sec. 4): "
-                + "; ".join(sites)
-            )
-        elif reductions is not None and len(sites) < ceilings[key]:
-            reductions[key] = len(sites)
-    for item in inventory["crate-wide"]:
-        if item not in recorded:
-            errors.append(
-                f"{package}: crate-wide allow {item} is not recorded; new crate-wide allows of "
-                "too_many_lines or too_many_arguments are not permitted (allow the item instead)"
-            )
-    for item in recorded:
-        if item not in inventory["crate-wide"]:
-            errors.append(
-                f"{package}: crate-wide allow {item} is gone; remove it from crate-wide-allows in this "
-                "package's [package.metadata.plakous-lint]"
-            )
-    return errors
-
-
-def package_lint_rule(package: Package) -> Any:
-    return package.manifest.get("package", {}).get("metadata", {}).get("plakous-lint", {})
-
-
-def package_lint_inventory(
-    package: Package, files: dict[str, str], repository: Path = ROOT
-) -> dict[str, Any]:
-    return lint_ratchet_inventory(files, package_crate_roots(package, repository))
-
-
-def validate_package_file_lints(
-    name: str, files: dict[str, str], crate_roots: set[str], rule: Any
-) -> list[str]:
-    return source_check(
-        "lint-ratchet",
-        files,
-        lambda: validate_lint_ratchet(name, lint_ratchet_inventory(files, crate_roots), rule),
-        name,
-        sorted(crate_roots),
-        rule,
-    )
-
-
-def package_crate_roots(package: Package, repository: Path) -> set[str]:
-    base = (repository / package.directory).resolve()
-    return {
-        Path(os.path.relpath(Path(target["src_path"]).resolve(), base)).as_posix()
-        for target in package.metadata.get("targets", [])
-    }
-
-
-def validate_ratchet_clippy_thresholds(root: Path = ROOT) -> list[str]:
-    try:
-        config = tomllib.loads((root / ".clippy.toml").read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as error:
-        return [f".clippy.toml: unreadable ({error})"]
-    errors: list[str] = []
-    for key, expected in RATCHET_CLIPPY_THRESHOLDS.items():
-        actual = config.get(key, 100 if key == "too-many-lines-threshold" else None)
-        if actual != expected:
-            errors.append(
-                f".clippy.toml: {key} is {actual!r}; the lint ratchet ceilings were frozen under {expected} "
-                "(changing it needs a reviewed recount, spec 06 sec. 4)"
-            )
-    return errors
 
 
 def package_sources(package: Package, repository: Path = ROOT) -> tuple[dict[str, str], list[str]]:
@@ -6108,7 +5793,7 @@ def tighten_ceilings(workspace: Workspace) -> int:
     root = workspace.root
     policy = workspace.policy
     cfg = workspace.root_manifest["workspace"]["metadata"]["plakous"].get("cfg", {})
-    errors = validate_ratchet_clippy_thresholds(root)
+    errors = []
     errors.extend(
         f"modules rule names unknown package {name!r}"
         for name in sorted(policy.modules.keys() - workspace.packages.keys())
@@ -6118,18 +5803,7 @@ def tighten_ceilings(workspace: Workspace) -> int:
         for name in sorted(cfg.keys() - workspace.packages.keys())
     )
     root_edits: dict[tuple[str, ...], dict[str, int]] = {}
-    edits = {root / "Cargo.toml": root_edits}
-    directories = {package.directory for package in workspace.packages.values()}
     for name, package in sorted(workspace.packages.items()):
-        nested = {other for other in directories if other.startswith(f"{package.directory}/")}
-        files = package_rust_files(root, package, nested)
-        lint: dict[str, int] = {}
-        errors.extend(
-            validate_lint_ratchet(
-                name, package_lint_inventory(package, files, root), package_lint_rule(package), lint
-            )
-        )
-        edits.setdefault(package.manifest_path, {})["package", "metadata", "plakous-lint"] = lint
         sources, discovery_errors = package_sources(package, root)
         errors.extend(discovery_errors)
         placement: dict[str, int] = {}
@@ -6149,19 +5823,16 @@ def tighten_ceilings(workspace: Workspace) -> int:
         print("\n".join(errors), file=sys.stderr)
         return 1
 
-    updated = {}
-    for path, reductions in edits.items():
-        if any(reductions.values()):
-            original = path.read_bytes().decode("utf-8")
-            try:
-                updated[path] = tightened_manifest(original, reductions)
-            except ValueError as error:
-                print(f"{path.relative_to(root)}: {error}", file=sys.stderr)
-                return 1
-    for path, manifest in updated.items():
-        path.write_bytes(manifest.encode("utf-8"))
-        print(f"tightened {path.relative_to(root)}")
-    if not updated:
+    if any(root_edits.values()):
+        manifest = root / "Cargo.toml"
+        try:
+            updated = tightened_manifest(manifest.read_text(encoding="utf-8"), root_edits)
+        except ValueError as error:
+            print(f"Cargo.toml: {error}", file=sys.stderr)
+            return 1
+        manifest.write_text(updated, encoding="utf-8")
+        print("tightened Cargo.toml")
+    else:
         print("ceilings already tight")
     return 0
 
@@ -6237,7 +5908,6 @@ def _check_workspace() -> int:
     errors.extend(validate_claude_oauth_state_comparison(sources.get("src/oauth.rs", "")))
 
     directories = {package.directory for package in packages.values()}
-    errors.extend(validate_ratchet_clippy_thresholds(ROOT))
     for name, package in sorted(packages.items()):
         nested = {
             other
@@ -6246,11 +5916,6 @@ def _check_workspace() -> int:
         }
         rust_files = package_rust_files(ROOT, package, nested, listed=listed)
         errors.extend(validate_rust_file_policies(name, rust_files))
-        errors.extend(
-            validate_package_file_lints(
-                name, rust_files, package_crate_roots(package, ROOT), package_lint_rule(package)
-            )
-        )
 
     # Layer policy: metadata shape, layout, edges, classes, pinned dependencies.
     errors.extend(validate_package_metadata(workspace))

@@ -6,7 +6,6 @@
 //! from packs outside the core.
 
 #![allow(
-    missing_docs,
     clippy::expect_used,
     clippy::unwrap_used,
     reason = "integration test crate"

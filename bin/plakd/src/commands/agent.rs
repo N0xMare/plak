@@ -27,10 +27,6 @@ use plakous_hosted::runtime as product_host;
 /// unchanged, and nothing here invents a `hello` for a session that never
 /// opened.
 #[allow(clippy::fn_params_excessive_bools, reason = "clap-shaped agent verb")]
-#[allow(
-    clippy::too_many_arguments,
-    reason = "The agent entry receives the independent clap binding overrides and resume controls before it can admit a hosted session."
-)]
 pub(crate) fn run_agent(
     services: &crate::shell::services::Services,
     session_id: Option<String>,
@@ -129,11 +125,7 @@ fn report_pre_dispatch_rejection(stdout: &mut dyn io::Write, failure: CliFailure
 /// overridden by the command's account, model, effort and composition. A
 /// direct API account binds what `platform::api_composition` decides for the
 /// final model, as `plakd run` does for the same arguments.
-#[allow(
-    clippy::fn_params_excessive_bools,
-    clippy::too_many_arguments,
-    reason = "clap-shaped agent verb"
-)]
+#[allow(clippy::fn_params_excessive_bools, reason = "clap-shaped agent verb")]
 pub(crate) fn new_agent_record(
     cfg: &product_config::ProductConfig,
     cwd: std::path::PathBuf,
@@ -293,11 +285,6 @@ fn fill_agent_accounts(
 }
 
 #[allow(clippy::fn_params_excessive_bools, reason = "clap-shaped agent verb")]
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "Agent admission carries the explicit binding overrides through session selection and host configuration."
-)]
 pub(crate) fn run_agent_after_admission(
     services: &crate::shell::services::Services,
     context: Option<&crate::home::paths::PlakPaths>,

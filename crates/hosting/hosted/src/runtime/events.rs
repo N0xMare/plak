@@ -93,10 +93,6 @@ pub(super) fn commit_notice_intents<P: plakous_host_protocol::ProtocolExtension>
     commit_session_update(store, home, session, |_| true).is_ok()
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "An event projection borrows each independent live row, tool, usage, and timing accumulator without merging their ownership."
-)]
 pub(super) fn apply_event<P: plakous_host_protocol::ProtocolExtension>(
     event: &AgentEvent,
     roots: &crate::agent::ProductStateRoots,

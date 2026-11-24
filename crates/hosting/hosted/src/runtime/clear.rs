@@ -27,10 +27,6 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 ///
 /// Builds the replacement agent **before** shutting down the live one so a
 /// failed rebuild never leaves the host without a usable agent.
-#[allow(
-    clippy::too_many_lines,
-    reason = "Clear rebuilds the candidate before detaching the source and preserves rollback at every publication boundary."
-)]
 ///
 /// # Errors
 /// Refuses source settlement, explicit successor construction or product publication
@@ -195,10 +191,6 @@ pub async fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Takes the attached source session, the new product session id and create operation id, and the host output channels and start instant that the clear reports through."
-)]
 pub(super) async fn production_build_clear_candidate<
     P: plakous_host_protocol::ProtocolExtension,
 >(
@@ -523,10 +515,6 @@ pub(super) fn exact_resume_target_matches(
         && candidate.target_selection == current.target_selection
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Clear candidate construction forwards the explicit runtime factory inputs without replacing the source authority."
-)]
 pub(super) async fn build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     opened: &AttachedCodingSession,

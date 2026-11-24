@@ -1,10 +1,5 @@
 //! The fact function over synthetic parent/successor checkpoint pairs.
 
-#![allow(
-    clippy::too_many_lines,
-    reason = "Feed delta scenarios compare command, operation, workflow, and history facts from the same committed checkpoints"
-)]
-
 use std::sync::Arc;
 
 use plakous_model::{

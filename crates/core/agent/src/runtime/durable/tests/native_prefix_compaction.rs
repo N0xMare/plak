@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Native prefix compaction follows protected history through summary publication and exact provider continuation"
-)]
-
 use super::*;
 
 #[tokio::test]

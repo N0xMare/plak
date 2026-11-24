@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Descriptor fixtures spell out complete model, registry, and presentation contracts used by admission and recovery tests"
-)]
-
 use super::*;
 
 pub(super) fn durable_test_context_contract(
@@ -188,7 +183,6 @@ fn configured_test_model_with_family_revision(
 }
 
 #[allow(
-    clippy::too_many_arguments,
     clippy::needless_pass_by_value,
     reason = "the fixture retains one explicit complete provider-operation configuration"
 )]
@@ -218,7 +212,6 @@ pub(super) fn configured_test_model_for_operation(
 }
 
 #[allow(
-    clippy::too_many_arguments,
     clippy::needless_pass_by_value,
     reason = "the fixture retains one explicit complete provider-operation configuration"
 )]

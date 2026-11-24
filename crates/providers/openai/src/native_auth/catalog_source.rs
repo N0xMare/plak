@@ -153,10 +153,6 @@ impl CodexCatalogSource {
     /// The catalog exchange and its admission, for a fence and login
     /// selection already checked; `hold` (the Ready record and its lease,
     /// under local custody) is kept until the reply.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "catalog admission keeps exact lease, wire, enum, evidence, and witness checks together"
-    )]
     async fn fetch_catalog_with(
         &self,
         renewal: Option<&CatalogRenewal<'_>>,

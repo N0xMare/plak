@@ -157,10 +157,6 @@ impl Driver {
         .and_then(|result| result.map_err(|_| tool_cleanup_error()))
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Process-session updates reconcile live handles, durable job rows, and pending notices before releasing ownership"
-    )]
     pub(super) async fn apply_process_session_update(
         &mut self,
         turn_id: TurnId,
@@ -457,10 +453,6 @@ impl Driver {
         combine_cleanup_results([local_result, process_result])
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Joined-process cleanup preserves exact stop outcomes and unresolved ownership across bounded shutdown"
-    )]
     async fn cleanup_joined_process_sessions(&mut self, turn_id: TurnId) -> Result<(), AgentError> {
         if self.process_session_cleanup_uncertainty == Some(turn_id) {
             return Err(AgentError::new(

@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Committed-turn feed checks correlate admission, provider attempt, canonical history, and terminal facts"
-)]
-
 use super::*;
 use crate::feed::{
     FeedCommandKind, FeedFact, FeedOperationKind, FeedOperationState, FeedTurnOutcome,

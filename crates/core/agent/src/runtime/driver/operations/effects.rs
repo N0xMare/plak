@@ -34,10 +34,6 @@ impl Driver {
         .await
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the admission class travels with the exact prepared record"
-    )]
     pub(in crate::runtime::driver) async fn prepare_operation_with_id(
         &mut self,
         admission: StoreAdmission,
@@ -174,14 +170,6 @@ impl Driver {
         Ok(claim_evidence_digest)
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Command classification folds admission and control effects into the ledger before acknowledging their disposition"
-    )]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the durable command receipt carries the complete closed classification tuple"
-    )]
     pub(in crate::runtime::driver) async fn persist_command_classification(
         &mut self,
         command_id: &CommandId,

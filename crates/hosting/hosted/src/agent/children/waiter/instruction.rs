@@ -45,10 +45,6 @@ pub(super) async fn placement_admission(
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Instruction-turn start preserves pending delivery identity, admission acknowledgement, and runtime release when the attempt cannot bind."
-)]
 pub(in crate::agent) async fn start_instruction_turn(
     driver: &TreeDriver,
     live: &Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,

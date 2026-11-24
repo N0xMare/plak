@@ -1,11 +1,6 @@
 //! Cell worker for Plak Code Mode (`exec`/`wait`) and js-ptc: the cell
 //! protocol over stdin/stdout.
 
-#![allow(
-    missing_docs,
-    reason = "binary entrypoint; protocol types are documented in plakous-cell"
-)]
-
 use std::{
     io::{self, Write},
     thread,

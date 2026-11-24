@@ -48,10 +48,6 @@ fn refold_preserves_usage_for_terminals_beyond_the_previous_cursor() {
     assert_late_recovery_read(true, true, true);
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "late-read law, SQLite clearing cut and both deletion paths"
-)]
 fn assert_late_recovery_read(later_retirement: bool, retained: bool, new_terminal: bool) {
     let tmp = tempfile::tempdir().unwrap();
     let (mut live, vcs, spawned) = spawned_tree(tmp.path());
@@ -638,10 +634,6 @@ fn generated_multi_child_cascades_rebuild_in_both_deletion_paths() {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "multi-session deletion law and first-application oracle"
-)]
 fn assert_multi_child_cascade(kind: usize, choices: usize) {
     let tmp = tempfile::tempdir().unwrap();
     let mut base = ProductAgentTree::bootstrap_root_for_test(
@@ -1068,10 +1060,6 @@ fn assert_candidate_view_rebuild(sql: bool) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(
-    clippy::too_many_lines,
-    reason = "opening and withdrawal cuts share one SQLite fixture"
-)]
 async fn sqlite_followup_open_save_and_withdrawal_cuts_rebuild_remaining_inputs() {
     use plakous_recursive_subagents::protocol::{
         AttemptScopedRequest, MessagePurpose, SendAgentMessageRequest,
@@ -1228,10 +1216,6 @@ async fn sqlite_followup_open_save_and_withdrawal_cuts_rebuild_remaining_inputs(
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one pruned-result law over both deletion paths"
-)]
 fn pruned_closed_attempt_result_is_not_pushed_again_after_view_deletion() {
     use plakous_recursive_subagents::protocol::{
         AttemptScopedRequest, MessagePurpose, SendAgentMessageRequest,
@@ -2420,10 +2404,6 @@ async fn sqlite_cold_below_retention_host_anchor_survives_a_refused_feed_read() 
     assert_cold_host_anchor(true).await;
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "cold-read failure, saved host intent, and two SQLite reopens share one fixture"
-)]
 async fn assert_cold_host_anchor(below_retention: bool) {
     for materialization in [false, true] {
         let tmp = tempfile::tempdir().unwrap();

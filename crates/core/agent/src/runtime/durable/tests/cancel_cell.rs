@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Cell cancellation and store-refusal campaigns inspect every tool fence and prove completed effects survive interruption"
-)]
-
 use super::*;
 
 /// Which shape of live cell the cancel-truthfulness fixtures drive.

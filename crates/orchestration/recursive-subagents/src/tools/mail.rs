@@ -496,10 +496,6 @@ impl TopologyTool {
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "mail admission and delivery retain the same attempt and independently owned operation receipt"
-    )]
     async fn send_after_recovery(
         &self,
         operation_id: String,

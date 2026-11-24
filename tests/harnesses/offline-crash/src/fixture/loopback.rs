@@ -126,10 +126,6 @@ impl LanguageModel for LoopbackModel {
         })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the loopback preparation keeps one exact inspected projection and dispatch capability together"
-    )]
     fn prepare_call(
         self: Arc<Self>,
         plan: ValidatedRequestPlan,

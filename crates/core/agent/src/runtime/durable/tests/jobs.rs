@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Durable process-job scenarios correlate owner generations, job notices, terminal rows, and recovered metadata"
-)]
-
 use super::*;
 
 #[derive(Default)]

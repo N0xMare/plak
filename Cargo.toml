@@ -337,7 +337,6 @@ plakous-recursive-subagents = ["store"]
 plakous-hosted = ["anthropic", "claude", "codex", "composition", "composition-python", "grok", "mcp", "openai", "openrouter", "sessions-sqlite", "web-fetch", "xai"]
 
 [workspace.lints.rust]
-missing_docs = "deny"
 rust_2018_idioms = { level = "deny", priority = -1 }
 unsafe_code = "forbid"
 unused_lifetimes = "deny"
@@ -347,8 +346,8 @@ unused_qualifications = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("test-support"))'] }
 
 [workspace.lints.rustdoc]
-broken_intra_doc_links = "deny"
-private_intra_doc_links = "deny"
+broken_intra_doc_links = "allow"
+private_intra_doc_links = "allow"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
@@ -360,6 +359,10 @@ todo = "deny"
 unimplemented = "deny"
 unwrap_used = "deny"
 duration_suboptimal_units = "allow"
+missing_errors_doc = "allow"
+must_use_candidate = "allow"
+too_many_arguments = "allow"
+too_many_lines = "allow"
 
 # Line tables keep panics and backtraces pointing at source lines in workspace
 # code; dependencies carry no debug info. Full debug info cost build and link

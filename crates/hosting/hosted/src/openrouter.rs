@@ -265,10 +265,6 @@ pub async fn construct_openrouter_compaction_runtime(
     api_compaction_runtime_binding(&spec, &prepared.configured, &prepared.registry)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "OpenRouter preparation keeps catalog admission, credentials, and the exact route policy in one failure boundary."
-)]
 async fn prepare_openrouter(spec: &ProductOpenRouterSpec) -> CliResult<PreparedOpenRouter> {
     if spec.account.vertical() != crate::account::Vertical::OpenRouter {
         return Err(
@@ -805,10 +801,6 @@ fn openrouter_runtime_binding(
     )
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "The OpenRouter profile fixture names the exact composition, wire, model, tool surface, and workspace used by production compilation."
-)]
 #[cfg(test)]
 pub(crate) fn openrouter_product_profile(
     composition: CompositionSelection,

@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Crash fixture setup constructs the complete offline host, durable stores, and boundary controller before dispatch."
-)]
-
 use std::error::Error;
 use std::future;
 use std::io::BufReader;
@@ -785,10 +780,6 @@ async fn project_branch_request(
 }
 
 /// Plak's `/fork`: a recompiling fork of the source's own binding.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "process fixture carries exact source, target, runtime, state, and cut authorities"
-)]
 async fn run_fork(
     sessions: &AgentSessions,
     journal: &mut ProductJournal,
@@ -827,10 +818,6 @@ async fn run_fork(
     cuts.reach(ProductCrashBoundary::ProductCommitted).await
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "process fixture carries exact source, target, runtime, state, and cut authorities"
-)]
 async fn run_rebind(
     sessions: &AgentSessions,
     journal: &mut ProductJournal,

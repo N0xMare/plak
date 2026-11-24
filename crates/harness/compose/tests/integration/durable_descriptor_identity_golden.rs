@@ -13,7 +13,6 @@
 //! `PLAK_PRINT_DESCRIPTOR_PINS=1 cargo test -p plakous-compose --test integration durable_descriptor_identity_golden:: -- --nocapture`.
 
 #![allow(
-    missing_docs,
     clippy::expect_used,
     clippy::unwrap_used,
     reason = "integration test crate"

@@ -90,14 +90,6 @@ impl RuntimeContextState {
     /// user/developer/system prefix, then exactly one native compaction
     /// segment, then optionally the source's protected current-round tail
     /// verbatim. Cache affinity still rotates.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Native compaction constructs the retained-tail provenance and replacement context from one validated source checkpoint"
-    )]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "native publication binds source, summary, successor, and affinity entropy together"
-    )]
     pub fn successful_native_compaction(
         &self,
         publication: &SemanticCompactionPublication,
@@ -233,14 +225,6 @@ impl RuntimeContextState {
     /// operation is involved, so `publication` carries no usage; the before
     /// and after audits are still independently measured. Cache affinity and
     /// its epoch are preserved; stale anchors are cleared.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Placeholder compaction binds selected tool results, retained history, and invalidation evidence in one context transition"
-    )]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "placeholders publication binds source, notice, successor and selection together"
-    )]
     pub fn successful_tool_result_placeholders(
         &self,
         publication: &SemanticCompactionPublication,
@@ -409,10 +393,6 @@ impl RuntimeContextState {
     /// followed by the closed planner's retained source content, with native
     /// reasoning invalidated by the cut omitted. Summary content stays only
     /// in that canonical segment.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Semantic compaction checks the published summary against its source and target context identities before rotation"
-    )]
     pub fn successful_semantic_compaction(
         &self,
         publication: &SemanticCompactionPublication,

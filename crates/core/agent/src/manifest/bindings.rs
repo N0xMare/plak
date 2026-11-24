@@ -253,10 +253,6 @@ impl RevalidationFact {
 
 impl ModelRouteBinding {
     /// Creates the exact binding selected before dispatch.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the fields are the closed provider binding"
-    )]
     pub fn new(
         protocol: ProtocolId,
         route: RouteId,

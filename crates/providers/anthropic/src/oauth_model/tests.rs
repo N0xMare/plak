@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Exercise Claude OAuth preparation and same-account relogin across complete replay and context-denial scenarios."
-)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;

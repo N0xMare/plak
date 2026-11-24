@@ -23,10 +23,6 @@ use crate::product_config::ProductConfig;
 const CLIENT_NAME: &str = "Plak";
 
 /// `plakd mcp login <id> [--scope <scopes>] [--remote]`.
-#[allow(
-    clippy::too_many_lines,
-    reason = "MCP login keeps scope selection, OAuth discovery, consent, storage, and terminal feedback in one credential workflow."
-)]
 pub(crate) fn login(
     paths: &PlakPaths,
     id: &str,

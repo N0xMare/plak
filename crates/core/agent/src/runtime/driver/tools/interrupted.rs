@@ -13,10 +13,6 @@ impl Driver {
     /// can no longer vouch for. A close that itself fails on an
     /// unresolved effect ends the turn with that stronger error; any other close
     /// failure leaves the original failure in charge of the terminal.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the exact interrupted batch and its provider round"
-    )]
     pub(in crate::runtime::driver) async fn close_interrupted_tool_batch(
         &mut self,
         command: &PromptCommand,
@@ -63,11 +59,6 @@ impl Driver {
     /// in one valid tool exchange before the root's terminal is published, so
     /// the next turn's model sees what already ran. A call that never completed
     /// gets a typed failure result naming `interruption`.
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "one interruption close reconstructs every source slot and its durable operations"
-    )]
     pub(in crate::runtime::driver) async fn promote_interrupted_tool_batch(
         &mut self,
         command: &PromptCommand,

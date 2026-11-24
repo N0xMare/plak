@@ -138,10 +138,6 @@ fn context(attempt: AttemptId, token: CancellationToken) -> ModelCallContext {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one shared-runner regression classifies every terminal stream outcome"
-)]
 fn shared_runner_classifies_complete_error_eof_and_cancel() -> Result<(), Box<dyn std::error::Error>>
 {
     let descriptor = descriptor()?;

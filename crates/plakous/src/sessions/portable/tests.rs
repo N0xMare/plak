@@ -79,10 +79,6 @@ fn carry_without_replay_keeps_a_native_compactions_turn_record()
 /// The marker stands in for context before those messages, which is what a
 /// semantic cut can fold.
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one carried native history is checked for order, turn counts, and a sealed cut"
-)]
 fn carried_native_compaction_leads_and_still_admits_a_semantic_cut()
 -> Result<(), Box<dyn std::error::Error>> {
     use plakous_model::{

@@ -68,7 +68,6 @@ impl Applier<'_> {
         }
     }
 
-    #[allow(clippy::too_many_arguments, reason = "one fact's fields")]
     fn effect(
         &mut self,
         read: Option<CallTarget>,

@@ -253,10 +253,6 @@ impl AgentSessions {
         .map_err(|error| runtime_error(&error))
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one closed mapping preserves every compaction outcome and endpoint refusal"
-    )]
     pub(super) async fn map_compact_outcome(
         &self,
         operation_id: SessionOperationId,

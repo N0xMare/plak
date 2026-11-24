@@ -500,10 +500,6 @@ impl Block {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "exhaustive neutral content conversion"
-    )]
     fn export(block: &ContentBlock, disclosure: Disclosure) -> Result<Self> {
         Ok(match block {
             ContentBlock::Text(b) => Self::Text {
@@ -624,10 +620,6 @@ impl Block {
         };
         Self::export(&block, disclosure)
     }
-    #[allow(
-        clippy::too_many_lines,
-        reason = "exhaustive neutral content reconstruction"
-    )]
     fn import(self) -> Result<ContentBlock> {
         Ok(match self {
             Self::Text { text, phase } => ContentBlock::Text(

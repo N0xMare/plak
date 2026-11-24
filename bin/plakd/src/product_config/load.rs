@@ -987,10 +987,6 @@ impl ProductConfig {
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Project save preserves the stage, permission, sync, replace, and injected-failure cleanup sequence as one transaction."
-    )]
     pub(super) fn save_project_with_fault(
         &self,
         paths: &PlakPaths,

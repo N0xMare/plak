@@ -337,10 +337,6 @@ impl<'de> Deserialize<'de> for ResolvedModelDescriptor {
 impl ResolvedModelDescriptor {
     /// Creates a resolved descriptor from already-resolved facts.
     #[must_use]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the authority token is additional to the complete descriptor fact set"
-    )]
     pub fn new(
         _authority: &StandardIntegrationAuthority,
         protocol: ProtocolId,
@@ -542,10 +538,6 @@ impl ResolvedModelDescriptor {
     /// # Errors
     ///
     /// Returns an error only when an immutable identity cannot be constructed.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the ordered fail-closed descriptor admission procedure stays auditable in one place"
-    )]
     pub fn context_status(
         &self,
         plan: &ValidatedRequestPlan,

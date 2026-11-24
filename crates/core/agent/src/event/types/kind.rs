@@ -329,10 +329,6 @@ impl AgentEventKind {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Event projection exhaustively redacts each event variant under the fixed subscriber visibility"
-    )]
     pub(in crate::event) fn projected(&self, visibility: EventVisibility) -> Self {
         match self {
             Self::JobPromoted { number } => Self::JobPromoted { number: *number },
@@ -528,10 +524,6 @@ impl AgentEventKind {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Event debt accounting covers every payload variant including ephemeral retry strings and caller lineage"
-    )]
     pub(in crate::event) fn retained_bytes(&self) -> usize {
         let content = match self {
             Self::Model {
@@ -707,10 +699,6 @@ pub(super) fn presentation_safe_model_event(event: &ModelEvent) -> Option<ModelE
 }
 
 impl fmt::Debug for AgentEventKind {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "The event-kind Debug implementation exhaustively formats the public observation variants without exposing hidden payloads"
-    )]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut event = formatter.debug_struct("AgentEventKind");
         match self {

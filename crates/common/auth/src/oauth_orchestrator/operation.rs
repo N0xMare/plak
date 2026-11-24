@@ -108,10 +108,6 @@ macro_rules! delegate_operation {
 }
 pub(super) use delegate_operation;
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "linear claimed-operation exits stay in one function so telemetry cannot miss a branch"
-)]
 pub(super) async fn run<H>(
     store: &PrivateCredentialStore,
     client: &Client,

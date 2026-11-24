@@ -5,10 +5,6 @@
 //! production CLI code. No production behaviour.
 
 #[cfg(test)]
-#[allow(
-    clippy::too_many_lines,
-    reason = "offline golden renderer walks the full product matrix"
-)]
 pub(crate) mod suite {
     use std::collections::BTreeMap;
     use std::fmt::Write as _;
@@ -947,10 +943,6 @@ pub(crate) mod suite {
         .expect("route surface")
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "Native prompt goldens compile the selected provider profile with the exact nested tools, product home, workspace, and working directory."
-    )]
     pub(crate) fn native_profile(
         provider: NativeProvider,
         model: &str,

@@ -19,10 +19,6 @@ use super::{
 impl CompilerModelFacts {
     /// Creates compiler model facts from an already-selected binding.
     #[must_use]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "compiler model facts are an explicit frozen input tuple"
-    )]
     pub fn new(
         selected_provider_configuration_id: SelectedProviderConfigurationId,
         effective_provider_configuration_id: EffectiveProviderConfigurationId,
@@ -601,10 +597,6 @@ pub fn compiler_model_facts_from_model(
 /// # Errors
 ///
 /// Returns a profile error when the derived specification cannot compile.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "construction-bound plan compilation takes one explicit frozen authority tuple"
-)]
 pub(crate) fn compile_construction_bound_plan(
     model: &dyn LanguageModel,
     provider_configuration: &CompiledProviderConfiguration,

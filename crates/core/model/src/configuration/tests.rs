@@ -69,10 +69,6 @@ fn behavior() -> Result<ProviderBehaviorConfiguration, crate::IdentityError> {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one matrix contrasts ordinary and workflow controls with every ceiling boundary"
-)]
 fn workflow_execution_controls_are_a_bounded_exact_refinement() -> TestResult {
     use crate::{
         AttemptId, ConversationView, GenerationLimits, ModelRequest, RequestMetadata, RunId,
@@ -1286,10 +1282,6 @@ fn custom_registration_rejects_standard_configuration_before_start() -> TestResu
     Ok(())
 }
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one matrix compares deserialization, compilation and both registration authorities for every evidence class"
-)]
 fn evidence_compatibility_matrix_keeps_registration_authority_separate() -> TestResult {
     use crate::{
         CapacityCertificate, CapacityRule, ContextContract, ContextEvidenceSource,

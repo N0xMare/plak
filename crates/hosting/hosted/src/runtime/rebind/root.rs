@@ -75,10 +75,6 @@ impl RebindMode<'_> {
 /// Forks the attached session onto a profile's root: the branch opens a
 /// tree of its own frozen on `roster`, so the source keeps its tree and cards.
 #[cfg(test)]
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Profile rebinding receives the attached source, interrupt watch, target tuple, and frozen roster as distinct authorities."
-)]
 pub(in crate::runtime) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,

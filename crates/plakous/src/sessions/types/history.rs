@@ -28,10 +28,6 @@ impl SessionHistoryCursor {
 impl SessionHistoryPageRequest {
     /// Binds one bounded history page to an exact checkpoint and visibility revision.
     #[must_use]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "history page identity is an exact eight-field request, not a decomposed builder"
-    )]
     pub const fn new(
         locator: SessionLocator,
         checkpoint_id: CheckpointId,

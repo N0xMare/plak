@@ -48,10 +48,6 @@ pub(super) fn abandonment_evidence_fold(
 /// [`abandonment_evidence_fold`] as a live cancel reads it: the same rows
 /// over the live head, with `closing` the restored hosted baton the cancel's
 /// terminal finalizes (a tool batch or a server pause, promoted or not).
-#[allow(
-    clippy::too_many_lines,
-    reason = "Turn abandonment folds recorded provider and effect evidence without inventing successful outcomes for unresolved work"
-)]
 pub(super) fn abandonment_fold(
     checkpoint: &RuntimeCheckpoint,
     barrier: super::DecisionBarrier,

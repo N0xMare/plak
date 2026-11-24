@@ -1262,10 +1262,6 @@ fn target_values() -> Result<(ProtocolId, ModelFamilyId, ModelId), Box<dyn std::
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the exact mixed-presentation fixture keeps each canonical tool contract beside its expected wire form"
-)]
 fn mixed_v2_projection_lowers_explicit_function_and_custom_presentations() -> TestResult {
     let base = crate::test_support::model_request_builder(
         ConversationView::from_items(vec![user(90, "run it")?])?,
@@ -1908,10 +1904,6 @@ fn operation_binding(
     )?)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the fixture seals every independent artifact authority fact"
-)]
 fn output_artifact(
     producing_request: &ModelRequest,
     covered_request: &ModelRequest,
@@ -4083,10 +4075,6 @@ fn code_mode_exec_cell_replays_on_a_lite_target() -> TestResult {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the complete canonical reasoning fixture and exact portable wire assertion are one projection contract"
-)]
 fn fresh_codex_body_matches_portable_reasoning_projection() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let affinity = Digest::sha256(DigestDomain::CacheAffinity, 1, &[b"offline-pass"])?;
@@ -5829,10 +5817,6 @@ fn stateless_wrap_up_keeps_hard_binding_axes() -> TestResult {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the vertical test proves the complete project-codec-append-next-request chain in both modes"
-)]
 fn project_codec_append_and_next_request_are_exact_in_both_storage_modes() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let replay_projection = ResponsesReplayProjection::new(
@@ -6266,10 +6250,6 @@ enum LongReplayHistory {
     ReplayBytes,
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one fixture exercises all historical bounds through sealing and lowering"
-)]
 fn long_history_replay(
     route: &str,
     policy: ResponsesRequestPolicy,
@@ -6495,10 +6475,6 @@ long_history_route_tests!(
 );
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the regression follows a fresh account-B round through artifact publication and the next request"
-)]
 fn new_account_artifact_does_not_resurrect_previous_account_reasoning() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let route = "responses-test-route";

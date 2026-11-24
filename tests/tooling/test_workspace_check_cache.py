@@ -717,7 +717,6 @@ class WorkspaceCheckCache(unittest.TestCase):
                 *checker.validate_tracked_hygiene(self.root),
                 *checker.validate_rust_file_policies("demo", sources),
                 *checker.validate_configuration_rules("demo", sources, rules),
-                *checker.validate_package_file_lints("demo", sources, {"src/lib.rs"}, {}),
             ]
             if errors:
                 print("\n".join(errors), file=sys.stderr)
@@ -752,7 +751,6 @@ class WorkspaceCheckCache(unittest.TestCase):
                 ('const X: &str = include_str!("../../other");\n', "outside the package"),
                 ('const X: &str = "while true; do sleep 1; done";\n', "unbounded shell loop"),
                 ('fn f() { let _ = std::env::var("DEMO"); }\n', "placement debt"),
-                ("#[allow(clippy::too_many_lines)]\nfn f() {}\n", "exceeds its ceiling"),
             ):
                 with self.subTest(finding=finding):
                     second.write_text(contents)

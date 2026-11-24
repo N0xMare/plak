@@ -68,11 +68,6 @@ impl PlakousApplication {
             .to_path_buf())
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "A native one-shot run carries its explicit model binding, draft, output streams, session-id choice, and bounds through ordered admission."
-    )]
     pub(crate) fn run(
         &mut self,
         config: &product_config::ProductConfig,
@@ -255,10 +250,6 @@ impl PlakousApplication {
         }
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "API run admission needs the selected target, composition, draft, output streams, and run bounds independently of the loaded product configuration."
-    )]
     pub(crate) fn run_api(
         &mut self,
         config: &product_config::ProductConfig,
@@ -319,11 +310,6 @@ impl PlakousApplication {
         )
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "Continuation loads recorded authority before driving the requested draft, output streams, and run bounds."
-    )]
     pub(crate) fn continue_session(
         &mut self,
         config: &product_config::ProductConfig,
@@ -504,11 +490,6 @@ impl PlakousApplication {
         )
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "Hosted run admission keeps the selected session and target beside the draft, output streams, and termination bounds."
-    )]
     fn run_hosted(
         &self,
         admitted: &product_config::ProductConfig,
@@ -664,11 +645,6 @@ fn run_preparation<F: Future>(
 }
 
 /// Product presentation stays on the calling thread; only the hosted worker owns execution.
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "The one-shot host drive owns its face, child availability, terminal output policy, output streams, and bounds through terminal settlement."
-)]
 pub(crate) fn run_config(
     executor: &ApplicationExecutor,
     config: product_host::HostConfig<crate::surface_protocol::PlakExtension>,

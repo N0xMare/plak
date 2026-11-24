@@ -8,8 +8,6 @@
 #![forbid(unsafe_code)]
 #![allow(
     clippy::doc_markdown,
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
     reason = "protocol vocabulary and closed family kernels"
 )]
 

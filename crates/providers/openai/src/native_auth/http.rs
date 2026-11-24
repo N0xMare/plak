@@ -43,10 +43,6 @@ pub(super) async fn execute_bounded(
     .map_err(|error| NativeCodexAuthError::Transport(error.0))
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Keep the exact catalog request parts, lookup budget and subscription dispatch gate explicit at the bounded transport boundary."
-)]
 pub(super) async fn execute_catalog_bounded(
     client: &Client,
     origin: &EndpointOrigin,
@@ -107,10 +103,6 @@ pub(super) async fn execute_catalog_bounded(
     })
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Classify one exact auth HTTP exchange with its request parts, deadline and body cap supplied independently."
-)]
 async fn execute_classified(
     client: &Client,
     origin: &EndpointOrigin,

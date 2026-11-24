@@ -511,10 +511,6 @@ impl fmt::Debug for ToolContext {
 
 impl ToolContext {
     /// Creates a complete owned execution context from injected dependencies.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "all invocation-bound context dependencies are explicit"
-    )]
     #[must_use]
     pub(crate) fn authorized(
         run_id: RunId,

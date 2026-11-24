@@ -224,10 +224,6 @@ fn predicted_reopen(
     Ok((inspection, report))
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one ordered negative proof keeps all public Working bypass workflows visibly bound to one report"
-)]
 async fn assert_recovery_remains_non_dispatching(
     sessions: &AgentSessions,
     source: SessionLocator,

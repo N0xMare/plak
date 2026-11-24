@@ -59,10 +59,6 @@ pub(crate) struct ApiRuntimeSpec<'a> {
     clippy::needless_pass_by_value,
     reason = "API construction owns the frozen tool registry for the runtime being compiled"
 )]
-#[allow(
-    clippy::too_many_lines,
-    reason = "API runtime construction joins route admission, tool compilation, composition attachment, and topology ownership before returning one binding."
-)]
 pub(crate) fn runtime_binding(
     spec: &ApiRuntimeSpec<'_>,
     configured: ConfiguredLanguageModel,
@@ -356,10 +352,6 @@ pub(crate) fn runtime_binding(
 ///
 /// `pub(crate)` so the rendered-prompt goldens can assemble the same spec offline
 /// without credentials. Production behaviour is unchanged.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "API profile compilation keeps route capability, selected configuration, frozen tools, workspace, and composition inputs distinct."
-)]
 pub(crate) fn api_product_profile(
     account: &crate::account::AccountRef,
     composition: CompositionSelection,

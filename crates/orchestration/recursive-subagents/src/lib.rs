@@ -53,9 +53,7 @@
 //! of acting twice, so a retried spawn cannot mint a second child.
 
 #![allow(
-    clippy::missing_errors_doc,
     clippy::missing_panics_doc,
-    clippy::must_use_candidate,
     clippy::doc_markdown,
     clippy::map_unwrap_or,
     clippy::needless_pass_by_value,

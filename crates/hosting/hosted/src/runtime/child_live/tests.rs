@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Live child transcript scenarios compare streamed rows against committed history through yields, gaps, and subsequent turns."
-)]
 use crate::runtime::test_kit::BlockOn as _;
 
 use super::*;

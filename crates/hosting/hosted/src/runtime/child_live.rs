@@ -380,10 +380,6 @@ impl ChildObservers {
         })
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "An agent-view task owns its executor and cancellation while borrowing the selected session, tree, and event transport."
-    )]
     fn start_agent_view<P: plakous_host_protocol::ProtocolExtension>(
         &mut self,
         tasks: &crate::TaskSet,
@@ -774,10 +770,6 @@ fn usage_op(usage: Usage, terminal: bool) -> HostEvent<Core> {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Transcript diffing preserves row identity while reconciling append, replacement, truncation, and gap-recovery operations."
-)]
 pub(super) fn transcript_ops(
     event: &AgentEvent,
     projection: &mut TurnProjection<Core>,

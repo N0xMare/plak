@@ -43,10 +43,6 @@ pub async fn seed_uncertain_terminal_siblings(
     seed_terminal_debt(database, source, turn_id, true).await
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the fixture constructs and commits one complete mixed-debt manifest"
-)]
 async fn seed_terminal_debt(
     database: &Path,
     source: SessionLocator,
@@ -338,7 +334,6 @@ enum Fence {
 }
 
 #[allow(
-    clippy::too_many_lines,
     clippy::items_after_statements,
     reason = "the fixture writes one complete exact ledger cut"
 )]

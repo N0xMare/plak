@@ -93,11 +93,6 @@ pub fn attach_eligibility(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "Host construction binds the recorded session, catalog facts, explicit effort, workspace, and publication fence in admission order."
-)]
 pub(crate) fn build_host_config(
     paths: &product_paths::PlakPaths,
     state_roots: &product_agent::ProductStateRoots,

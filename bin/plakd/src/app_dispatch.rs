@@ -7,10 +7,6 @@ use crate::{
     CliResult, ProcessOutcome, Services, carry, commands, execute_command, product_config,
 };
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Application command routing preserves one explicit handler for each account, catalog, usage, and one-shot run verb."
-)]
 pub(super) fn execute_application_command(
     command: Command,
     services: &Services,

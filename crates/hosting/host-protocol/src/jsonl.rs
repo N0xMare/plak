@@ -101,7 +101,6 @@ pub fn host_event_kind<P: ProtocolExtension>(event: &SessionObservation<P>) -> &
 /// wire does not carry.
 #[must_use]
 #[allow(
-    clippy::too_many_lines,
     clippy::match_same_arms,
     reason = "one exhaustive match is the wire contract: every variant is decided here"
 )]

@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Carry history scenarios build full canonical block families and verify same-binding versus neutral replay."
-)]
-
 use super::*;
 
 #[test]

@@ -5,11 +5,6 @@
 //! encodings used by that graph. Exact bytes from versioned component codecs
 //! remain mandatory reconstruction data; digests never substitute for them.
 
-#![allow(
-    clippy::missing_errors_doc,
-    reason = "the closed error enum documents shared failures"
-)]
-
 mod bindings;
 mod codec;
 mod context_state;
@@ -685,10 +680,6 @@ pub struct RuntimeManifest {
 
 impl RuntimeManifest {
     /// Creates and validates the one canonical manifest aggregate.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the closed manifest groups"
-    )]
     pub fn new(
         provenance: ProducerProvenance,
         topology: RuntimeTopology,

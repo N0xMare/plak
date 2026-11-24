@@ -95,10 +95,6 @@ pub(crate) fn encode_bundle_metadata_value(
     Ok(writer.bytes)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Bundle metadata decoding keeps closed tags and bounded collection reads in their canonical wire order"
-)]
 pub(crate) fn decode_bundle_metadata(
     bytes: &[u8],
 ) -> Result<RuntimeManifestBundleMetadata, RuntimeManifestError> {
@@ -210,10 +206,6 @@ pub(crate) fn decode_bundle_metadata(
     })
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the arguments are the closed manifest groups"
-)]
 pub(crate) fn assemble_bundle_manifest(
     metadata: RuntimeManifestBundleMetadata,
     harness_plan: ReconstructiveComponent,

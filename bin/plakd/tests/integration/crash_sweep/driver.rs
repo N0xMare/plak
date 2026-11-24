@@ -568,10 +568,6 @@ fn capacity_cut_selection_uses_facts_not_transaction_ordinals() {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one cut's relaunch sequence reads best as a single ordered procedure"
-)]
 fn cut_after_kill(
     fixture: &Fixture,
     session: &str,

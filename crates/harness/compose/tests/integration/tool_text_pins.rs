@@ -6,8 +6,6 @@
 //! to the tables that lived in `plakous-tools/src/prompts/` before the cut --
 //! a pack move may not move a pin.
 
-#![allow(missing_docs, reason = "integration test crate")]
-
 use plakous_tool_files::{
     PLAKOUS_CODEX_APPLY_PATCH_FREEFORM_DESCRIPTION, PLAKOUS_CODEX_UPDATE_PLAN_DESCRIPTION,
     PLAKOUS_GROK_GREP_DESCRIPTION, PLAKOUS_GROK_LIST_DIR_DESCRIPTION,

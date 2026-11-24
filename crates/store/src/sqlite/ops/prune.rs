@@ -21,10 +21,6 @@ pub(in super::super) const PRUNE_CANDIDATES: &str = "SELECT checkpoint_id FROM c
          AND (o.session_id<>?1 OR o.branch_id<>?2))
      ORDER BY checkpoint_id";
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the one prune transaction stays linear so its retained set is auditable"
-)]
 pub(in super::super) fn prune(
     b: &mut Backend,
     r: &PruneBranch,

@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Rebind scenarios construct and reopen production API branches to verify complete staging lineage and immutable source authority."
-)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 use crate::runtime::test_kit::BlockOn as _;
 

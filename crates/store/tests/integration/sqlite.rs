@@ -192,10 +192,6 @@ async fn seed_shared_corpus(
     .await
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the restart fixture keeps one complete publish/drop/reopen/recover proof linear"
-)]
 async fn assert_lost_fork_ack_reopens(
     db: &Database,
     base: u128,
@@ -908,10 +904,6 @@ fn runtime_is_the_reviewed_fixed_bundled_sqlite() {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the WAL reset regression keeps one complete concurrent sequence auditable"
-)]
 fn bundled_sqlite_preserves_commits_across_concurrent_wal_reset_sequence() {
     const INITIAL_ROWS: i64 = 32;
     const ROUNDS: i64 = 32;
@@ -1690,10 +1682,6 @@ async fn assert_commit_cut(base: u128, table: &str) -> Result<(), Box<dyn Error>
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear corpus proves sustained deltas and loaded-graph reopen advancement"
-)]
 async fn sustained_commits_publish_only_deltas_and_reopen_the_exact_head()
 -> Result<(), Box<dyn Error>> {
     const TURNS: u64 = 100;
@@ -1984,10 +1972,6 @@ async fn foreign_scope_open_preserves_database_and_wal() -> Result<(), Box<dyn E
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one reboot proof retains exact historical receipts and verifies both branch fences"
-)]
 async fn reboot_preserves_create_and_fork_receipts_without_reviving_old_authority()
 -> Result<(), Box<dyn Error>> {
     let db = Database::new();
@@ -2730,10 +2714,6 @@ async fn sqlite_prune_conformance_reopens_exact_and_verified() -> Result<(), Box
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one ordered large-operation persistence, prune and cold reconstruction proof"
-)]
 async fn sqlite_retains_large_operation_payloads_after_prune_and_cold_reopen()
 -> Result<(), Box<dyn Error>> {
     use plakous_agent::internal::{
@@ -2880,10 +2860,6 @@ async fn sqlite_retains_large_operation_payloads_after_prune_and_cold_reopen()
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one ordered reclaim, reconstruction and verified-reopen regression"
-)]
 async fn sqlite_reconstructs_reclaimed_addresses_across_prune_cycles_and_reopen()
 -> Result<(), Box<dyn Error>> {
     use plakous_agent::internal::{

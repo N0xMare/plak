@@ -34,10 +34,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         released
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Host release drains terminal publication and pending cancellations before dropping runtime and topology ownership."
-    )]
     async fn release_attachment(&mut self) -> CliResult<()> {
         // Taken first, whether or not this release succeeds: a later
         // release never inherits a planned handoff.

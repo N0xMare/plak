@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "CLI grammar matrices keep accepted commands and exact located refusals beside their complete argv inputs."
-)]
-
 #[test]
 fn bare_invocation_is_help_and_terminal_launch_grammar_is_absent() {
     assert!(matches!(parse(args(&[])), Ok(Command::Help)));

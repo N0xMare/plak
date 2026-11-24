@@ -165,10 +165,6 @@ impl Driver {
             .await
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Hosted tool-batch resume reconstructs completed slots and pending admission without replaying settled effects"
-    )]
     pub(super) async fn resume_hosted_tool_batch(
         &mut self,
         command: &PromptCommand,
@@ -378,10 +374,6 @@ impl Driver {
             .await
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Restored-batch execution preserves source order while reconciling completed, undecided, and undispatched slots"
-    )]
     pub(super) async fn resume_restored_batch(
         &mut self,
         command: &PromptCommand,
@@ -573,10 +565,6 @@ impl Driver {
         })
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "restored authorization preserves the complete persisted source slot"
-    )]
     pub(super) async fn execute_restored_authorization(
         &mut self,
         command: &PromptCommand,
@@ -658,14 +646,6 @@ impl Driver {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Restored authorized execution uses the recorded one-shot grant and publishes its exact effect outcome"
-    )]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "restored dispatch preserves the complete persisted operation tuple"
-    )]
     pub(in crate::runtime::driver) async fn execute_restored_admitted(
         &mut self,
         command: &PromptCommand,

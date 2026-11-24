@@ -491,10 +491,6 @@ fn await_schemas_require_exactly_one_nonempty_id_form() -> Result<(), Box<dyn Er
 
 #[cfg(unix)]
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one lifecycle test keeps start, close, poll, terminate, and stale-handle assertions causal"
-)]
 async fn canonical_process_operations_close_poll_terminate_and_reject_stale_authority()
 -> Result<(), Box<dyn Error>> {
     use plakous_tools::{
@@ -740,10 +736,6 @@ fn canonical_process_registration_rejects_shell_identity_drift() -> Result<(), T
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "full exact provider schema goldens are intentionally reviewed in one causal table"
-)]
 fn exact_process_projection_schemas_are_v2_bound_goldens() -> Result<(), ToolRuntimeError> {
     let codex =
         ProcessToolProjectionKind::CodexUnifiedExec.tools(plakous_tools::JobConfig::default())?;
@@ -1391,10 +1383,6 @@ async fn a_start_publishes_its_job_only_in_the_poll_that_completes_it() -> Resul
 /// start) or releases the reservation and polls the start to completion.
 /// Neither path depends on when the blocking pool runs.
 #[cfg(unix)]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one hand-driven start keeps its setup, reservation and drop or re-poll assertions causal"
-)]
 fn start_to_its_reservation(repoll: bool) -> Result<(), Box<dyn Error>> {
     use plakous_tools::{
         ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, JobOutputRoot,
@@ -2456,10 +2444,6 @@ async fn production_unified_exec_closed_stdin_refusal_explains_tty_retry()
 /// knowable and the turn must be able to continue.
 #[cfg(unix)]
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the exited-session lifecycle is one test: start, write, exit, refusal, continue"
-)]
 async fn write_to_an_exited_session_is_a_definite_failure_not_an_unknown_outcome()
 -> Result<(), Box<dyn Error>> {
     use plakous_model::ToolResultPart;

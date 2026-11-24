@@ -1,15 +1,5 @@
 //! Pinned Codex exec parsing, descriptions and bounded result DTOs.
 
-#![allow(
-    missing_docs,
-    reason = "published-internal DTO inventory is documented at the module contract boundary"
-)]
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
-    reason = "published-internal boundary methods preserve concise upstream operation docs"
-)]
-
 mod description;
 mod output;
 mod types;

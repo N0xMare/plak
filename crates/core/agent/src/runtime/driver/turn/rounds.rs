@@ -46,10 +46,6 @@ impl Driver {
 
     /// A hosted round's decision with its restorable frame in one commit, and
     /// for a server pause the response's history too.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the frame binds the exact provider, its outcome, prior baton and continuation"
-    )]
     pub(super) async fn commit_hosted_round(
         &mut self,
         turn_id: TurnId,
@@ -83,10 +79,6 @@ impl Driver {
     /// Adds a hosted round's decision and its restorable frame to `plan`: the
     /// provider's outcome record, the finalization of the frame it resumed
     /// from, and the new continuation record.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the frame binds the exact provider, its outcome, prior baton and continuation"
-    )]
     pub(super) fn stage_hosted_continuation(
         &mut self,
         plan: &mut CommitPlan,
@@ -300,10 +292,6 @@ impl Driver {
         result
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "The root-turn round loop keeps model decisions, tool batches, steering, and budget terminalization under one owner"
-    )]
     pub(super) async fn run_turn_rounds(
         &mut self,
         command: &PromptCommand,
@@ -732,10 +720,6 @@ impl Driver {
     }
 
     /// The restorable frame of a round paused at its customer tool batch.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the frame records every round input the restored batch needs"
-    )]
     pub(super) fn tool_batch_continuation(
         &self,
         command: &PromptCommand,

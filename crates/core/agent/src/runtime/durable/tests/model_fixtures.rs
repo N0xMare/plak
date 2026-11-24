@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Scripted model fixtures enumerate complete provider outcomes, event streams, and replay bindings for durable turns"
-)]
-
 use super::*;
 
 type PreparationObserver = Box<dyn FnMut(&ValidatedRequestPlan) + Send>;

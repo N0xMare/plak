@@ -611,10 +611,6 @@ pub(super) struct NativeSuccessorAudit {
     pub(super) fits: bool,
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "successor audit keeps persisted source and current measurement authority explicit"
-)]
 pub(super) async fn native_successor_audit(
     model: Arc<dyn LanguageModel>,
     manifest: &RuntimeManifest,

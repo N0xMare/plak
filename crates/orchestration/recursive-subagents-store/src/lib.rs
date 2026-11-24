@@ -15,11 +15,6 @@
 //! tree tables are separate from `product.sqlite3`: the two files carry their
 //! own schema versions; no transaction spans both.
 
-#![allow(
-    clippy::missing_errors_doc,
-    reason = "the set this crate actually trips"
-)]
-
 pub mod admission;
 mod custody;
 pub mod database;

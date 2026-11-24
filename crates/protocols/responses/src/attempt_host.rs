@@ -1071,10 +1071,6 @@ impl ResponsesAttemptDialectData {
     ///
     /// This host admits requests whose provider authority is complete at the
     /// final revalidation fence immediately before transport.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "closed Responses attempt data table"
-    )]
     pub fn new<D, G>(
         dialect_revision: u32,
         target: ResponsesAttemptTarget,

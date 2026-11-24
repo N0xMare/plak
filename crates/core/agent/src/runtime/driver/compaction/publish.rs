@@ -19,10 +19,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 impl Driver {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the exact compaction publication fence carries its complete persisted tuple"
-    )]
     pub(super) async fn publish_compaction_success(
         &mut self,
         identity: DurableCompactionIdentity,

@@ -71,10 +71,6 @@ impl Driver {
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "publication receives the closed successor checkpoint groups"
-    )]
     pub(in crate::runtime::driver) async fn publish_checkpoint(
         &mut self,
         admission: StoreAdmission,
@@ -98,10 +94,6 @@ impl Driver {
         .await
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one atomic successor and its consumed observations"
-    )]
     pub(super) async fn publish_checkpoint_consuming_jobs(
         &mut self,
         admission: StoreAdmission,

@@ -427,10 +427,6 @@ pub(crate) fn bundle(
     Ok(RuntimeCheckpointCodec::bundle(checkpoint, prior)?)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one ordered corpus is reused unchanged by every backend factory"
-)]
 pub(crate) async fn run_semantic_conformance<F>(
     durability: RuntimeDurability,
     expected_effective_durability: RuntimeDurability,
@@ -1262,10 +1258,6 @@ where
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the deletion conformance keeps one complete authority lifecycle auditable"
-)]
 pub(crate) async fn run_delete_conformance(
     store: &dyn SessionStore,
     durability: RuntimeDurability,
@@ -1952,10 +1944,6 @@ async fn working_head_prune_does_not_regress_a_recorded_horizon(
 /// History retention: the exact retained set, typed `Pruned` for removed
 /// checkpoints and receipts, idempotent repeats, forks before and after a
 /// prune, and exact usage accounting.
-#[allow(
-    clippy::too_many_lines,
-    reason = "one ordered retention corpus is reused unchanged by every backend"
-)]
 pub(crate) async fn run_prune_conformance(
     store: &dyn SessionStore,
     durability: RuntimeDurability,
@@ -2436,10 +2424,6 @@ pub(super) async fn memory_backend_satisfies_semantic_conformance() -> TestResul
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one long-history scenario proves cache bounds, exact cold reconstruction, and incremental head reuse together"
-)]
 pub(super) async fn memory_retains_only_head_bundle_metadata_across_long_history() -> TestResult {
     const TURNS: u64 = 1_024;
 

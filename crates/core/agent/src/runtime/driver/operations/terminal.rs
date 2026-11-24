@@ -278,14 +278,6 @@ impl Driver {
     /// canonical segment, i.e. no round of the turn committed after it.
     /// The text bytes and provenance of this root's own prompt when it is
     /// still the last canonical segment.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Queued cancellation publishes the command closure, prompt disposition, and terminal receipt in one checkpoint"
-    )]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one atomic queued-cancel candidate closes the complete command and target tuple"
-    )]
     pub(in crate::runtime::driver) async fn publish_atomic_queued_cancellation(
         &mut self,
         cancel_command_id: &CommandId,
@@ -572,10 +564,6 @@ impl Driver {
     /// evidence of earlier turns, so a session is not bounded by its history.
     /// Compaction publications never come here: their receipt is checked
     /// against an exact re-fold of the ledger they started from.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one atomic terminal successor and its consumed observations"
-    )]
     pub(super) async fn publish_turn_terminal(
         &mut self,
         checkpoint_id: CheckpointId,

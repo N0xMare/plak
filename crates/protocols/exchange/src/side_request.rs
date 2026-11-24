@@ -1,11 +1,5 @@
 //! One bounded exchange/retry owner for isolated side requests.
 
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
-    reason = "closed side-request vocabulary and explicit replay authority"
-)]
-
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;

@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Release scenarios commit a terminal during shutdown and verify its projection wins before ownership is dropped."
-)]
-
 use super::*;
 use crate::runtime::Sender;
 use crate::runtime::startup::build_session_from_config;

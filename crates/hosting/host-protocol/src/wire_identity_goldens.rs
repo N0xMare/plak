@@ -246,10 +246,6 @@ fn template(name: &str) -> TemplateName {
 /// identity golden: a change here is a wire/durable-format change and needs the
 /// maintainers' decision.
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one exhaustive pin table; splitting it hides what is covered"
-)]
 fn wire_identity_handshake_lines_are_pinned() {
     let mut rows = Vec::new();
     let mut failures = Vec::new();
@@ -364,10 +360,6 @@ fn wire_identity_handshake_lines_are_pinned() {
 /// identity golden: a change here is a wire/durable-format change and needs the
 /// maintainers' decision.
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one exhaustive pin table; splitting it hides what is covered"
-)]
 fn wire_identity_topology_payloads_are_pinned() {
     let mut rows = Vec::new();
     let mut failures = Vec::new();
@@ -598,10 +590,6 @@ fn joined<T: Serialize>(values: &[T]) -> String {
 /// identity golden: a change here is a wire/durable-format change and needs the
 /// maintainers' decision.
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one exhaustive pin table; splitting it hides what is covered"
-)]
 fn wire_identity_closed_vocabularies_are_pinned() {
     let mut rows = Vec::new();
     let mut failures = Vec::new();

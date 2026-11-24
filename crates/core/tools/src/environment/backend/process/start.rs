@@ -28,11 +28,6 @@ pub(super) enum JoinedSessionInput {
     Pty(PtyInputSender),
 }
 
-#[allow(
-    clippy::too_many_lines,
-    clippy::too_many_arguments,
-    reason = "joined spawn, initial I/O rollback and supervisor ownership transfer form one admission boundary"
-)]
 pub(super) fn start_joined_host_process(
     workspace: &ExecutionWorkspace,
     process: &HostProcessContext,

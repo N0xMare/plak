@@ -1282,7 +1282,6 @@ fn request_tool_kind(request: &ModelRequest, name: &str) -> Option<RawToolCallKi
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
-    clippy::too_many_lines,
     reason = "unit fixtures use focused expectations and exhaustive mutation tables"
 )]
 mod tests;

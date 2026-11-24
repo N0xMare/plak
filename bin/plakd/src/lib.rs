@@ -4,7 +4,6 @@
 
 #![allow(
     clippy::doc_markdown,
-    clippy::missing_errors_doc,
     clippy::needless_pass_by_value,
     clippy::match_same_arms,
     clippy::if_same_then_else,
@@ -14,7 +13,6 @@
     reason = "product CLI names SuperGrok/Codex; clap handlers; pedantic CLI surface"
 )]
 #![allow(
-    clippy::must_use_candidate,
     clippy::assigning_clones,
     clippy::unnested_or_patterns,
     clippy::cast_possible_truncation,
@@ -322,10 +320,6 @@ fn log_command_start(command: &Command) {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "The composition root orders read-only shortcuts, signal installation, service construction, product-state admission, and face dispatch."
-)]
 fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult<ProcessOutcome> {
     let host_reexec = if reexec {
         let (binary, inherited) = host::receive_reexec()?;
@@ -824,10 +818,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Read-only session display gathers recorded binding, runtime history, workflows, and child status before rendering the requested view."
-)]
 fn show_session_read_only(
     paths: &product_paths::PlakPaths,
     id: &str,
@@ -975,10 +965,6 @@ fn show_session_read_only(
     Ok(ProcessOutcome::Success)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "The product dispatcher exhaustively routes the remaining admitted commands without a second interpretation of their arguments."
-)]
 fn execute_command<Backend: AccountOps>(
     command: Command,
     services: &Services,

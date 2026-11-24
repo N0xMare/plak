@@ -139,10 +139,6 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
     /// Create the explicit empty successor of a clear operation; the source
     /// attachment remains borrowed until construction returns. The operation id
     /// binds retries to this create, not to a second admitted turn.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "The runtime factory clear seam receives both the source session authority and the complete new-session construction facts."
-    )]
     fn clear<'a>(
         &'a self,
         config: &'a mut HostConfig<P>,

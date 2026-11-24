@@ -247,7 +247,6 @@ impl Model {
         }
     }
 
-    #[allow(clippy::too_many_lines, reason = "one generated row per table")]
     fn put(&mut self, templates: &Templates, table: u8, slot: u8, seed: u32) {
         match table {
             0 => {

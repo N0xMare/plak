@@ -254,10 +254,6 @@ fn text(outcome: &ToolOutcome) -> Result<&str, TestError> {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "leak reversal and footprint goldens stay in one table"
-)]
 fn footprint_is_exact_and_request_view_has_no_process_synonyms() -> Result<(), TestError> {
     let (registry, codex, grok) = maps()?;
     let portable_wire_bytes = serde_json::to_vec(registry.definitions())?.len();
@@ -555,10 +551,6 @@ fn malformed_calls_and_exact_target_drift_fail_closed() -> Result<(), TestError>
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "single table-driven audit keeps every presentation identity axis visible together"
-)]
 fn every_presentation_target_identity_axis_rotates_the_map() -> Result<(), TestError> {
     let registry = registry()?;
     let base_configuration = configuration(b"identity-base")?;
@@ -727,10 +719,6 @@ fn every_presentation_target_identity_axis_rotates_the_map() -> Result<(), TestE
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "Codex, Grok, and Claude menus stay in one catalog proof"
-)]
 fn coding_presentation_catalogs_are_exact_menus() -> Result<(), TestError> {
     let mut builder = ToolRegistryBuilder::default();
     register_packs(&standard_coding_packs_in_memory()?, &mut builder)?;
@@ -1039,10 +1027,6 @@ fn coding_presentation_catalogs_are_exact_menus() -> Result<(), TestError> {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear walk over the whole pi menu"
-)]
 fn the_pi_catalog_is_complete_exact_and_distinct_from_oauth() -> Result<(), TestError> {
     let mut builder = ToolRegistryBuilder::default();
     register_packs(&standard_coding_packs_in_memory()?, &mut builder)?;

@@ -101,11 +101,6 @@ impl Driver {
         .map(|(item, _)| item)
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "source-ordered admission, mutation barriers, and indexed read-only joining remain visible in one auditable batch"
-    )]
     pub(super) async fn execute_tool_batch(
         &mut self,
         command: &PromptCommand,
@@ -330,11 +325,6 @@ impl Driver {
     }
 
     /// Executes or joins one admitted call in source order.
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "one source-ordered call keeps its barriers and joins in a single auditable body"
-    )]
     async fn dispatch_admitted_tool(
         &mut self,
         batch: ToolBatchInput<'_>,
@@ -523,11 +513,6 @@ impl Driver {
     }
 
     /// Pauses one call at its effect decision, then executes or rejects it.
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "one source-ordered call keeps its barriers and joins in a single auditable body"
-    )]
     async fn dispatch_decision_required_tool(
         &mut self,
         batch: ToolBatchInput<'_>,
@@ -1145,10 +1130,6 @@ impl Driver {
         })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the actor-owned select must visibly join every indexed execution while retaining controls and lease renewal"
-    )]
     pub(super) async fn execute_read_only_group(
         &mut self,
         command: &PromptCommand,

@@ -57,10 +57,6 @@ impl ToolExecutor for Answer {
 }
 
 #[tokio::main]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one example shows one complete workflow in a single readable flow"
-)]
 async fn main() -> Fallible<()> {
     let host = std::env::args()
         .nth(1)

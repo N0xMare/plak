@@ -112,10 +112,6 @@ pub(crate) fn with_remedy(
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "One exhaustive projection keeps all 37 closed semantic remedies and their three frontend alternatives together for review."
-)]
 pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> String {
     use Frontend::{Jsonl, Run, Wire};
     use NoticeRemedy as R;

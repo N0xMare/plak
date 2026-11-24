@@ -128,10 +128,6 @@ impl Driver {
     /// A retry decision in one commit (spec 01 §3.5 item 6): the failed
     /// attempt's outcome record, finalized with the note or guidance the
     /// decision committed the turn to.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the retry commit binds the exact attempt, its usage, decision, baton and note"
-    )]
     pub(super) async fn commit_retry(
         &mut self,
         turn_id: TurnId,
@@ -224,10 +220,6 @@ impl Driver {
 
     /// Settles an attempt that ended with a definite error: its decision commits
     /// first, then the round is retried or the turn fails.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the failed attempt's decision, retry commit and overflow fold stay in one ordered body"
-    )]
     pub(super) async fn settle_failed_attempt(
         &mut self,
         command: &PromptCommand,
@@ -333,11 +325,6 @@ impl Driver {
 
     /// Commits a round that requested no customer tools: a server pause or a
     /// continuing round resumes the loop; any other round ends the turn.
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "each disposition's decision and history commit stays in one ordered body"
-    )]
     pub(super) async fn settle_model_round(
         &mut self,
         command: &PromptCommand,

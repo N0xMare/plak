@@ -413,10 +413,6 @@ async fn decode_response(
     clippy::result_large_err,
     reason = "the attempt error is returned once per attempt from a future that already holds it"
 )]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear host step whose ordering is the invariant"
-)]
 pub(super) async fn decode_body(
     body_slot: &mut Option<ResponseBody>,
     http_cancellation: &HttpCancellationToken,

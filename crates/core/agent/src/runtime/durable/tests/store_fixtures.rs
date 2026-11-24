@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Store fixtures implement complete failure and acknowledgement schedules while retaining immutable accepted receipts"
-)]
-
 use super::*;
 
 pub(super) type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;

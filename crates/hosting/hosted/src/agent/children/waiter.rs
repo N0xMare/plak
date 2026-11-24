@@ -259,10 +259,6 @@ impl crate::node::TurnRole<()> for ChildTurns {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "The child waiter owns observation, transient recovery, result publication, and terminal release for exactly one bound attempt."
-    )]
     async fn after_terminal(
         &mut self,
         (): &mut (),
@@ -1292,10 +1288,6 @@ pub async fn finalize_topology_child_turn(
     .await;
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Child finalization reconciles canonical outcome and tree attempt state before publishing the result and releasing its runtime."
-)]
 pub(super) async fn finalize_child_turn(
     driver: &TreeDriver,
     agent_id: &str,

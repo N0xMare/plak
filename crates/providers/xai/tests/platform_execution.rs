@@ -622,10 +622,6 @@ fn tool_request(
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one source response proves same-key continuation and both changed-key artifact states"
-)]
 async fn local_tool_and_encrypted_reasoning_round_trip_reconstructs_exact_binding() -> TestResult {
     let reasoning = serde_json::json!({"type":"reasoning","id":"rs_test","status":"completed","summary":[],"encrypted_content":"synthetic-xai-ciphertext"});
     let function = serde_json::json!({"type":"function_call","id":"fc_test","status":"completed","call_id":"call_test","name":"lookup","arguments":"{\"q\":\"fixture\"}"});

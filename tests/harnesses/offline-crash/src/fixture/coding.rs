@@ -993,10 +993,6 @@ pub(super) fn direct_configured_tools(
         .collect()
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "complete crash-evidence fixture construction"
-)]
 pub(super) fn configured_model_with_configured_tools(
     model: Arc<dyn LanguageModel>,
     descriptor: &ResolvedModelDescriptor,

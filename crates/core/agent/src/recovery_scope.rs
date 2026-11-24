@@ -124,10 +124,6 @@ pub struct RuntimeRevalidationWitness {
 
 impl RuntimeRevalidationWitness {
     /// Creates a complete fresh binding witness.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the closed revalidation tuple"
-    )]
     #[must_use]
     pub const fn new(
         checked_at: Timestamp,

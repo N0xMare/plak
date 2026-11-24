@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Object-graph round trips and corruption cases retain bundle construction and complete validation assertions together"
-)]
-
 use super::object::object_address;
 use super::*;
 

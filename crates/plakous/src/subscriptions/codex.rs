@@ -665,10 +665,6 @@ impl NativeVertical for Vertical {
     ) -> NativeFuture<'a, Result<Vec<NativeModelSummary>, NativeSubscriptionError>> {
         Box::pin(async move { subscriptions.codex_catalog_models(gate).await })
     }
-    #[allow(
-        clippy::too_many_lines,
-        reason = "exact selection and pre/post-selection evidence stay together within the provider vertical"
-    )]
     fn resolve<'a>(
         &self,
         subscriptions: &'a NativeSubscriptions,

@@ -3,10 +3,6 @@ use std::collections::BTreeMap;
 use crate::tree::{MessagePurpose, OperationRecord, ProductAgentTree, operator_intents};
 
 impl ProductAgentTree {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one diagnostic invariant covers every foreign view and queue"
-    )]
     pub(super) fn assert_agent_local_applier(
         &self,
         before_operations: &BTreeMap<String, OperationRecord>,

@@ -532,10 +532,6 @@ impl SemanticCompactionCut {
     /// Returns a typed error for working state, source or plan drift, an absent
     /// selected prefix, noncanonical selected/retained semantics, or identity
     /// construction failure.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the single closed sealing sequence keeps every source, selection, retention, and identity fence auditable in order"
-    )]
     pub fn seal(
         source: &ConversationView,
         plan: &ContextHistoryPlan,

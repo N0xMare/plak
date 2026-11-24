@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Exercise exact Codex login, catalog, credential rotation and inference through complete controlled-peer scenarios."
-)]
 mod carry_replay;
 mod custody;
 mod drift;

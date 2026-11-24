@@ -265,10 +265,6 @@ impl ProductAgentTree {
         self.vcs = TreeVcs(vcs);
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "exact persisted tree reconstruction"
-    )]
     /// Rebuilds a tree from the rows a store handed back, exactly as they
     /// were written. Applying the reopen law — paused admission, no restored
     /// turn — is [`Self::reopen`]'s job, not this one's.

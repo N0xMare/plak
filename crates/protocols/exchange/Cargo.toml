@@ -16,12 +16,6 @@ exclude.workspace = true
 layer = "protocol"
 class = "published-internal"
 
-[package.metadata.plakous-lint]
-too-many-lines-ceiling = 2
-too-many-arguments-ceiling = 3
-large-file-ceiling = 0
-reason = "One physical host serves all protocol families; phase and stream owners retain their exact authority inputs."
-
 [dependencies]
 futures-channel = { workspace = true, features = ["sink"] }
 futures-util = { workspace = true, features = ["sink", "std"] }

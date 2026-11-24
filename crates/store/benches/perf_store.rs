@@ -510,10 +510,6 @@ fn linux_current_rss_bytes() -> Option<u64> {
         .map(|kibibytes| kibibytes.saturating_mul(1_024))
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one trace loop keeps timing scopes and exact publication assertions adjacent"
-)]
 async fn run_trace(
     store: &dyn SessionStore,
     seed: &Seed,
@@ -670,10 +666,6 @@ fn sqlite_row_counts(path: &Path) -> BenchResult<SqliteRowCounts> {
     })
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one instrumented trace keeps every cross-checked phase on the same commit row"
-)]
 async fn run_sqlite_instrumented_trace(turns: u64) -> BenchResult<()> {
     let database = Database::new()?;
     let seed = seed(turns, RuntimeDurability::Required)?;
@@ -1010,10 +1002,6 @@ fn sqlite_file_bytes(path: &Path) -> SqliteFileBytes {
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one JSONL schema row keeps raw counters aligned"
-)]
 fn emit_summary(
     backend: &str,
     turns: u64,
@@ -1339,10 +1327,6 @@ async fn run_large_store_admission() -> BenchResult<()> {
 
 /// A roughly 20 MiB head with thousands of independently addressed history
 /// objects. Timings deliberately separate cold graph loads from status reads.
-#[allow(
-    clippy::too_many_lines,
-    reason = "one ordered cold-load/fork workload keeps setup outside the timers"
-)]
 async fn run_cold_lineage() -> BenchResult<()> {
     use plakous_agent::internal::{
         ForkBranch, ForkLineage, RuntimeContextState, SessionRevision, SessionWorkflowId,

@@ -21,8 +21,6 @@ impl PreparedModelProjection {
     ///
     /// Rejects any scope drift, missing integrity, invalid label, or oversized wire.
     #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
         clippy::similar_names,
         reason = "the complete exact prepared projection is checked as one auditable trust-boundary operation"
     )]
@@ -190,10 +188,6 @@ impl PreparedModelProjection {
     /// Checks every projection axis against `plan` and the semantic axes of
     /// `descriptor`, but not that the plan is bound to this exact observation
     /// of the descriptor.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "all prepared scope axes are rechecked together at the trust boundary"
-    )]
     pub(in super::super) fn validate_plan_axes(
         &self,
         descriptor: &ResolvedModelDescriptor,
@@ -469,10 +463,6 @@ impl PreparedModelProjection {
 }
 
 impl<'de> Deserialize<'de> for PreparedModelProjection {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "deserialization rechecks every retained projection invariant before construction"
-    )]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,

@@ -24,10 +24,6 @@ impl Driver {
     /// Publishes `plan` as one checkpoint CAS: its ledger edits, its history,
     /// the artifact transition and the finalization of every operation it
     /// names, bound to the committed history (spec 01 §3.5).
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one atomic successor is checked and assembled in one place"
-    )]
     pub(in crate::runtime::driver) async fn publish_commit_plan(
         &mut self,
         turn_id: TurnId,

@@ -7,10 +7,6 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Run-until-idle selection preserves queue priority, child wake readiness, turn bounds, and terminal shutdown conditions."
-    )]
     pub(super) async fn next_run_prompt(
         &mut self,
         state: &mut OneShotState,

@@ -420,10 +420,6 @@ fn load_authority_commit_receipts(
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "ordered bulk receipt decoding keeps exact fork authority visible"
-)]
 fn load_authority_fork_receipts(
     c: &Connection,
     sessions: &BTreeMap<SessionId, SessionHead>,

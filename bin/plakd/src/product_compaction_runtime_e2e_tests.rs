@@ -2,7 +2,6 @@
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
-    missing_docs,
     reason = "offline runtime qualification"
 )]
 use crate::product_host::{HostWorkflow, ScriptedRuntimeFactory};

@@ -305,10 +305,6 @@ async fn unsupported_nested_opaque_result_successfully_carries_with_stripping() 
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one offline workflow pins account scope through validated import, rebind and ordinary fork"
-)]
 async fn responses_account_scope_survives_import_rebind_and_fork() -> TestResult {
     let root = TempDir::new()?;
     let workspace = Arc::new(WorkspacePolicy::host(root.path(), ".")?);

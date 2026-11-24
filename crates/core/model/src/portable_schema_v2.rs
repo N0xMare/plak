@@ -134,10 +134,6 @@ struct V2SchemaBudget {
     properties: usize,
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the closed V2 keyword/type matrix is clearest in one authority"
-)]
 fn validate_v2_schema_node(
     schema: &Value,
     root: bool,

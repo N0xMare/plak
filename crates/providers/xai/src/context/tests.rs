@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Recompute every live Grok wire occurrence against the enrolled input bound and disprove a guessed output cap."
-)]
 use super::*;
 use serde_json::Value;
 

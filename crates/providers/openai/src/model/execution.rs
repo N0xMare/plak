@@ -135,10 +135,6 @@ impl LanguageModel for OpenAiLanguageModel {
         })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Seal the Codex authority, replay artifact, wire measurement and prepared execution under the same immutable target."
-    )]
     fn prepare_call(
         self: Arc<Self>,
         plan: ValidatedRequestPlan,

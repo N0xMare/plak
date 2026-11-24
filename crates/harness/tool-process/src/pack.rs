@@ -84,10 +84,6 @@ impl ToolPack for ProcessToolPack {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one reviewed menu table per presentation"
-    )]
     fn menu(&self, presentation: CodingPresentation) -> Result<Vec<MenuEntry>, ToolRuntimeError> {
         let kind = Self::kind(presentation);
         let start = tool_name(

@@ -96,10 +96,6 @@ impl FamilyArtifactProducerFacts {
     ///
     /// Rejects foreign digest domains, empty output, inconsistent counts, or
     /// identical physical-request and terminal-response identities.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the closed exact producer fact set"
-    )]
     pub fn new(
         request: Digest,
         model_input: Digest,

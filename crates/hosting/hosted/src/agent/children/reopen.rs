@@ -49,10 +49,6 @@ fn inflight_children(tree: &crate::agent_tree::ProductAgentTree) -> Vec<Inflight
 /// refuses stays owed, takes no new turn, and records the refusal as its
 /// fault. Each child is held for its own recovery; one another run holds is
 /// skipped.
-#[allow(
-    clippy::too_many_lines,
-    reason = "Child recovery reconciles each owed attempt with its live owner, the exact reopen and the owner-lost mark."
-)]
 pub(in crate::agent) async fn recover_owed_children(
     parent: &SpawnParent,
     runtime: &Arc<crate::topology_runtime::ProductTopologyRuntime>,
@@ -771,10 +767,6 @@ pub(in crate::agent) async fn reopen_spawned_child(
     .await
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Child reopen reconstructs the stored binding and frozen tools before admitting its existing canonical head into the topology runtime."
-)]
 async fn reopen_spawned_child_at_head(
     parent: &SpawnParent,
     agent_id: &str,

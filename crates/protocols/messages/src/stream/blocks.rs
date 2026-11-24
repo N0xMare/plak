@@ -23,10 +23,6 @@ use super::{
 };
 
 impl MessagesStreamProjector {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "keeping every content-block start transition together makes the wire grammar auditable"
-    )]
     pub(super) fn block_start(
         &mut self,
         data: &str,
@@ -413,10 +409,6 @@ impl MessagesStreamProjector {
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "all typed delta transitions stay together so ownership and replay mutations remain auditable"
-    )]
     pub(super) fn block_delta(
         &mut self,
         data: &str,
@@ -579,10 +571,6 @@ impl MessagesStreamProjector {
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "keeping every content-block finalization transition together makes replay rules auditable"
-    )]
     pub(super) fn block_stop(
         &mut self,
         data: &str,

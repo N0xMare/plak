@@ -196,10 +196,6 @@ impl<W: FamilyWire, H: FamilyHttpHooks<W>> FamilyHttpAttemptService<W, H> {
     ///
     /// `timeout` bounds each physical exchange up to its response head; the
     /// streamed body is bounded only by the client's per-pull idle limit.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "all executable family authority is explicit"
-    )]
     #[must_use]
     pub fn new(
         client: Client,
@@ -404,10 +400,6 @@ impl<W: FamilyWire, H: FamilyHttpHooks<W>> FamilyExchangeHooks for HttpGeneratio
 }
 
 impl<W: FamilyWire, H: FamilyHttpHooks<W>> HttpGeneration<W, H> {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one generation has ordered authorization, response-head and stream phases"
-    )]
     async fn exchange_one(
         &mut self,
         generation: Generation,
@@ -658,10 +650,6 @@ fn retry_or_end<W: FamilyWire>(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "stream owner receives exact exchange state"
-)]
 async fn stream_response<W: FamilyWire, H: FamilyHttpHooks<W>>(
     mut body: ResponseBody,
     operation: &PreparedFamilyHttpOperation<W>,
@@ -776,11 +764,6 @@ const fn stream_refusal_fault<W: FamilyWire>(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "stream owner receives exact exchange state"
-)]
 async fn stream_body<W: FamilyWire, H: FamilyHttpHooks<W>>(
     body: &mut ResponseBody,
     operation: &PreparedFamilyHttpOperation<W>,

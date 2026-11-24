@@ -26,10 +26,6 @@ fn fresh_access_salt() -> Option<[u8; 32]> {
 }
 
 impl PreparedAgent {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Driver spawning wires the bounded control channels, durable startup, and terminal supervision before exposing handles"
-    )]
     pub(in crate::runtime) fn spawn(self) -> Agent {
         let event_pipeline = EventPipeline::new(self.events.clone());
         let ingress_capacity = self

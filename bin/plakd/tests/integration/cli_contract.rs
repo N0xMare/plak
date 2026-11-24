@@ -3,7 +3,6 @@
 //! These tests catch wiring/clap/path bugs that unit tests miss. No network.
 
 #![allow(
-    missing_docs,
     clippy::unwrap_used,
     clippy::expect_used,
     reason = "integration test crate may unwrap"

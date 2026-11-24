@@ -14,10 +14,6 @@ use crate::{
     telemetry_store,
 };
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Doctor assembles its read-only account, worker, storage, and environment checks into one report with a shared failure decision."
-)]
 pub(crate) fn run_doctor(
     services: &Services,
     stdout: &mut dyn io::Write,

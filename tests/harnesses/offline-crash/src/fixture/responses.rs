@@ -214,10 +214,6 @@ pub(super) async fn stall(
 /// non-secret binding, which decide what replay material it may consume.
 pub(super) type ReplayTarget<'a> = (&'a ResolvedModelDescriptor, Digest);
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the deterministic fixture keeps its three closed response scenarios visibly exhaustive"
-)]
 pub(super) fn loopback_response(
     round: u64,
     plan: &ValidatedRequestPlan,
@@ -468,10 +464,6 @@ pub(super) fn loopback_identity_for_attempt(
 ///
 /// A round the script does not name commits the fixture's ordinary final text,
 /// so a script only has to describe the rounds it cares about.
-#[allow(
-    clippy::too_many_lines,
-    reason = "closed scripted output variants and response assembly"
-)]
 fn scripted_response(
     round: u64,
     plan: &ValidatedRequestPlan,

@@ -3514,10 +3514,6 @@ async fn history_page_on_created_session_returns_page_or_honest_resnapshot() -> 
 
 #[cfg(feature = "sessions-sqlite")]
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "both paging directions, visibility, exactness and unchanged store authority share one SQLite fixture"
-)]
 async fn sqlite_history_inspection_pages_committed_content_without_mutation() -> TestResult {
     let request = |locator: SessionLocator, visibility, cursor| {
         SessionHistoryPageRequest::new(
@@ -5230,10 +5226,6 @@ async fn fork_receipt_retry_survives_later_heads_and_conflicting_reuse_fails() -
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "fresh target authority, exact publication, restart recovery, and prepublication continuity failures are one rebind contract"
-)]
 async fn rebind_requires_fresh_matching_authority_and_recovers_without_reauth() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
@@ -5945,10 +5937,6 @@ async fn sqlite_reboot_retries_attach_fresh_runtime_without_republishing_history
 
 #[cfg(feature = "sessions-sqlite")]
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the exact Working checkpoint and read-only diagnostic form one fixture"
-)]
 async fn sqlite_recovery_inspection_reports_working_obligations_without_mutation() -> TestResult {
     let directory = tempfile::tempdir()?;
     let database = directory.path().join("working-inspect.sqlite3");
@@ -6244,10 +6232,6 @@ async fn sqlite_recovery_inspection_is_exact_and_does_not_change_authority() -> 
 
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "fixture sizing, real capacity failure, cold exact recovery and next-turn continuity are one regression"
-)]
 async fn sqlite_terminal_capacity_failure_recovers_exactly_within_the_reserve() -> TestResult {
     use std::num::NonZeroUsize;
 
@@ -6703,10 +6687,6 @@ async fn exact_open_reports_stale_head_and_never_substitutes_current() -> TestRe
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the scripted fixture, persisted safe point, recovery classification, and no-mutation proof are one scenario"
-)]
 async fn scripted_working_checkpoint_is_recovery_only_and_never_mutated() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);

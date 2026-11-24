@@ -315,10 +315,6 @@ struct SchemaBudget {
     properties: usize,
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "closed V1 keyword matrix is clearest in one recursive authority"
-)]
 fn validate_schema_node(
     schema: &Value,
     root: bool,

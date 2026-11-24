@@ -15,10 +15,6 @@ use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Host open reconstructs projection, workflow settlements, queued submissions, and live attachments before exposing a ready session."
-    )]
     pub(super) async fn open(
         mut config: HostConfig<P>,
         actions: &'a crate::surface_protocol::UserActionReceiver<P>,

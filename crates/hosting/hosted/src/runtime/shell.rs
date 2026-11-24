@@ -162,10 +162,6 @@ fn publish_shell_startup<P: plakous_host_protocol::ProtocolExtension>(
 }
 
 #[allow(
-    clippy::too_many_lines,
-    reason = "Shell action dispatch preserves the individual model, profile, queue, compaction, and navigation refusal paths."
-)]
-#[allow(
     clippy::match_same_arms,
     reason = "the unreachable promptable mailbox flag is distinct from accepted no-op shell controls"
 )]
@@ -1040,11 +1036,6 @@ pub(super) fn api_root_binding(
     Ok((effort, composition))
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "Shell model selection resolves the exact catalog entry before rebinding and reporting its result to the prompt loop."
-)]
 pub(super) fn handle_shell_set_model<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut ShellHostConfig<P>,
     events: &Sender<P>,

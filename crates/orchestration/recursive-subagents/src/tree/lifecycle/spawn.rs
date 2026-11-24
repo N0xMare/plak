@@ -42,10 +42,6 @@ impl ProductAgentTree {
     /// # Errors
     ///
     /// As [`Self::spawn_reserve`], and the two placement refusals.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "spawn admission validates grants, roster, schema and capacity before reserving a single workspace identity"
-    )]
     pub fn spawn_reserve_on(
         &mut self,
         caller_id: &str,
@@ -311,10 +307,6 @@ impl ProductAgentTree {
     /// Writes the reserved spawn's rows once its mint has answered.
     /// `minted` is `None` exactly when the reservation
     /// carried no ticket — an `inherit` bind.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "spawn commit installs the reserved node, attempt, grant and workspace as one acknowledged transition"
-    )]
     pub fn spawn_commit(
         &mut self,
         reservation: SpawnReservation,

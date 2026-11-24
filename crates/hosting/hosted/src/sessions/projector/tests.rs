@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Recorded feed scenarios compare replay, page boundaries, retained rows, and cursor-CAS projections end to end."
-)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use std::collections::{BTreeMap, BTreeSet};

@@ -148,10 +148,6 @@ struct PreparedAgentEvent {
 }
 
 impl EventHub {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "all event scope and resource bindings are explicit"
-    )]
     pub(crate) fn new(
         agent_id: DriverInstanceId,
         session_id: SessionId,

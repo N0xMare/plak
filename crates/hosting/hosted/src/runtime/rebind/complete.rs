@@ -13,10 +13,6 @@ use super::{
 
 use crate::binding::TargetSelection;
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "durable source/target adoption requires complete host authority"
-)]
 pub(in crate::runtime) async fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
@@ -110,10 +106,6 @@ struct RebindTransition<'a, 'interrupt, P: plakous_host_protocol::ProtocolExtens
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Canonical rebind dispatch distinguishes published, unchanged, refused, and uncertain outcomes while preserving source restoration."
-    )]
     async fn dispatch(
         &mut self,
         source_was_detached: bool,

@@ -1541,10 +1541,6 @@ fn slow_actor_jobs_warn_with_content_free_labels_and_depths() -> TestResult {
 
 #[tokio::test]
 #[ignore = "opt-in large synthetic turn-boundary measurement"]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the opt-in measurement keeps fixture setup, timed commit and warm/cold probes together"
-)]
 async fn measure_large_session_turn_boundary_reads() -> TestResult {
     use crate::integrity_fixture as fixture;
     const READS: usize = DEFAULT_QUEUE_CAPACITY * 4;
@@ -1916,10 +1912,6 @@ async fn explicit_reclaim_clears_ready_and_pending_entries() -> TestResult {
 
 #[tokio::test]
 #[ignore = "opt-in release-profile small-delta cache-seeding measurement"]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the opt-in paired measurement keeps untimed fixture construction and timed probes together"
-)]
 async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
     use crate::integrity_fixture as fixture;
     // F1 defaults below; F2: HISTORY=4080, PAYLOAD=64, GENERATIONS=4.

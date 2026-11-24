@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Seeded carry scenarios construct imported history and bindings before testing replay acceptance and refusal"
-)]
-
 use super::*;
 
 #[tokio::test]

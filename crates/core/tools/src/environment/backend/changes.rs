@@ -2,8 +2,6 @@
 
 #![allow(
     missing_docs,
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
     reason = "unsupported operator execution seam, documented in spec 04 section 2.6"
 )]
 

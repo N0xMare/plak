@@ -19,6 +19,11 @@
 //! [`runtime::SurfaceHandler`] keep settings parsing and publication in the
 //! product, outside the host loop's authority.
 //!
+#![deny(
+    missing_docs,
+    rustdoc::broken_intra_doc_links,
+    rustdoc::private_intra_doc_links
+)]
 #![forbid(unsafe_code)]
 #![cfg_attr(
     test,

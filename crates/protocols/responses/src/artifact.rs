@@ -198,10 +198,6 @@ impl ResponsesArtifactBinding {
         )
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the closed exact artifact producer binding"
-    )]
     fn from_parts(
         dialect: ProtocolId,
         route: RouteId,
@@ -1009,10 +1005,6 @@ pub struct ResponsesArtifact {
 
 impl ResponsesArtifact {
     /// Captures complete family-native state and rejects stale or inconsistent facts.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the closed reconstructive artifact body"
-    )]
     pub fn new(
         binding: ResponsesArtifactBinding,
         production: ResponsesArtifactProduction,
@@ -1461,10 +1453,6 @@ impl fmt::Debug for ResponsesArtifact {
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the identity covers the complete closed producer binding"
-)]
 fn artifact_binding_identity(
     dialect: &ProtocolId,
     route: &RouteId,

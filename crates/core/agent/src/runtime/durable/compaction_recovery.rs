@@ -168,10 +168,6 @@ impl DurableSessionRuntime {
     }
 
     /// Reconciles one exact recovery-only compaction without redispatch.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Compaction recovery follows the recorded paid-work phase and never dispatches a replacement request for an ambiguous attempt"
-    )]
     #[doc(hidden)]
     pub async fn recover_compaction(
         &self,
@@ -703,10 +699,6 @@ pub(super) async fn close_abandoned_compaction(
     ))
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Compaction operation decoding checks workflow membership and the evidence vocabulary of each recorded phase"
-)]
 pub(in crate::runtime) fn decode_compaction_operations(
     checkpoint: &RuntimeCheckpoint,
     identity: DurableCompactionIdentity,
@@ -984,10 +976,6 @@ async fn recovery_complete_compaction_call(
         .await
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Recovery failure publication closes the compaction workflow while preserving paid ambiguity and terminal accounting"
-)]
 pub(super) async fn recovery_fail_compaction(
     owner: &mut RecoveryPublicationOwner<'_>,
     identity: DurableCompactionIdentity,
@@ -1163,10 +1151,6 @@ pub(in crate::runtime) fn decode_compaction_failure_evidence(
     Ok(error)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "restart publication consumes the exact persisted compaction operation tuple"
-)]
 pub(super) async fn recovery_publish_compaction_success(
     owner: &mut RecoveryPublicationOwner<'_>,
     identity: DurableCompactionIdentity,

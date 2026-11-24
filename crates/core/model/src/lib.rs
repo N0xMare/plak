@@ -4,6 +4,11 @@
 //! the object-safe model boundary, deterministic event assembly, and a
 //! provider-neutral model contracts.
 
+#![deny(
+    missing_docs,
+    rustdoc::broken_intra_doc_links,
+    rustdoc::private_intra_doc_links
+)]
 #![forbid(unsafe_code)]
 
 mod configuration;

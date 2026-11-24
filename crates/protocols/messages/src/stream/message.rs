@@ -293,10 +293,6 @@ impl MessagesStreamProjector {
         Ok(self.blocks.values().cloned().collect())
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "terminal validation and exact artifact sealing remain one ordered boundary"
-    )]
     pub(super) fn message_stop(
         &mut self,
         data: &str,

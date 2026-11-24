@@ -629,10 +629,6 @@ fn completed_provider_evidence(
     Ok(actual)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the pure fold consumes the closed persisted compaction authority tuple"
-)]
 pub(super) fn fold_compaction_success(
     manifest: &RuntimeManifest,
     identity: DurableCompactionIdentity,
@@ -738,10 +734,6 @@ pub(super) fn fold_compaction_success(
     })
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "native publication consumes the same closed persisted compaction tuple as semantic fold"
-)]
 pub(super) fn fold_native_compaction_success(
     manifest: &RuntimeManifest,
     identity: DurableCompactionIdentity,
@@ -847,14 +839,6 @@ pub(super) fn fold_native_compaction_success(
     })
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "The success fold combines selected history, provenance, operation closure, and workflow facts into one successor"
-)]
-#[allow(
-    clippy::too_many_arguments,
-    reason = "live and restart completion share the same exact persisted authority tuple"
-)]
 pub(in crate::runtime) async fn build_compaction_success_fold(
     manifest: &RuntimeManifest,
     identity: DurableCompactionIdentity,
@@ -1032,10 +1016,6 @@ pub(in crate::runtime) async fn build_compaction_success_fold(
 /// Fits and strictly shrinks; otherwise the tail-less successor under today's
 /// measurable strict-shrink rule. Both candidates are measured offline; the
 /// paid dispatch already happened once.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "native completion consumes the same exact persisted authority tuple"
-)]
 async fn build_native_success_fold(
     manifest: &RuntimeManifest,
     identity: DurableCompactionIdentity,

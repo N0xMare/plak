@@ -411,10 +411,6 @@ enum WakeRefusal {
 /// process notices at admission. An interrupt or close that lands before the
 /// Start is admitted ends the park instead; one that lands after binds the
 /// wake turn first and then cancels it, like any running turn.
-#[allow(
-    clippy::too_many_lines,
-    reason = "A parked-child wake binds its durable wake receipt before starting the instruction turn and reconciles every refusal window."
-)]
 async fn start_wake_turn(
     driver: &TreeDriver,
     live: &Arc<tokio::sync::Mutex<LiveChildTable>>,

@@ -1,9 +1,6 @@
 //! Product wire DTOs and extension classification for Plak hosts and clients.
 
-#![allow(
-    missing_docs,
-    reason = "Wire declarations retain their original schema documentation verbatim."
-)]
+#![deny(rustdoc::broken_intra_doc_links, rustdoc::private_intra_doc_links)]
 
 use plakous_host_protocol::observation::ObservationClass;
 use plakous_host_protocol::{

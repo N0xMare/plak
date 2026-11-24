@@ -159,10 +159,6 @@ fn mismatch(field: &'static str) -> ResponsesProviderConfigurationError {
     ResponsesProviderConfigurationError::PolicyMismatch(field)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear host step whose ordering is the invariant"
-)]
 fn validate_selected_behavior(
     selected: &SelectedProviderConfiguration,
     policy: ResponsesRequestPolicy,

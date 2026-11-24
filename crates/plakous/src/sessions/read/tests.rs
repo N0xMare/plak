@@ -75,10 +75,6 @@ fn byte_bounded_forward_pages_return_every_item_exactly_once() -> TestResult {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one history fixture covers every pass, an unnamed segment, and metadata omission"
-)]
 fn compaction_segment_projects_its_own_kind_without_the_summary() -> TestResult {
     use super::{CommittedCompactionFacts, flatten_history_items};
     use crate::sessions::{

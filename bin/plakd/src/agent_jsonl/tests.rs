@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "JSONL protocol scenarios retain complete ordered envelopes and additive projection assertions."
-)]
-
 use super::*;
 use crate::surface_protocol::HostEvent;
 use plakous_host_protocol::QueueDrainState;

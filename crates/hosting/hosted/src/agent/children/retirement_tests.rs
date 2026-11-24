@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Child retirement scenarios exercise real submissions, delayed acknowledgements, terminal ownership, and replayed result publication."
-)]
 use crate::runtime::test_kit::BlockOn as _;
 
 use super::bind::{StartupWorker, child_create_failure};

@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Capacity replacement exercises paid-fold failure and placeholder eligibility against the exact protected tool exchange"
-)]
-
 use super::*;
 
 /// A second capacity check can replace an entire multi-call exchange after the

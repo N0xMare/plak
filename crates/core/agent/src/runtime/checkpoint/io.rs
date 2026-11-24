@@ -327,14 +327,6 @@ impl DurabilityCommitTelemetry {
 /// recovery. Call sites retain `Box::pin` to bound already-large driver futures;
 /// inlining this protocol previously overflowed the nested local-composition
 /// scheduler's stack.
-#[allow(
-    clippy::too_many_lines,
-    reason = "The commit acknowledgement loop distinguishes absent writes from accepted receipts without retrying an ambiguous mutation"
-)]
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the bounded commit protocol consumes the exact store, head, identity, and telemetry tuple"
-)]
 pub(in crate::runtime) async fn commit_with_acknowledgement_recovery(
     store: &Arc<dyn SessionStore>,
     timeout: Duration,

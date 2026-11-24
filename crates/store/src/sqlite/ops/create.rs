@@ -8,10 +8,6 @@
 use super::super::*;
 use crate::memory::receipts::create_matches;
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the single create transaction stays linear so validation and publication are auditable"
-)]
 pub(in super::super) fn create(
     b: &mut Backend,
     r: &CreateSession,

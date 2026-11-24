@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Pending-decision scenarios persist grants and expiry state before reopening and exercising the exact one-shot capability"
-)]
-
 use super::*;
 
 mod description_reopen;

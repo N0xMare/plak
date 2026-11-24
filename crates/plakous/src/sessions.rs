@@ -714,7 +714,6 @@ mod lease_override {
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
-    clippy::too_many_lines,
     reason = "session workflow integration tests keep each complete fault/publication scenario together"
 )]
 mod tests;

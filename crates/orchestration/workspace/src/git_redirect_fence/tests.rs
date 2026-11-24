@@ -209,10 +209,6 @@ fn jj_shim_refuses_nested_or_linked_workspace_discovery() {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one exhaustive refusal table shares before/after repository and sibling invariants"
-)]
 fn jj_shim_refuses_repository_wide_operations() {
     if !jj_available() {
         return;
@@ -1236,10 +1232,6 @@ fn git_stdout(cwd: &Path, args: &[&str]) -> String {
 
 /// Refuses writes to pins, other copies' branches, the stash, and retention.
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the exhaustive coordination-write table checks one unchanged ref and index snapshot"
-)]
 fn guard_refuses_coordination_writes() {
     let parent = git_repo();
     git_ok(

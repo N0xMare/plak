@@ -654,10 +654,6 @@ fn start_promise<'js>(ctx: &Ctx<'js>, start: StartExecution) -> Result<Promise<'
         .map_err(|error| format!("embedded QuickJS execution failed to start: {error}"))
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "bootstrap native helper bindings are installed together"
-)]
 fn install_native_functions<'js>(
     ctx: &Ctx<'js>,
     state: &Rc<RefCell<ExecutionState>>,

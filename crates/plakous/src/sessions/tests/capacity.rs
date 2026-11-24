@@ -120,10 +120,6 @@ async fn start_rejection(session: &OpenedSession, command: &str) -> TestResult<C
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "mid-turn refusal, pre-admission refusal and the deletion remedy are one store lifetime"
-)]
 async fn sqlite_ordinary_pressure_fails_the_running_turn_then_refuses_roots_until_deletion()
 -> TestResult {
     let directory = tempfile::tempdir()?;
@@ -623,10 +619,6 @@ async fn sqlite_a_subordinate_turn_crossing_the_mark_fails_once_and_settles_past
 /// a repeat open writes nothing, and a store opened over its configured limit
 /// still opens.
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the refused settlement, reserve recovery and over-limit reopen are one store lifetime"
-)]
 async fn sqlite_recovery_writes_into_the_reserve_and_an_over_limit_store_opens() -> TestResult {
     // Sixteen is the smallest limit whose settlement threshold sits below it:
     // ordinary stops at 14, settlement at 15, recovery at 16.

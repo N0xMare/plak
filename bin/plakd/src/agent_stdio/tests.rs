@@ -1380,10 +1380,6 @@ fn saturated_mailbox_cannot_attribute_unknown_refusal_to_previous_turn() {
 
 #[cfg(unix)]
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one actual stdio session spans gated admission, refusal and persisted queue checks"
-)]
 fn actual_jsonl_refusal_pauses_followup_until_resume_queue() {
     use plakous_offline_crash_harness::BoundaryController;
     use plakous_offline_crash_harness::protocol::CrashBoundary;

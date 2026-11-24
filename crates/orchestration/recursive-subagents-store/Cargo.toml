@@ -17,10 +17,6 @@ layer = "host"
 class = "published-internal"
 neutral = true
 
-[package.metadata.plakous-lint]
-too-many-lines-ceiling = 9
-reason = "Existing item-local schema, row-write and durability-test debt; table-local read codecs need no line-count allowance and no crate-wide lint allowances remain."
-
 [dependencies]
 # Repository-only commit tracing; never selected by a default or maintainer build.
 plakous-store = { workspace = true, optional = true }

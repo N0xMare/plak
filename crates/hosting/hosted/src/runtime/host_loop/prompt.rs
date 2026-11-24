@@ -261,10 +261,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "One prompt admission owns preparation, interrupt handling, dispatch, and terminal publication as an ordered host transition."
-    )]
     async fn run_prompt_inner(
         &mut self,
         raw_text: String,
@@ -471,10 +467,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         Ok(std::ops::ControlFlow::Continue(()))
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Prompt preflight reconciles queue identity, product pressure, recovery, and scheduled compaction before admitting inference."
-    )]
     async fn preflight_prompt(
         &mut self,
         input: PromptInput,
@@ -745,10 +737,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         crate::node::drive_turns(self, &mut one_shot, turn).await
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Prompt completion publishes the canonical terminal before deciding queue continuation, transient retry, and child-wake suppression."
-    )]
     async fn finish_prompt(
         &mut self,
         input: PromptInput,
@@ -1098,10 +1086,6 @@ impl<'o, P: plakous_host_protocol::ProtocolExtension>
     type Terminal = CliResult<RootTerminal>;
     type Settled = CliResult<HostStep>;
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Prompt dispatch records delivery and reconciles definite refusal versus admitted canonical work before returning to the host loop."
-    )]
     async fn drive(
         &mut self,
         _one_shot: &mut Option<&'o mut super::super::oneshot::OneShotState>,

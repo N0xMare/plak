@@ -278,10 +278,6 @@ impl ProductStateRoots {
         self.child_runtime.clone()
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "Takes the three absolute state roots and each injected product seam (telemetry, tree store, roster, sidecars, OpenRouter and platform credentials, session records) as separate trait objects so tests can replace each one."
-    )]
     /// Bind absolute state roots to the product-supplied store and service authorities.
     ///
     /// # Errors

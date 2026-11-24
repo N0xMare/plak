@@ -16,12 +16,6 @@ exclude.workspace = true
 layer = "protocol"
 class = "published-internal"
 
-[package.metadata.plakous-lint]
-too-many-lines-ceiling = 25
-too-many-arguments-ceiling = 14
-large-file-ceiling = 0
-reason = "Existing item-local protocol debt; tool starts and terminal lifecycle checks use typed inputs."
-
 [dependencies]
 base64.workspace = true
 futures-core.workspace = true

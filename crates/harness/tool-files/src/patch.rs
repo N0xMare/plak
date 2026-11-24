@@ -105,10 +105,6 @@ struct ParsedPatch {
 }
 
 impl ToolExecutor for ApplyPatchTool {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the patch preflight keeps parsing, exact reads, transformation, and the sole mutation boundary visibly ordered"
-    )]
     fn execute(self: Arc<Self>, invocation: ToolInvocation, context: ToolContext) -> ToolFuture {
         Box::pin(async move {
             context.check_cancelled()?;

@@ -32,10 +32,6 @@ pub(in super::super) fn commit_observed(
     commit_impl(backend, request, true)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the single SQLite transaction keeps validate-then-publish atomicity auditable"
-)]
 fn commit_impl(
     backend: &mut Backend,
     request: &CommitCheckpoint,

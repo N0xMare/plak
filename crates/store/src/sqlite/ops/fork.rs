@@ -8,10 +8,6 @@
 use super::super::*;
 
 // Keeping the full transaction linear makes its validate-then-publish boundary auditable.
-#[allow(
-    clippy::too_many_lines,
-    reason = "the single transaction remains linear so validation and publication are auditable"
-)]
 pub(in super::super) fn fork(
     b: &mut Backend,
     r: &ForkBranch,
@@ -255,10 +251,6 @@ pub(in super::super) fn recover_fork(
     Ok(receipt)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "linear receipt decode keeps historical source/target validation auditable"
-)]
 fn load_fork(
     c: &Connection,
     workflow_id: SessionWorkflowId,

@@ -9,10 +9,6 @@
 //! They lived in the hosted crate's unit tests until the product half moved
 //! here. Names are unchanged.
 
-#![allow(
-    clippy::too_many_lines,
-    reason = "Composition scenarios drive real hosted compaction and clear workflows through publication and reopen."
-)]
 #![allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
 
 use plakous_host_protocol::status::HostPhase;

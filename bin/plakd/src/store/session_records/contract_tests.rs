@@ -1,10 +1,5 @@
 //! One suite, run over the memory double and the product SQLite store.
 
-#![allow(
-    clippy::too_many_lines,
-    reason = "The shared store contract runs complete CAS, workflow, queue, and successor-publication scenarios against both stores."
-)]
-
 use std::path::{Path, PathBuf};
 
 use super::{SessionRecordStore, SqliteSessionStore};

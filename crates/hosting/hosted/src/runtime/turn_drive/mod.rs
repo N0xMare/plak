@@ -451,10 +451,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "The turn driver selects canonical completion, live events, operator actions, and interrupt escalation under one terminal fence."
-    )]
     async fn on_wake(
         &mut self,
         wake: crate::node::TurnWake<Self::Result, Self::Event, RootWake>,

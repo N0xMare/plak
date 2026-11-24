@@ -764,10 +764,6 @@ impl MemorySessionStore {
         Ok(PruneReceipt::from_store(head, horizon_revision, pruned))
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one atomic fork validates and publishes the complete old/new authority tuple"
-    )]
     fn fork_sync(&self, request: &ForkBranch) -> Result<ForkReceipt, SessionStoreError> {
         let target = SessionRef::new(
             request.source().session().session_id(),

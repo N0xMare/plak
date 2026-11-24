@@ -753,10 +753,6 @@ fn owner_live() -> TopologyError {
 }
 
 /// [`recover_child`] for a child its caller holds.
-#[allow(
-    clippy::too_many_lines,
-    reason = "Child recovery reconciles tree ownership and canonical terminal state before reopening or retiring the existing attempt."
-)]
 async fn recover_claimed_child(
     runtime: &ProductTopologyRuntime,
     port: &dyn ChildSessionPort,

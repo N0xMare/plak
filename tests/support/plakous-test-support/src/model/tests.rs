@@ -402,10 +402,6 @@ fn start_rejects_foreign_plan_before_consuming_scenario() -> Result<(), Box<dyn 
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one contract test keeps locator bounds, scope, stage, redaction, and tamper cases together"
-)]
 fn recovery_locator_is_exact_versioned_redacted_and_tamper_evident()
 -> Result<(), Box<dyn std::error::Error>> {
     let ordinary = model(
@@ -569,10 +565,6 @@ fn recovery_locator_is_exact_versioned_redacted_and_tamper_evident()
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one restart matrix proves every closed scripted recovery classification and no duplicate start"
-)]
 fn scripted_recovery_survives_restart_and_starts_each_locator_at_most_once()
 -> Result<(), Box<dyn std::error::Error>> {
     let shared = ScriptedRecoveryState::new();

@@ -146,10 +146,6 @@ impl AnthropicLanguageModel {
     /// Runs the production executor through an explicitly trusted HTTPS loopback transport.
     /// Credential authority and request headers remain bound to the official API route.
     #[doc(hidden)]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one exact API binding names its whole tuple"
-    )]
     pub fn configured_with_local_transport(
         source: Arc<AnthropicKeySource>,
         account: &str,
@@ -187,14 +183,6 @@ impl AnthropicLanguageModel {
         .map(|(configured, _)| configured)
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Bind the Platform route, context evidence, selected configuration and HTTP executor in one admission transaction."
-    )]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one exact API binding names its whole tuple"
-    )]
     fn build(
         source: Arc<AnthropicKeySource>,
         account: &str,
@@ -435,10 +423,6 @@ impl LanguageModel for AnthropicLanguageModel {
             Ok(self.authority.clone())
         })
     }
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Validate Platform authority and seal the complete Messages wire, output reservation and replay projection before dispatch."
-    )]
     fn prepare_call(
         self: Arc<Self>,
         plan: ValidatedRequestPlan,
@@ -749,10 +733,6 @@ fn caller_context(
     )
     .map_err(configuration_error)
 }
-#[allow(
-    clippy::too_many_lines,
-    reason = "one validation boundary keeps descriptor surface, provenance, freshness, and factory-route checks adjacent"
-)]
 fn validate_descriptor(
     resolved: &ResolvedAnthropicMessages,
     factory_route: Option<&AnthropicPlatformRoute>,

@@ -10,7 +10,6 @@
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
-    missing_docs,
     reason = "private real-process test harness"
 )]
 

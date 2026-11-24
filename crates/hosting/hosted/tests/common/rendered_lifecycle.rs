@@ -5,10 +5,6 @@
 //! production CLI code. No production behaviour.
 
 #[cfg(test)]
-#[allow(
-    clippy::too_many_lines,
-    reason = "offline golden renderer walks tool-result, compaction, child-mail, and mid-session surfaces"
-)]
 mod suite {
     use std::collections::BTreeMap;
     use std::fmt::Write as _;

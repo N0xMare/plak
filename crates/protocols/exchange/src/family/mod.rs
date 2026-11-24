@@ -1,11 +1,5 @@
 //! One admitted attempt and HTTP/SSE host; wire grammars remain family-owned.
 
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
-    reason = "closed protocol vocabulary and explicit attempt authority"
-)]
-
 use std::fmt::Debug;
 use std::sync::Arc;
 

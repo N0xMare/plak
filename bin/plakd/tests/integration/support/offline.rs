@@ -2,7 +2,6 @@
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
-    missing_docs,
     reason = "private real-process test harness"
 )]
 use serde_json::{Value, json};

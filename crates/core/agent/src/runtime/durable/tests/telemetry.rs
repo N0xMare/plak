@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Telemetry scenarios compare provider, compaction, retention, and recovered-turn observations against durable authority"
-)]
-
 use super::*;
 
 pub(super) struct RecordingTelemetrySink {

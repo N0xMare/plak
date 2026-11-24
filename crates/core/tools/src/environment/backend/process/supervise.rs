@@ -107,10 +107,6 @@ pub(super) fn sleep_until_next_poll(started: Instant, deadline: Instant) {
     ));
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the shared supervisor owns the terminal strategy, limits, cancellation and publication inputs"
-)]
 pub(super) fn supervise_joined_process(
     resources: &mut JoinedProcessResources,
     limits: ExecutionEnvironmentLimits,
@@ -218,10 +214,6 @@ pub(super) const fn joined_process_final_status(
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "process setup rollback and joined cleanup are kept in one auditable supervisor"
-)]
 pub(super) fn supervise_host_process(
     process: &HostProcessContext,
     cwd: PathBuf,

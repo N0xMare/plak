@@ -1,7 +1,6 @@
 //! Process-level diagnostics contracts for optional `PLAK_LOG` file logging.
 
 #![allow(
-    missing_docs,
     clippy::unwrap_used,
     clippy::expect_used,
     reason = "integration test crate may unwrap"

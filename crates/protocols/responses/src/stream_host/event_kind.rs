@@ -246,10 +246,6 @@ impl<Response, ProviderError> ResponsesStreamEventKind<Response, ProviderError> 
     /// # Errors
     ///
     /// Propagates `ResponsesLifecycleError` from the pure lifecycle machine.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one linear host step whose ordering is the invariant"
-    )]
     pub fn apply_intermediate_lifecycle(
         &self,
         lifecycle: &mut ResponsesLifecycle,
@@ -423,10 +419,6 @@ impl<Response, ProviderError> ResponsesStreamEventKind<Response, ProviderError> 
 impl<Response: fmt::Debug, ProviderError: fmt::Debug> fmt::Debug
     for ResponsesStreamEventKind<Response, ProviderError>
 {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one linear host step whose ordering is the invariant"
-    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Redacted structural Debug: never dumps provider payloads.
         match self {

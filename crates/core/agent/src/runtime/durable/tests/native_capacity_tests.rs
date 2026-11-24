@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Native capacity scenarios preserve provider replay artifacts while checking preflight and anchored request limits"
-)]
-
 use super::*;
 
 fn inflated_compaction_history(

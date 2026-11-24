@@ -51,10 +51,6 @@ pub(super) fn finish_continue_session(
     })
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Run finishing receives the independent clap binding fields, prompt, output choice, and existing RunBounds without inventing a second binding type."
-)]
 pub(super) fn finish_run(
     account: String,
     accounts: Vec<plakous_host_protocol::wire::AccountChoice>,

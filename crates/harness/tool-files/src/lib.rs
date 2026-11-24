@@ -238,10 +238,6 @@ impl ToolPack for FilesToolPack {
         ])
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the four vocabularies of one pack stay in one menu"
-    )]
     fn menu(&self, presentation: CodingPresentation) -> Result<Vec<MenuEntry>, ToolRuntimeError> {
         let read_file = tool_name(
             READ_FILE_CAPABILITY_NAME,

@@ -25,6 +25,11 @@
 //! use plakous::live_platform::PaidAuthorityStore;
 //! ```
 
+#![deny(
+    missing_docs,
+    rustdoc::broken_intra_doc_links,
+    rustdoc::private_intra_doc_links
+)]
 #![allow(
     clippy::doc_markdown,
     reason = "facade docs name provider brands and exact feature identifiers"
@@ -1053,10 +1058,6 @@ pub mod openrouter {
             )
         }
 
-        #[allow(
-            clippy::too_many_arguments,
-            reason = "closed family contract axes stay explicit at the facade boundary"
-        )]
         fn custom_context_contract_for(
             &self,
             reported_context_window: u64,

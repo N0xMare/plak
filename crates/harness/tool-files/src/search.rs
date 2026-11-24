@@ -778,10 +778,6 @@ struct SearchArgs {
 }
 
 impl ToolExecutor for SearchRepositoryTool {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "search execute keeps query, stamp, and bounded match formatting together"
-    )]
     fn execute(self: Arc<Self>, invocation: ToolInvocation, context: ToolContext) -> ToolFuture {
         Box::pin(async move {
             context.check_cancelled()?;

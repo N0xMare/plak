@@ -486,10 +486,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         self.try_child_wake_with_jobs(now, jobs).await
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Child wake admission reconciles unread mail, joined jobs, suppression, and durable wake preparation before dispatch."
-    )]
     async fn try_child_wake_with_jobs(
         &mut self,
         now: Instant,

@@ -56,10 +56,6 @@ struct ContextScopeContent<'a> {
 }
 
 impl ContextScope {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the exact binding/projection scope"
-    )]
     pub(crate) fn new(
         protocol_family: ProtocolId,
         protocol: ProtocolId,

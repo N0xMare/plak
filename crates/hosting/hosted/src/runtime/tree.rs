@@ -1022,10 +1022,6 @@ pub(super) async fn dispatch_topology_navigator<P: plakous_host_protocol::Protoc
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one idle tool dispatch names its whole exact context"
-)]
 pub(super) async fn dispatch_invoke_tool<P: plakous_host_protocol::ProtocolExtension>(
     rows: &dyn TopologyRows,
     store: &dyn crate::session_store::SessionRecordStore,

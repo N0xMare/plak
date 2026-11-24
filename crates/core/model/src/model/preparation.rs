@@ -865,10 +865,6 @@ impl PreparedOutputLimit {
     ///
     /// Rejects stale/foreign authority, invalid revisions, or certificate
     /// identities outside the context-budget domain.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "hard-cap evidence binds the complete prepared model scope"
-    )]
     pub fn release_verified_hard_cap(
         tokens: NonZeroU32,
         certificate: Digest,
@@ -1172,10 +1168,6 @@ fn prepared_output_scope_identity(
     )
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "output certificate scope is the complete exact model scope"
-)]
 fn prepared_output_scope_identity_from_axes(
     descriptor_binding: Digest,
     protocol_family: &ProtocolId,

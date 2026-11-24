@@ -8,11 +8,6 @@
     missing_docs,
     reason = "unsupported sibling-composition DTOs are documented by the module contract"
 )]
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
-    reason = "the narrow unsupported seam is consumed only by official sibling composition"
-)]
 
 use std::{future::Future, pin::Pin, sync::Arc};
 

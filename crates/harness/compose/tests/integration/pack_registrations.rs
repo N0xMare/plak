@@ -3,7 +3,7 @@
 //! One pack knows what it registers; only the composition knows what the four
 //! of them register together, so the count lives here.
 
-#![allow(missing_docs, clippy::expect_used, reason = "integration test crate")]
+#![allow(clippy::expect_used, reason = "integration test crate")]
 
 use plakous_compose::standard_coding_packs_in_memory;
 use std::error::Error;

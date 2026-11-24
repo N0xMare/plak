@@ -14,9 +14,7 @@
 //! for.
 
 #![allow(
-    clippy::missing_errors_doc,
     clippy::missing_panics_doc,
-    clippy::must_use_candidate,
     clippy::map_unwrap_or,
     reason = "the set this crate actually trips"
 )]

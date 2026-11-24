@@ -1,9 +1,5 @@
 //! Exercises the production product binding without sending inference requests.
 #![allow(
-    clippy::too_many_lines,
-    reason = "Platform session scenarios reopen enrolled tool tables and refuse obsolete native and API construction shapes."
-)]
-#![allow(
     clippy::unwrap_used,
     clippy::panic,
     reason = "offline regression assertions"

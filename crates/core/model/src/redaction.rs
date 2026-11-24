@@ -9,7 +9,6 @@
 //! change must also force that host's stored rows to be rebuilt.
 
 #![allow(
-    clippy::must_use_candidate,
     missing_docs,
     reason = "unsupported sibling seam is documented as one implementation tier"
 )]

@@ -54,10 +54,6 @@ pub(in super::super) enum CompactionStreamError {
 }
 
 impl LiveCompaction {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one exact compaction operation carries its immutable authority and sole prepared capability"
-    )]
     pub(in super::super) fn prepared(
         origin: CompactOrigin,
         active: Option<PromptCommand>,

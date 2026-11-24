@@ -5,6 +5,11 @@
 //! invocations, applies provider-neutral policy, and supplies owned execution
 //! contexts to tools.
 
+#![deny(
+    missing_docs,
+    rustdoc::broken_intra_doc_links,
+    rustdoc::private_intra_doc_links
+)]
 #![forbid(unsafe_code)]
 
 #[cfg(not(any(unix, all(target_arch = "wasm32", target_os = "unknown"))))]

@@ -10,10 +10,6 @@ use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "A restored turn retains its original admission and terminal fence while reconnecting host events and pending cancel settlement."
-    )]
     pub(super) async fn drive_restored_turn(&mut self) -> CliResult<HostStep> {
         let Some(recovered) = self.opened.take_recovered_turn() else {
             return Ok(HostStep::Continue);

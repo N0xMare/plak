@@ -10,9 +10,7 @@
 // lifecycle policy bool tables.
 #![allow(
     clippy::doc_markdown,
-    clippy::missing_errors_doc,
     clippy::struct_excessive_bools,
-    clippy::must_use_candidate,
     reason = "product names in ownership docs; pure Result helpers; policy bool tables"
 )]
 #![cfg_attr(

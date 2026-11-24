@@ -1024,10 +1024,6 @@ impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
         })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Offline binding selects each scripted crash shape and its recovery evidence before constructing the test runtime."
-    )]
     fn bind(
         &self,
         start: plakous_hosted::agent_tree_tools::SpawnStart,

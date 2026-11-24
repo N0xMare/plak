@@ -371,10 +371,6 @@ impl ResponseProjectorCore {
     }
 
     /// Start a tool block with full correlation / emit control (OpenAI custom/program).
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "matches wire correlation fields at tool start"
-    )]
     pub fn start_tool_block_with(
         &mut self,
         provider_index: u32,

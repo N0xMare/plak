@@ -294,10 +294,6 @@ impl Writer {
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "The operation-kind encoder enumerates the complete closed tag vocabulary beside its payload writes"
-    )]
     pub(super) fn operation_kind(
         &mut self,
         kind: &DurableOperationKind,

@@ -619,10 +619,6 @@ impl ProcessSessionTools {
     /// # Errors
     ///
     /// Returns an invalid-definition error if the locked registration cannot be constructed.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the four exact registrations and one shared binding are reviewed together"
-    )]
     pub fn registrations(self: Arc<Self>) -> Result<Vec<ToolRegistration>, ToolRuntimeError> {
         if self.shell.executable() != Path::new("/bin/sh")
             || self.shell.arguments() != ["-c"]
@@ -850,10 +846,6 @@ impl ProcessSessionTools {
     /// `max_bytes`, with the cursor advanced to the end. A chatty process is
     /// then summarised per call instead of paged 40 KB at a time, which a
     /// model polling a long test run could never catch up with.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one observation coordinates output draining, quiet holds and wake attribution"
-    )]
     pub(crate) async fn observe_summarized(
         environment: &plakous_tools::ExecutionEnvironment,
         handle: u64,
@@ -1021,11 +1013,6 @@ impl ProcessSessionTools {
         }
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "one observer owns output cursor, joined proof and cancellation through the bounded poll"
-    )]
     pub(crate) async fn observe_bounded_with_update(
         environment: &plakous_tools::ExecutionEnvironment,
         handle: u64,

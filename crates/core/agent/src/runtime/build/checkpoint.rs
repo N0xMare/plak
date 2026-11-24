@@ -279,14 +279,6 @@ pub(in crate::runtime) fn harness_plan_component(
     runtime_component(RuntimeComponentKind::HarnessPlan, bytes)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Manifest binding reconstruction resolves the frozen registry and presentation against the validated runtime binding"
-)]
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the checkpoint binding consumes the complete live reconstruction authority tuple"
-)]
 pub(in crate::runtime) fn runtime_manifest_binding_and_tools(
     _model: &dyn LanguageModel,
     provider_configuration: &CompiledProviderConfiguration,
@@ -413,10 +405,6 @@ pub(in crate::runtime) fn runtime_manifest_binding_and_tools(
     Ok((binding, tool_manifest))
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "genesis closes the complete manifest groups in one auditable constructor"
-)]
 pub(in crate::runtime) fn initial_memory_checkpoint(
     session_id: SessionId,
     branch_id: BranchId,

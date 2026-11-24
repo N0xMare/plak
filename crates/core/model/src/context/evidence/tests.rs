@@ -2,10 +2,6 @@ use super::super::tests::{authority, timestamp};
 use super::*;
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one adversarial matrix proves every recomputed evidence-class forgery fails"
-)]
 fn forged_recomputed_wire_cannot_bypass_evidence_class_invariants() {
     let freshness = EvidenceFreshness::new(timestamp(1), Some(timestamp(100))).expect("freshness");
     let authority_binding = authority(b"authority");

@@ -1011,10 +1011,6 @@ impl ProcessSessionTools {
         })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one multi-session wait keeps terminal reporting and notice attribution together"
-    )]
     pub(crate) async fn await_canonical(
         environment: &plakous_tools::ExecutionEnvironment,
         request: &CanonicalProcessAwaitRequest,

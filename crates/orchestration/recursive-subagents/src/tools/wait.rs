@@ -85,10 +85,6 @@ impl TopologyTool {
     /// children, their mail and its own processes, with one receipt kind.
     /// `presented` is the presentation's own request; a same-call replay
     /// must present it again.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "wait admission retains its provisional receipt through wake, timeout, cancellation and publication"
-    )]
     pub(super) async fn await_operation<R>(
         &self,
         operation_id: &str,
@@ -386,10 +382,6 @@ impl TopologyTool {
     /// Attaches the named job rows, applies the output budget, and records
     /// the receipt once the result exists: a result too large to return
     /// leaves its mail and its rows for the next await.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one await's identity, request and observation"
-    )]
     fn finish_await<R: serde::Serialize>(
         &self,
         tree: &mut ProductAgentTree,

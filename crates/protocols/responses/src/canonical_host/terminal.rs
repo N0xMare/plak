@@ -198,10 +198,6 @@ pub fn project_canonical_terminal(
 ///
 /// In addition to ordinary terminal errors, rejects caller/output references
 /// to absent or already completed programs and duplicate program terminals.
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear host step whose ordering is the invariant"
-)]
 pub fn project_canonical_terminal_with_hosted_programs(
     terminal: &ResponsesTerminalProjection,
     data: &ResponsesCanonicalDialectData,
@@ -387,10 +383,6 @@ pub(super) fn validate_router_metadata(
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear host step whose ordering is the invariant"
-)]
 pub(super) fn terminal_item_blocks(
     item: &ResponsesOutputItem,
     _replay: &plakous_model::ReplayEnvelope,
@@ -611,10 +603,6 @@ pub(super) fn terminal_item_blocks(
     Ok(blocks)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "tool projection validates every identity-bearing wire fact together"
-)]
 pub(super) fn terminal_tool_block(
     remote_call_id: &str,
     name: &str,

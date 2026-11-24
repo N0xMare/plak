@@ -236,10 +236,6 @@ impl BundleBuilder {
         })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Incremental bundle construction traverses the pending child graph while applying one bounded builder step"
-    )]
     pub(super) fn advance(
         &mut self,
         checkpoint: &RuntimeCheckpoint,

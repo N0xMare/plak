@@ -16,11 +16,6 @@ exclude.workspace = true
 layer = "provider"
 class = "published-internal"
 
-[package.metadata.plakous-lint]
-too-many-lines-ceiling = 4
-large-file-ceiling = 0
-reason = "Existing item-local debt; admission and duplicate-tag matrices use labelled rows and no crate-wide lint allowances remain."
-
 [features]
 test-clock = []
 

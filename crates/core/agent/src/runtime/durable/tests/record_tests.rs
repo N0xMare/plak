@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Operation-record scenarios encode provider and tool evidence and validate the reconstructed durable lifecycle"
-)]
-
 use super::*;
 
 pub(super) fn durable_owner(agent: &Agent) -> Result<RunId, &'static str> {

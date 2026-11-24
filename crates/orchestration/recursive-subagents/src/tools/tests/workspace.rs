@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "workspace scenarios verify spawn, seal, adoption and retained candidate evidence together"
-)]
-
 //! Workspace copies: minting, discard, seals and adoption.
 
 use super::*;

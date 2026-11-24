@@ -759,10 +759,6 @@ pub(in crate::agent) fn child_plan_state_authority(
     Ok(authority)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Native child binding names the parent authority, child identity, selected tuple, durable reopen state, tool fence, and output bound."
-)]
 pub(in crate::agent) async fn child_session_runtime_binding(
     parent: &SpawnParent,
     agent_id: &str,
@@ -901,10 +897,6 @@ pub(super) async fn production_child_runtime(
     .await
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "OpenRouter child binding carries its created output bound beside the exact parent, account, model, effort, and tool fence."
-)]
 pub(in crate::agent) async fn openrouter_child_runtime_binding(
     created_output_bound: Option<OutputBoundDisposition>,
     parent: &SpawnParent,
@@ -1077,10 +1069,6 @@ pub(in crate::agent) fn openrouter_frozen_pin(
     ))
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Child specification resolution reconstructs native provider evidence, reasoning admission, frozen tools, and the exact spawned identity."
-)]
 /// Reconstruct a child's exact session specification from its frozen parent and roster facts.
 ///
 /// # Errors
@@ -1279,10 +1267,6 @@ pub(in crate::agent) fn child_session_workspace_root(
 /// turn never bound.
 /// `pub(crate)` so rendered prompt goldens can emit the child's first Start
 /// user turn. Production behaviour is unchanged.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one Start prompt is assembled from exactly these node facts"
-)]
 pub(crate) fn assignment_start_prompt(
     start_kind: ChildAssignmentStartKind,
     template: &str,

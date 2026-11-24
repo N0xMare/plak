@@ -32,10 +32,6 @@ impl ToolProjectionTargetV2 {
     ///
     /// Returns an error when any target axis is empty, oversized, non-ASCII,
     /// model-substituted, or uses the reserved zero projection revision.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the release-owned projection target is one closed exact authority tuple"
-    )]
     pub fn new(
         integration_class: crate::IntegrationClass,
         protocol: impl Into<String>,
@@ -309,10 +305,6 @@ impl ProjectedToolDefinitionV2 {
     /// # Errors
     ///
     /// Returns an error when the common definition axes or grammar are invalid.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "every presentation axis is explicit"
-    )]
     pub fn new_custom(
         canonical_name: ToolName,
         mut covered_canonical_names: Vec<ToolName>,

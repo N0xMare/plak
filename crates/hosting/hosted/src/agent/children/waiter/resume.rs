@@ -70,10 +70,6 @@ pub(in crate::agent::children) async fn wait_transient_gate(
     .await
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Transient child resume revalidates ownership, pending instructions, and canonical turn state before reconnecting the same attempt."
-)]
 pub(super) async fn try_transient_resume(
     driver: &TreeDriver,
     live: &Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,

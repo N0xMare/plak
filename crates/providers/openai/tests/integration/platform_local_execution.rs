@@ -257,10 +257,6 @@ async fn read_wire_request(stream: &mut TlsStream<TcpStream>) -> io::Result<Vec<
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one e2e keeps local TLS, exact wire, and terminal authority contiguous"
-)]
 async fn missing_context_contract_rejects_before_openai_tls_or_key_resolution() -> TestResult {
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["localhost".to_owned(), "127.0.0.1".to_owned()])?;

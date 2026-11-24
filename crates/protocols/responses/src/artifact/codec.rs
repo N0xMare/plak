@@ -313,10 +313,6 @@ fn decode_expiry(reader: &mut Reader<'_>) -> Result<Option<Timestamp>, Responses
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the canonical codec intentionally writes one closed schema in field order"
-)]
 pub(super) fn encode_body(
     artifact: &ResponsesArtifact,
 ) -> Result<EncodedBody, ResponsesArtifactError> {

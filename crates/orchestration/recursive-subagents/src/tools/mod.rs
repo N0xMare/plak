@@ -431,10 +431,6 @@ impl TopologyTool {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one dispatch match lowers every topology tool request to its typed executor and receipt"
-    )]
     async fn run_named(
         &self,
         operation_id: &str,

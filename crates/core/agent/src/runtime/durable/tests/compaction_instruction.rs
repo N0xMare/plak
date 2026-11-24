@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Instruction compaction scenarios check provider failures, placeholder fallback, and instruction precedence without a second paid call"
-)]
-
 use super::*;
 use crate::runtime::compaction::instruction::CompactionInstruction;
 

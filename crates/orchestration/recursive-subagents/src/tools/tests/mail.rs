@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "mail scenarios retain startup and followup delivery barriers through receipt settlement"
-)]
-
 //! Sends, followups, steering and redelivery.
 
 use super::*;

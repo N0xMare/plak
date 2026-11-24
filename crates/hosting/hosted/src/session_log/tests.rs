@@ -745,10 +745,6 @@ fn serde_encoding_keeps_every_event_on_one_valid_physical_line() {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one table pins the small preview rule set"
-)]
 fn preview_redaction_rules_table() {
     // Token-shaped inputs are split with concat! so secret scanners do not
     // flag these synthetic values in the source.

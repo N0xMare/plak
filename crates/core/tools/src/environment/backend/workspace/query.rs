@@ -241,10 +241,6 @@ pub(super) fn list_repository_query_paths(
     })
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "literal and regex matching stay one bounded scan of each admitted file"
-)]
 pub(super) fn scan_repository_query_files(
     query: &RepositoryQuery,
     control: &OperationContext,

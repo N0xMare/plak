@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "The idle queue-save failure scenario verifies safe logging and preservation of both queued input and the draft."
-)]
-
 use super::*;
 use crate::host_service::HostService;
 use crate::runtime::recover_tests::{script, scripted_host_with};

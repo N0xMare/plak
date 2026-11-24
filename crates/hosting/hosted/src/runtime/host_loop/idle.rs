@@ -196,10 +196,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     }
 
     #[allow(
-        clippy::too_many_lines,
-        reason = "The idle owner arbitrates operator intents, queued work, child wakes, transient retries, and shutdown without a second dispatcher."
-    )]
-    #[allow(
         clippy::match_same_arms,
         reason = "the unreachable promptable mailbox flag is distinct from an accepted idle background control"
     )]

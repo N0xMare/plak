@@ -720,10 +720,6 @@ impl<P: ProtocolExtension> HostService<P> {
     /// `request` names the session request that caused the switch, if one
     /// did: the attachment that asked and its client's id for it. Returns
     /// the attachments it ended.
-    #[allow(
-        clippy::must_use_candidate,
-        reason = "moving attachments is the effect; callers may ignore the ended-attachment summary"
-    )]
     pub fn move_attachments(
         &self,
         node: &NodeAddress,
@@ -1146,10 +1142,6 @@ impl<P: ProtocolExtension> HostService<P> {
 
     /// Takes everything queued for `attachment`. A dropped attachment
     /// yields its resync-required once and is then gone.
-    #[allow(
-        clippy::must_use_candidate,
-        reason = "draining is the effect even when a caller discards the queued observations"
-    )]
     pub fn take(&self, attachment: AttachmentId) -> Vec<Outbound<P>> {
         self.take_shared(attachment)
             .into_iter()

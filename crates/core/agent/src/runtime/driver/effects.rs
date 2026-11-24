@@ -45,14 +45,6 @@ use plakous_tools::{
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 impl Driver {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Mutating dispatch keeps claim, authorization, execution, and outcome publication in their required fence order"
-    )]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the exact admitted mutating-effect authority tuple"
-    )]
     pub(super) async fn execute_mutating_effect(
         &mut self,
         command: &PromptCommand,
@@ -346,10 +338,6 @@ impl Driver {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the actor-owned effect-decision state machine remains auditable as one cancellation-safe select loop"
-    )]
     pub(super) async fn await_effect_decision(
         &mut self,
         command: &PromptCommand,
@@ -646,11 +634,6 @@ impl Driver {
     /// restored. Every exit settles the decision operation, publishes the
     /// resolution and leaves a tombstone, so later commands naming the
     /// decision are answered the same way on both paths.
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "the actor-owned effect-decision state machine remains auditable as one cancellation-safe select loop"
-    )]
     async fn drive_effect_decision(
         &mut self,
         command: &PromptCommand,

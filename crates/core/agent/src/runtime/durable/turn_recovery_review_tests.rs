@@ -455,10 +455,6 @@ async fn recovery_review_completed_effect_note_and_terminal_are_exact() -> TestR
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "matrix pins all recorded root states, sibling kinds and exact/uncertain evidence"
-)]
 async fn recovery_recorded_terminal_settles_uncertain_siblings_without_replacing_history()
 -> TestResult {
     let cut = root_without_provider_cut(false).await?;

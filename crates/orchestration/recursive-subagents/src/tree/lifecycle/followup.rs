@@ -16,10 +16,6 @@ impl ProductAgentTree {
     /// may be superseded only after session recovery settles and no owner or
     /// pending continuation remains. Closed nodes and unresolved recovery are
     /// refused, as is a spawn that never produced a session.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "followup admission validates schema, budget, workspace and prior attempt state before installing its rollback boundary"
-    )]
     pub(in crate::tree) fn admit_followup(
         &self,
         agent_id: &str,

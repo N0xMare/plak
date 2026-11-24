@@ -15,7 +15,6 @@
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
-    missing_docs,
     reason = "private process-level test harness"
 )]
 
@@ -7262,10 +7261,6 @@ fn session_child_log_working_head_shows_only_committed_history_without_writes() 
 
 /// A committed fold is a `compaction` row. The summary ciphertext is not.
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the fold, the child bind, and the log projection share one offline session"
-)]
 fn session_child_log_names_a_committed_compaction_and_hides_the_summary() {
     use plakous_hosted::agent_tree::ProductAgentTree;
     use plakous_hosted::agent_tree_protocol::{NodeStatus, SpawnAgentRequest, WriterMode};

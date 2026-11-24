@@ -1234,10 +1234,6 @@ fn prepared_projection_binds_required_provider_configuration_ids() {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one preparation matrix proves complete status/source identity and zero-start behavior for every closed denial kind"
-)]
 fn ordinary_prepare_retains_complete_exact_status_for_every_denial_before_start() {
     let mut unavailable_features = BTreeMap::new();
     unavailable_features.insert(
@@ -2257,10 +2253,6 @@ fn context_semantic_identity_survives_refresh_and_binds_behavior() {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one end-to-end certificate test keeps the complete fail-closed matrix visible"
-)]
 fn reference_client_envelope_contract_requires_measurement_and_exposes_non_guarantee() {
     let freshness = EvidenceFreshness::new(timestamp(1), Some(timestamp(100)))
         .expect("fresh reference evidence");
@@ -2372,10 +2364,6 @@ fn reference_client_envelope_contract_requires_measurement_and_exposes_non_guara
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one end-to-end certificate test keeps the complete fail-closed matrix visible"
-)]
 fn caller_envelope_on_maintained_and_custom_models_is_bounded_and_never_release_verified() {
     let freshness = EvidenceFreshness::new(timestamp(1), None).expect("fresh declaration");
     let auth_binding = authority_class(authority(b"custom-authority"));

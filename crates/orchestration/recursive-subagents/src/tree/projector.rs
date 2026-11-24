@@ -671,10 +671,6 @@ impl ProductAgentTree {
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "feed projection preserves cursor ordering, retained-read reconciliation and deferred host-failure joins"
-    )]
     fn project_page(
         &mut self,
         agent_id: &str,

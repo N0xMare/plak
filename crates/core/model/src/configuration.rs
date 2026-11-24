@@ -841,10 +841,6 @@ pub struct ProviderRouteSelection {
 
 impl ProviderRouteSelection {
     /// Creates one exact provider route selection. All arguments are already validated IDs.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the route selection is a closed authority tuple"
-    )]
     #[must_use]
     pub const fn new(
         protocol: ProtocolId,

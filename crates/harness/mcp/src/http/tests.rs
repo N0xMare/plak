@@ -422,10 +422,6 @@ fn http_failures_classify_by_what_the_server_can_have_done() -> TestResult {
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one HTTP error correlation and content-type matrix"
-)]
 async fn http_400_accepts_only_a_correlated_json_rpc_error() -> TestResult {
     use tokio::io::AsyncWriteExt as _;
     for (status, content_type, session) in [

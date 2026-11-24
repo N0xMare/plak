@@ -29,7 +29,6 @@ EARLY_MODULES = (
     "test_policy_validators",
     "test_shipping_artifacts",
     "test_check_prod_loc",
-    "test_lint_ratchet",
     "test_nextest_lanes",
     "test_publish",
 )

@@ -78,10 +78,6 @@ pub fn coded_diagnostic_line(id: Option<&str>, code: Option<&str>, message: &str
 
 /// The `hello` line: the first outbound object of a session.
 #[must_use]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one wire object; its fields are the protocol"
-)]
 pub fn hello_line(
     id: Option<&str>,
     session_id: &str,

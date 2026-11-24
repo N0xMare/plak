@@ -8,8 +8,6 @@
 #![forbid(unsafe_code)]
 #![allow(
     clippy::doc_markdown,
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
     reason = "closed protocol vocabulary and explicit attempt authority"
 )]
 

@@ -42,10 +42,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Terminal publication joins cached outcome, durable feed catch-up, pending notices, and compaction under one publication fence."
-    )]
     pub(super) async fn publish_terminal(
         &mut self,
         drive: Result<TurnHostOutcome, String>,

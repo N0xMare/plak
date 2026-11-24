@@ -402,10 +402,6 @@ impl ResponsesFamilyHooks {
         Ok(item_id.map(str::to_owned))
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one linear host step whose ordering is the invariant"
-    )]
     fn parse_event(
         &mut self,
         value: &Value,
@@ -829,10 +825,6 @@ impl ResponsesFamilyHooks {
         Ok(event)
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one linear host step whose ordering is the invariant"
-    )]
     fn parse_terminal(
         &self,
         event_kind: &str,

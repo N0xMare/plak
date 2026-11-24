@@ -5,10 +5,6 @@
 //! production CLI code. No production behaviour.
 
 #[cfg(test)]
-#[allow(
-    clippy::too_many_lines,
-    reason = "offline golden renderer walks the full product matrix"
-)]
 pub(crate) mod suite {
     use std::collections::{BTreeMap, BTreeSet};
     use std::fmt::Write as _;

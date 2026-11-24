@@ -375,10 +375,6 @@ impl Applier<'_> {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Feed-fact dispatch preserves exact history-range loading, per-kind bookkeeping, and terminal usage attribution on the followed branch."
-    )]
     fn apply_fact(&mut self, fact: &FeedFact) -> Result<(), ProjectError> {
         match fact {
             FeedFact::SessionCreated { operation_id, .. } => {

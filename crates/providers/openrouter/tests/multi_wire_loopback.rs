@@ -614,10 +614,6 @@ fn discovery_replies() -> Vec<(&'static str, String, &'static str)> {
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear fixture audits catalog drift and all three exact dispatch paths"
-)]
 async fn catalog_drift_preserves_all_wire_bindings_and_refuses_changed_facts() -> TestResult {
     let endpoint = serde_json::json!({
         "tag": "provider/first", "provider_name": "First",
@@ -922,10 +918,6 @@ fn case_limits(case: TerminalCase) -> Limits {
     limits
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one physical TLS fixture keeps each terminal classification auditable"
-)]
 async fn physical_terminal_case(case: TerminalCase, ordinal: u128) -> TestResult {
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["127.0.0.1".to_owned()])?;
@@ -1270,10 +1262,6 @@ async fn configured_lanes_dispatch_only_the_selected_exact_path() -> TestResult 
     Box::pin(configured_lanes_case(true)).await
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear fixture keeps the discovery and three exact dispatches auditable"
-)]
 async fn configured_lanes_case(attributed: bool) -> TestResult {
     let mut replies = discovery_replies();
     replies.extend([
@@ -3060,10 +3048,6 @@ async fn execute_workflow_with_retry_revocation(
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "qualifies the same revalidation fence on all three gateway kernels"
-)]
 async fn workflow_unsent_retry_revalidates_authorization_on_every_wire() -> TestResult {
     for family in [
         CHAT_COMPLETIONS_FAMILY_ID,

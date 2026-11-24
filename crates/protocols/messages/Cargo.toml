@@ -16,12 +16,6 @@ exclude.workspace = true
 layer = "protocol"
 class = "published-internal"
 
-[package.metadata.plakous-lint]
-too-many-lines-ceiling = 6
-too-many-arguments-ceiling = 0
-large-file-ceiling = 0
-reason = "Existing item-local protocol debt; request-policy construction uses a typed input."
-
 [dependencies]
 base64.workspace = true
 plakous-exchange.workspace = true

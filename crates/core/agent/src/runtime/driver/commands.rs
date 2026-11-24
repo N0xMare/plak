@@ -330,10 +330,6 @@ impl Driver {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "The command dispatcher handles every admitted control kind under one owner and acknowledgement contract"
-    )]
     async fn handle_command(
         &mut self,
         active: Option<&PromptCommand>,
@@ -718,10 +714,6 @@ impl Driver {
     }
 
     /// Cancels the active or a queued turn.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Cancellation resolves queued, active, and already-settled commands without publishing a second terminal result"
-    )]
     async fn cancel_command(
         &mut self,
         active: Option<&PromptCommand>,
@@ -956,10 +948,6 @@ impl Driver {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Root admission atomically reserves queue capacity and durable command authority before making the turn runnable"
-    )]
     async fn admit_root(
         &mut self,
         command_id: CommandId,

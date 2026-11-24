@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Root wake scenarios drive real child results, storage refusal, interrupt joins, and repeated post-terminal job delivery."
-)]
 #![allow(clippy::unwrap_used, reason = "offline host assertions")]
 use crate::runtime::test_kit::BlockOn as _;
 

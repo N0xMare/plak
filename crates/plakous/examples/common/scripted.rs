@@ -276,10 +276,6 @@ impl LanguageModel for ScriptedModel {
         })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one scripted model builds one complete prepared call and stream"
-    )]
     fn prepare_call(
         self: Arc<Self>,
         plan: ValidatedRequestPlan,

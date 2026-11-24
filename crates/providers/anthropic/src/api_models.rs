@@ -663,10 +663,6 @@ pub fn anthropic_api_models(
     )
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Classify each exact Anthropic family against the complete reviewed model and effort admission table."
-)]
 fn classify(
     listed: &AnthropicListedModel,
     reviewed: Option<&BundledRow>,

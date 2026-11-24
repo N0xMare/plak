@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Tree store conformance checks one complete lifecycle and its durable graph against every implementation."
-)]
-
 use super::*;
 use std::path::Path;
 

@@ -240,10 +240,6 @@ pub struct PreparedChatStreamBinding {
 }
 impl PreparedChatStreamBinding {
     /// Creates an exact credential-free binding.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "exact stream replay and policy binding"
-    )]
     pub fn new(
         plan: Digest,
         protocol: ProtocolId,
@@ -504,7 +500,6 @@ impl ChatStreamProjector {
         })
     }
 
-    #[allow(clippy::too_many_lines, reason = "closed Chat chunk grammar is linear")]
     fn chunk(&mut self, data: &str, output: &mut Vec<ModelEvent>) -> Result<(), ChatStreamError> {
         if self.done {
             return self.fail(
@@ -906,10 +901,6 @@ impl ChatStreamProjector {
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "terminal validation and projection stay atomic"
-    )]
     fn complete(&mut self, output: &mut Vec<ModelEvent>) -> Result<(), ChatStreamError> {
         if self.done || self.response_id.is_none() || !self.role_seen {
             return self.fail(

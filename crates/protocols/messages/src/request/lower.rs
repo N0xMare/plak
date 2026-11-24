@@ -27,10 +27,6 @@ pub fn lower_request(
 }
 
 /// Lowers one request while validating and consuming the sole active Messages artifact.
-#[allow(
-    clippy::too_many_lines,
-    reason = "one fail-closed lowering boundary keeps semantic and artifact checks ordered"
-)]
 pub fn lower_request_with_active_artifact(
     plan: &ValidatedRequestPlan,
     policy: &MessagesRequestPolicy,

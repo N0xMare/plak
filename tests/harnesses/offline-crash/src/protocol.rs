@@ -1,8 +1,3 @@
-#![allow(
-    missing_docs,
-    reason = "unpublished versioned process-test protocol has self-describing field names"
-)]
-
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};

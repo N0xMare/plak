@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Lineage fixtures run each composition caller class and validate its retained operation evidence and projected ancestry"
-)]
-
 use super::*;
 
 /// Exact local-composition marker family under lineage test.

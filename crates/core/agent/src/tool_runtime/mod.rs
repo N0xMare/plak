@@ -913,10 +913,6 @@ impl ToolRuntime {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "keeping the complete authorization-to-dispatch sequence together makes the safety boundary auditable"
-    )]
     async fn dispatch_authorized(
         &self,
         authorized: AuthorizedToolInvocation,

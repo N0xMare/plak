@@ -355,10 +355,6 @@ fn native_model_entry(
     })
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Presentation joins native and API model facts, credentials, compatibility, and composition choices into one ordered picker bundle."
-)]
 fn catalog_bundle_with_backend(
     paths: &PlakPaths,
     mut backend: Option<&mut NativePresentationBackend>,

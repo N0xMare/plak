@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "OpenRouter route scenarios preserve authenticated admission evidence, exact request policy, and reopened session capabilities."
-)]
 #![allow(clippy::unwrap_used, reason = "unit fixtures fail fast")]
 
 fn chat_review_clock() -> Arc<dyn plakous::model::Clock> {

@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Host-open scenarios reopen unpublished controls and queued commands without inventing receipts or resubmitting changed bytes."
-)]
-
 use super::*;
 use crate::surface_protocol::HostEvent;
 use plakous::agent::CommandId;

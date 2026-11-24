@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Placeholder scenarios verify replacement history, compaction identities, and the next provider request as one turn boundary"
-)]
-
 use super::*;
 
 /// A descriptor whose context window is small enough to reach in a test.
@@ -155,10 +150,6 @@ pub(super) fn placeholder_fixture(
 
 /// [`placeholder_fixture`] whose first `candidate_calls` responses publish an
 /// active family artifact, so what a later call attaches is observable.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one test fixture constructor, every axis explicit at the call site"
-)]
 pub(super) fn placeholder_fixture_producing_artifacts(
     workspace: Arc<WorkspacePolicy>,
     entry_base: u128,
@@ -183,10 +174,6 @@ pub(super) fn placeholder_fixture_producing_artifacts(
 }
 
 /// [`placeholder_fixture`] whose model server-pauses on the named calls.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one test fixture constructor, every axis explicit at the call site"
-)]
 pub(super) fn placeholder_fixture_pausing(
     workspace: Arc<WorkspacePolicy>,
     entry_base: u128,
@@ -210,10 +197,6 @@ pub(super) fn placeholder_fixture_pausing(
     )
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the scripted fixture keeps every authority axis explicit"
-)]
 pub(super) fn placeholder_fixture_with_descriptor(
     workspace: Arc<WorkspacePolicy>,
     entry_base: u128,

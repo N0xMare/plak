@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Credential matrix scenarios exercise stored-state, login, refresh, and refusal behavior without live providers."
-)]
-
 use plakous::subscriptions::NativeSubscriptionError;
 
 use plakous::subscriptions::{NativeAuthStatus, NativeProvider};

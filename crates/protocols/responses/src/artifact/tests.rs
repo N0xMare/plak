@@ -396,10 +396,6 @@ enum LongHistoryCorruption {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one sealed fixture checks late failures after both former history cutoffs"
-)]
 fn long_history_still_rejects_late_corruption_with_exact_errors() {
     use plakous_model::{CanonicalHistory, HistorySegment, HistorySegmentKind, WorkingProjection};
 

@@ -171,10 +171,6 @@ impl PreparedResponsesModelExecution {
     /// # Errors
     ///
     /// Rejects descriptor, plan or artifact drift or a zero observation bound.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the constructor binds the closed exact terminal projection fact set"
-    )]
     pub fn new(
         attempt: PreparedResponsesAttempt,
         canonical: ResponsesCanonicalDialectData,
@@ -495,10 +491,6 @@ enum JoinedState {
 }
 
 impl ResponsesJoinedModelStream {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one linear host step whose ordering is the invariant"
-    )]
     fn terminalize(&mut self) -> Result<(), ModelError> {
         let outcome = self.outcome.take().ok_or_else(|| {
             model_error(
@@ -848,10 +840,6 @@ impl Drop for ResponsesJoinedModelStream {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear host step whose ordering is the invariant"
-)]
 fn seal_terminal_events(
     projection: ResponsesTerminalProjection,
     canonical: ResponsesCanonicalTerminal,
@@ -1078,10 +1066,6 @@ fn model_error_from_attempt(
         .with_attempt_summary(summary)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear host step whose ordering is the invariant"
-)]
 fn model_error_from_attempt_without_summary(
     error: ResponsesAttemptError,
     descriptor: &ResolvedModelDescriptor,

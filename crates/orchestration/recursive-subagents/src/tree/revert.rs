@@ -19,10 +19,6 @@ fn refuse(message: impl Into<String>) -> TopologyError {
 }
 
 impl ProductAgentTree {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "revert admission validates accepted candidate lineage and target identity before reserving the reversal"
-    )]
     pub(super) fn begin_revert(
         &mut self,
         caller: &str,

@@ -441,10 +441,6 @@ pub fn validate_codex_minimal_local_code_mode_candidate_v1(
     validate_codex_code_mode_candidate_v1(&descriptor.0, projection, registry, configuration, true)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "exact candidate qualification is one closed comparison"
-)]
 fn validate_codex_code_mode_candidate_v1(
     descriptor: &CodexNativeLocalCodeModeDescriptorV1,
     projection: &ToolProjectionMap,

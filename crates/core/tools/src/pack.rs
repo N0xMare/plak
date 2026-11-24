@@ -861,10 +861,6 @@ fn order_entries(
     ordered.into_iter().map(|(_, entry)| entry).collect()
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one entry shape is resolved in one place"
-)]
 /// Resolves one declared menu entry against a frozen registry.
 ///
 /// Public because a composition renders the same entries inside a cell with a

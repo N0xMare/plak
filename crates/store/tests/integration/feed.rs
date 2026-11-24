@@ -76,10 +76,6 @@ fn next_commit(
     Ok((request, next))
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one law walks every mutation kind in order against one feed"
-)]
 pub(crate) async fn run_feed_conformance(
     store: &dyn SessionStore,
     durability: RuntimeDurability,

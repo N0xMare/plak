@@ -242,10 +242,6 @@ impl ProductAgentTree {
         })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "agent list presentation projects bounded nodes, mail, workspace and attempt evidence in one response"
-    )]
     pub(super) fn full_list_json(
         &self,
         node: &NodeRecord,

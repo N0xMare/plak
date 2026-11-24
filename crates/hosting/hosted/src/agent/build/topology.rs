@@ -586,10 +586,6 @@ pub(in crate::agent) fn spawn_parent_root_effort(parent: &SpawnParent) -> Option
 /// The root's tree from `store` with the reopen law applied, or a fresh
 /// genesis tree published through it. `store` is the roots' one handle and the
 /// roster is the product's answer; nothing here reads a configuration file.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one genesis binds every root fact the epoch freezes"
-)]
 pub(in crate::agent) async fn load_or_bootstrap_topology_tree(
     store: &dyn crate::agent_tree::TreeStore,
     tree_id: &str,
@@ -1092,10 +1088,6 @@ pub(in crate::agent) fn claim_root_topology_owner(tree_id: &str, is_root: bool) 
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "An API topology parent freezes route evidence, tool selection, instruction authority, limits, and its owning tree identity."
-)]
 #[must_use]
 pub fn api_topology_parent(
     product_home: PathBuf,

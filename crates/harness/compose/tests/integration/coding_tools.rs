@@ -747,10 +747,6 @@ async fn apply_patch_codex_envelope_accepts_absolute_path_under_root() -> TestRe
 
 #[cfg(unix)]
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one regression follows both exact V2 patch projections through prepare and file effects"
-)]
 async fn codex_projected_patch_preserves_raw_utf8_through_prepare_and_execution() -> TestResult {
     use plakous_compose::CodingPresentationExt as _;
     let mut builder = ToolRegistryBuilder::default();

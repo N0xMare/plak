@@ -1036,7 +1036,6 @@ fn prepared_unretried_model_host(
 }
 
 #[allow(
-    clippy::too_many_arguments,
     clippy::fn_params_excessive_bools,
     reason = "test fixture binds the exact route policy"
 )]

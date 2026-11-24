@@ -508,10 +508,6 @@ fn enforces_fixed_and_response_stable_reasoning_aliases() {
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one end-to-end fixture verifies exact replay, terminal ordering, and assembly"
-)]
 fn projects_ordered_exact_reasoning_details_through_the_assembler() {
     let binding = binding_with_policy(
         ChatStreamLimits::default(),

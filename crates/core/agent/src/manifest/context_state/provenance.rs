@@ -305,10 +305,6 @@ impl fmt::Debug for CompactionInvalidation {
 
 impl SemanticCompactionPublication {
     /// Captures exact non-content publication facts for semantic compaction.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the exact compact publication authority tuple"
-    )]
     pub fn new(
         source_checkpoint: CheckpointId,
         operation: Digest,

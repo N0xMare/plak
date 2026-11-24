@@ -327,10 +327,6 @@ fn runtime_facts(database: &Path, locator: SessionLocator) -> RuntimeFacts {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one read-only pass over the three stores builds the whole summary"
-)]
 pub(super) fn read(fixture: &Fixture) -> Summary {
     let paths = paths(fixture);
     let product = open(&paths.product_database());

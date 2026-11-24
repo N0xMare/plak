@@ -315,10 +315,6 @@ pub(super) fn remember_tool_call(
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one exhaustive canonical-block match preserves source order"
-)]
 pub(super) fn lower_item(
     config: ResponsesRequestConfig<'_>,
     item_index: usize,

@@ -373,11 +373,6 @@ impl Driver {
         }
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "the model operation keeps cancellation, control, assembly, and cleanup ordering visible in one auditable state machine"
-    )]
     async fn run_model_operation(
         &mut self,
         command: &PromptCommand,

@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Terminal publication scenarios retain paid-compaction and cached-result fixtures to verify exact notices and cursor progress."
-)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use plakous::model::FinishReason;

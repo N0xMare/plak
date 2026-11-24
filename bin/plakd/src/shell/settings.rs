@@ -661,10 +661,6 @@ pub(super) fn emit_settings(paths: &PlakPaths, events: &Sender<PlakExtension>) {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Settings save validates catalog authority, writes configuration, and stages a binding handoff in the required order."
-)]
 pub(super) fn save_settings(
     paths: &PlakPaths,
     update: crate::surface_protocol::SettingsUpdate,
@@ -1207,10 +1203,6 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
         needed.then(|| accounts::catalog_read(self.paths.clone(), self.custody.clone()))
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "The product intent dispatcher handles each settings, session, topology, and account action against one immutable host snapshot."
-    )]
     fn dispatch(
         &self,
         intent: SurfaceIntent,

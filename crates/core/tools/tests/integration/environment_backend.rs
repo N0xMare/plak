@@ -1280,7 +1280,6 @@ async fn joined_process_sessions_keep_the_newest_output_window() -> Result<(), T
 }
 
 #[tokio::test]
-#[allow(clippy::too_many_lines, reason = "one query conformance matrix")]
 async fn workspace_operations_reject_traversal_and_query_stably_without_symlinks()
 -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -1671,7 +1670,6 @@ async fn deterministic_read_resume_fails_closed_when_content_changes_and_enforce
 }
 
 #[tokio::test]
-#[allow(clippy::too_many_lines, reason = "one transaction conformance matrix")]
 async fn workspace_mutation_preflights_all_items_and_returns_typed_results() -> Result<(), TestError>
 {
     let workspace = tempfile::tempdir()?;
@@ -2151,10 +2149,6 @@ async fn host_literal_missing_cwd_is_no_effect_and_a_corrected_request_can_execu
 
 #[cfg(target_os = "linux")]
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one host-process conformance schedule retains literal argv, cwd, and environment assertions together"
-)]
 async fn host_process_uses_literal_argv_absolute_program_and_explicit_environment()
 -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -2435,10 +2429,6 @@ fn file_tools_refuse_credentials_outside_the_workspace() -> Result<(), TestError
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the paired output-cap and timeout schedules share one exact bounded host fixture"
-)]
 async fn host_process_bounds_live_output_and_enforces_timeout() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
     let yes = unix_program(&["/usr/bin/yes", "/bin/yes"])?;
@@ -2620,10 +2610,6 @@ async fn host_cancel_and_future_drop_join_the_owned_process_group() -> Result<()
 
 #[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the detached-process fixture keeps launch, bounded owner cleanup, and failure-safe escaped-process cleanup auditable together"
-)]
 async fn host_future_drop_is_bounded_with_a_detached_continuous_writer() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
     let shell = unix_program(&["/bin/sh", "/usr/bin/sh"])?;

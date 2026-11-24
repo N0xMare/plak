@@ -39,10 +39,6 @@ pub struct ForkBranch {
 
 impl ForkBranch {
     /// Creates an exact atomic fork request.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the fields are the closed fork CAS"
-    )]
     #[must_use]
     pub const fn new(
         workflow_id: SessionWorkflowId,
@@ -277,10 +273,6 @@ pub struct ForkOperation {
 impl ForkOperation {
     /// Creates a backend-validated fork binding.
     #[doc(hidden)]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the fields are the closed fork identity"
-    )]
     #[must_use]
     pub const fn from_store(
         workflow_id: SessionWorkflowId,

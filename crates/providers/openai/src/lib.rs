@@ -9,8 +9,6 @@
 // match arms intentionally share retry-never bodies; Result helpers are pure wire.
 #![allow(
     clippy::doc_markdown,
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
     clippy::needless_pass_by_value,
     clippy::match_same_arms,
     clippy::if_not_else,

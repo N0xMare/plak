@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Projection store scenarios assert atomic successor publication, replay identity, and prefix notice copying together."
-)]
-
 use std::path::{Path, PathBuf};
 
 use plakous_hosted::sessions::projector::{

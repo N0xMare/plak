@@ -776,10 +776,6 @@ impl ResponsesCanonicalObservationProjector {
         self.gapped
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one linear host step whose ordering is the invariant"
-    )]
     fn try_project(
         &mut self,
         event: ResponsesFamilyStreamEvent,
@@ -994,10 +990,6 @@ impl ResponsesCanonicalObservationProjector {
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one linear host step whose ordering is the invariant"
-    )]
     fn add_item(
         &mut self,
         output_index: u32,
@@ -1110,10 +1102,6 @@ impl ResponsesCanonicalObservationProjector {
         }
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "wire call identity and observation output are one transition"
-    )]
     fn start_tool(
         &mut self,
         output_index: u32,

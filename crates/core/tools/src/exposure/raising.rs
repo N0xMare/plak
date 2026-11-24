@@ -20,10 +20,6 @@ mod grok;
 mod pi;
 
 /// Raises one canonical process result into the projection's shared shape.
-#[allow(
-    clippy::too_many_lines,
-    reason = "each vendor's background and status lines stay beside the shared shape"
-)]
 pub(super) fn raise_process_result(
     entry: &ToolProjectionExposureV2,
     outcome: &ToolOutcome,

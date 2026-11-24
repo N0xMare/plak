@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Steering recovery keeps the stalled cell, settled child evidence, and resumed instruction history in one scenario"
-)]
-
 use super::*;
 
 #[path = "composition_steer_tests/observation.rs"]

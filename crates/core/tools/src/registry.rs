@@ -624,10 +624,6 @@ impl ToolRegistryBuilder {
     /// Rejects duplicate/reserved names, duplicate tool IDs, executor-ID
     /// aliases to a different capability, invalid schemas, and registry budget
     /// overflow.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "registration validates one atomic definition/schema/executor binding transaction"
-    )]
     pub fn register(&mut self, registration: ToolRegistration) -> Result<(), ToolRuntimeError> {
         if self.entries.len() >= self.limits.max_tools {
             return Err(ToolRuntimeError::new(

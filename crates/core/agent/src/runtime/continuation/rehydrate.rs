@@ -15,10 +15,6 @@ use super::{
     stable_runtime_environment_component, tool_descriptor_error,
 };
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "reopen must compare the complete live reconstruction authority tuple"
-)]
 pub(in crate::runtime) fn runtime_revalidation_witness(
     _model: &dyn LanguageModel,
     provider_configuration: &CompiledProviderConfiguration,
@@ -111,10 +107,6 @@ pub(in crate::runtime) fn runtime_revalidation_witness(
     ))
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "Index rehydration rebuilds command acknowledgements and pending decisions solely from the validated checkpoint ledger"
-)]
 pub(in crate::runtime) fn rehydrate_runtime_indexes(
     authority: &RuntimeCheckpoint,
     feed_sequences: &BTreeMap<CommandId, crate::feed::FeedSeq>,

@@ -166,10 +166,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
     }
 
     #[allow(
-        clippy::too_many_lines,
-        reason = "The running-turn owner serializes queue edits, steering, cancellation, navigation, usage, and shutdown intents against one admission."
-    )]
-    #[allow(
         clippy::match_same_arms,
         reason = "readiness reads, template refreshes, unreachable mailbox flags and empty polls retain distinct control meanings"
     )]

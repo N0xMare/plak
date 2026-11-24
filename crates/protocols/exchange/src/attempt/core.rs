@@ -44,10 +44,6 @@ pub struct FamilyAttemptCore {
     observations: Arc<PhysicalRequestLedger>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "constructor/impl methods documented individually"
-)]
 impl FamilyAttemptCore {
     /// Creates a prepared core with Responses-family ledger policy.
     #[must_use]

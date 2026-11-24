@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Compaction fence scenarios preserve occupancy anchors across reopen and distinguish successful folds from failed paid work"
-)]
-
 use super::*;
 
 pub(super) fn compaction_workflow_count(checkpoint: &RuntimeCheckpoint) -> usize {

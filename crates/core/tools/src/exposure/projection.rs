@@ -190,10 +190,6 @@ impl ProviderModelProjectionIdentityV2 {
     /// # Errors
     ///
     /// Rejects non-portable, zero-revision, or model-drifted tuples.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the candidate projection target is one closed exact authority tuple"
-    )]
     pub fn new(
         integration_class: IntegrationClass,
         protocol: impl Into<String>,
@@ -312,10 +308,6 @@ impl ToolProjectionExposureV2 {
     /// # Errors
     ///
     /// Rejects invalid names, schemas, defaults, descriptions, or digest inputs.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "every behavior-bearing projection axis is explicit"
-    )]
     pub(crate) fn new(
         canonical_operations: impl IntoIterator<
             Item = (CanonicalProcessOperationV2, RegisteredToolIdentity),
@@ -346,10 +338,6 @@ impl ToolProjectionExposureV2 {
     ///
     /// This is a presentation/descriptor primitive only. It does not enroll a
     /// composition runtime or a provider/model candidate.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "every behavior-bearing projection axis is explicit"
-    )]
     pub(crate) fn new_custom(
         canonical_operations: impl IntoIterator<
             Item = (CanonicalProcessOperationV2, RegisteredToolIdentity),
@@ -377,14 +365,6 @@ impl ToolProjectionExposureV2 {
         )
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "every behavior-bearing projection axis is explicit"
-    )]
-    #[allow(
-        clippy::too_many_lines,
-        reason = "projection identity binds its closed contracts atomically"
-    )]
     fn new_with_presentation(
         canonical_operations: impl IntoIterator<
             Item = (CanonicalProcessOperationV2, RegisteredToolIdentity),
@@ -1284,10 +1264,6 @@ fn projection_program_identity(
     })
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the digest binds the complete descriptor"
-)]
 fn projection_entry_identity(
     canonical: &BTreeMap<CanonicalProcessOperationV2, RegisteredToolIdentity>,
     exposed: &ToolName,

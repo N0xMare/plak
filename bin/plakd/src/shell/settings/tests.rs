@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Settings scenarios assert immutable host facts, exact catalog admission, saved configuration, and binding handoffs together."
-)]
-
 use crate::surface_protocol::HostEvent;
 use plakous_host_protocol::status::HostPhase;
 

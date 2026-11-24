@@ -270,7 +270,6 @@ async fn end(
     .await;
 }
 
-#[allow(clippy::too_many_lines, reason = "one scripted commit-cut scenario")]
 async fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
     let vcs = Arc::new(FakeVcs::new());
     let feeds = Arc::new(Mutex::new(vec![Feed::default(); 8]));
@@ -1157,10 +1156,6 @@ async fn two_phase_scenario(root: &Path) -> Vec<Frame> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(
-    clippy::too_many_lines,
-    reason = "indexed two-save cuts and their no-repeat oracle"
-)]
 async fn indexed_finalize_and_submitted_cancel_intent_consequence_cuts() {
     use plakous_recursive_subagents::protocol::AttemptStatus;
     use std::os::unix::process::ExitStatusExt;
@@ -1296,10 +1291,6 @@ async fn indexed_finalize_and_submitted_cancel_intent_consequence_cuts() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one deterministic resume commit-cut scenario"
-)]
 async fn transient_resume_decision_commit_cuts_are_conservative_then_replayable() {
     use plakous_recursive_subagents::protocol::AttemptStatus;
     use std::os::unix::process::ExitStatusExt;

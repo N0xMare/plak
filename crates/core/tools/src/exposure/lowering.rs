@@ -232,10 +232,6 @@ impl LoweredProjectionArguments {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "closed lowering programs stay in one audited match"
-)]
 pub(super) fn lower_projection(
     entry: &ToolProjectionExposureV2,
     projected: &Value,

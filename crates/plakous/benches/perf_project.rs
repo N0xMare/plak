@@ -481,10 +481,6 @@ fn measure_append_samples(history: &CanonicalHistory, history_items: usize) -> B
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one sample keeps related timings and their structural assertions together"
-)]
 fn measure_sample(
     fixture: &StableFixture,
     history: &CanonicalHistory,
@@ -697,10 +693,6 @@ struct StableFixture {
 }
 
 impl StableFixture {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "complete benchmark fixture construction"
-    )]
     fn new() -> BenchResult<Self> {
         let instructions = vec![
             InstructionBlock::new(
@@ -838,10 +830,6 @@ impl StableFixture {
         .build()?)
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "all synthetic exact-scope evidence is asserted and emitted together"
-    )]
     fn synthetic_prepared_evidence(
         &self,
         request: &ModelRequest,
@@ -1135,10 +1123,6 @@ fn descriptor(namespace: NamespaceId) -> BenchResult<ResolvedModelDescriptor> {
     .with_context_contract(contract))
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the benchmark compiles the exact behavior-bearing fixture request"
-)]
 fn provider_configuration(
     descriptor: &ResolvedModelDescriptor,
     authority: &RuntimeModelAuthority,

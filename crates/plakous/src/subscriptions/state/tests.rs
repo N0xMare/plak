@@ -1231,10 +1231,6 @@ async fn dropping_a_browser_completion_while_its_callback_is_pending_leaves_no_r
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one sequential test exercises pre-dispatch, post-persistence, recovery, and expiry consent boundaries"
-)]
 async fn pending_login_revalidates_exact_consent_before_and_after_completion()
 -> Result<(), Box<dyn Error>> {
     let root = unique_test_root("pending-consent")?;
@@ -1624,10 +1620,6 @@ async fn same_second_reack_has_a_distinct_generation_and_invalidates_old_handles
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one matrix keeps clear ambiguity, restoration failure, replay, deletion, restart simulation, and cross-instance status on the same v2 protocol"
-)]
 async fn recovery_v2_rejects_ambiguous_clear_deletion_and_stale_replay_across_instances()
 -> Result<(), Box<dyn Error>> {
     let provider = NativeProvider::Codex;

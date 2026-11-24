@@ -167,7 +167,6 @@ impl PersistedTree {
 
     /// Builds the rows a store read back. Exact reconstruction: nothing is
     /// derived here that the reopen law owns.
-    #[allow(clippy::too_many_arguments, reason = "exact persisted tree rows")]
     #[must_use]
     pub fn from_rows(
         tree_id: String,

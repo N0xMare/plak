@@ -7,10 +7,6 @@
 
 use super::*;
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "process budgets are an extra exact construction identity, not a new concern"
-)]
 pub(super) fn validate_product_configuration(
     job_config: plakous_tools::JobConfig,
     descriptor: &LocalCompositionDescriptor,
@@ -107,10 +103,6 @@ pub(super) fn validate_product_configuration(
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "nested Direct pack is an extra exact identity, not a new concern"
-)]
 pub(super) fn validate_python_configuration(
     job_config: plakous_tools::JobConfig,
     descriptor: &LocalCompositionDescriptor,

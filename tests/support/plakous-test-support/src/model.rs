@@ -853,10 +853,6 @@ impl LanguageModel for ScriptedModel {
         Box::pin(async move { result })
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "scripted preparation keeps exact lowering, recovery receipt, and one-shot capture together"
-    )]
     fn prepare_call(
         self: Arc<Self>,
         plan: ValidatedRequestPlan,
@@ -1072,10 +1068,6 @@ struct ScriptStartFuture {
 impl Future for ScriptStartFuture {
     type Output = Result<ModelStream, ModelError>;
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the deterministic scripted start keeps its one-shot integrity and scenario transition auditable in one poll implementation"
-    )]
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         let Some(call_context) = self.call_context.as_ref() else {
             self.completed = true;

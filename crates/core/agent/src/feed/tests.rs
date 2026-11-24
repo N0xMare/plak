@@ -1,10 +1,5 @@
 //! Feed record codec tests.
 
-#![allow(
-    clippy::too_many_lines,
-    reason = "The feed-shape round trip constructs every closed record variant and checks its decoded authority"
-)]
-
 use plakous_model::{
     Digest, DigestDomain, FinishReason, HistorySegmentKind, LineId, ModelErrorKind, NamespaceId,
     TurnOrigin,

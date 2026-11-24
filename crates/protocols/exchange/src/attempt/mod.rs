@@ -4,9 +4,7 @@
 // Ledger/policy structs intentionally use small bool policy tables.
 #![allow(
     clippy::doc_markdown,
-    clippy::missing_errors_doc,
     clippy::struct_excessive_bools,
-    clippy::must_use_candidate,
     clippy::manual_let_else,
     clippy::single_match_else,
     clippy::type_complexity,

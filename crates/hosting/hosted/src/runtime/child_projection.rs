@@ -369,10 +369,6 @@ impl<T> crate::node::TurnPort for ChildPort<T> {
 
 impl<T> ChildPort<T> {
     /// Folds one event into the observation; `Done` once the reducer is.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Child projection coordinates the bounded face stream, committed history catch-up, and cancellation lifetime in one reducer."
-    )]
     fn reduce(&mut self, event: ChildEvent) -> Flow {
         let event = match event {
             ChildEvent::Event(event) => event,

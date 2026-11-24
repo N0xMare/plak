@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Exercise exact Grok login, catalog, credential rotation and two-round Responses inference through controlled peers."
-)]
 use std::error::Error;
 use std::fs;
 use std::num::NonZeroU32;

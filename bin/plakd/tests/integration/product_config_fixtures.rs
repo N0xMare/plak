@@ -4,7 +4,6 @@
 //! `ProductConfig` shape: one `config.toml` plus one template file per agent.
 
 #![allow(
-    missing_docs,
     clippy::expect_used,
     clippy::unwrap_used,
     reason = "integration test crate may unwrap"

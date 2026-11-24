@@ -18,10 +18,6 @@ use uuid::Uuid;
 ///
 /// # Errors
 /// Returns fixture construction or durable commit failures.
-#[allow(
-    clippy::too_many_lines,
-    reason = "fixture commits one complete crossed-root manifest"
-)]
 pub async fn seed_crossed_root(
     database: &Path,
     source: SessionLocator,

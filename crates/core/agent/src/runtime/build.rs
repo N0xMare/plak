@@ -836,10 +836,6 @@ impl PreparedAgent {
             .map_err(|error| attribute_account_change(error, account_changed))
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "Bound construction validates model, profile, tools, and persisted authority before installing the single-owner runtime"
-    )]
     fn new_bound_checked(
         mut builder: AgentBuilder,
         bootstrap: Option<DurableRuntimeBootstrap>,

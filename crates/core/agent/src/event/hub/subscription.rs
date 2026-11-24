@@ -242,10 +242,6 @@ impl EventSubscription {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "retention, debt, typed loss, and terminal decisions share one locked snapshot"
-    )]
     fn read_locked(&self, state: &EventHubState, delivery_aware: bool) -> SubscriptionDecision {
         if let Some(first) = state.retained.front()
             && first.branch_sequence.0 > self.next_sequence

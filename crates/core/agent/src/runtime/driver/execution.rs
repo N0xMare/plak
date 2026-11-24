@@ -44,10 +44,6 @@ impl Drop for ProgressForwardingGuard {
 }
 
 impl ActorToolDispatchObserver {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "exact dispatch observation and authority inputs"
-    )]
     pub(in crate::runtime) fn new(
         authority: StartAuthority,
         cancellation: CancellationToken,
@@ -243,10 +239,6 @@ pub(super) async fn execute_indexed_read_only(
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "execution, progress forwarding, terminal drain, and telemetry ordering remain visible together"
-)]
 async fn execute_read_only_tool(
     request: IndexedReadOnlyRequest,
 ) -> Result<ToolExecutionResult, AgentError> {

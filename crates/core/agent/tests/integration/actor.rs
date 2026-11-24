@@ -1606,10 +1606,6 @@ async fn wake_operation_budget_wrap_up_preserves_origin() -> TestResult {
     budget_wrap_up_preserves_origin(true).await
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "shared fixture verifies budget withdrawal, origin, events and retained history"
-)]
 async fn budget_wrap_up_preserves_origin(instruction: bool) -> TestResult {
     const ANSWER: &str = "what I found before the budget ran out";
     let descriptor = descriptor(true, false)?;
@@ -2856,10 +2852,6 @@ fn cancellation_at_model_tool_and_decision_phases_is_joined() -> TestResult {
     result.map_err(Into::into)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one cancellation matrix keeps model, tool, and decision phase invariants together"
-)]
 async fn cancellation_phase_matrix() -> TestResult {
     {
         let descriptor = descriptor(false, false)?;
@@ -2992,10 +2984,6 @@ async fn cancellation_phase_matrix() -> TestResult {
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one deterministic schedule proves saturation, queued cancellation, capacity reuse, and joined shutdown"
-)]
 async fn fifo_saturation_queued_cancel_and_shutdown_are_ghost_free() -> TestResult {
     let descriptor = descriptor(false, false)?;
     let barrier = plakous_test_support::ScenarioBarrier::new();

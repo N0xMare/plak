@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Lease-permit scenarios refuse publication at nested dispatch edges while retaining settled evidence and preventing replay"
-)]
-
 use super::*;
 
 async fn delayed_dispatch_ack_admission(

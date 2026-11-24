@@ -4,8 +4,6 @@
 //! out of the supported tools inventory.
 
 #![allow(
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
     missing_docs,
     reason = "unsupported sibling seam is documented as one implementation tier"
 )]
@@ -779,10 +777,6 @@ pub async fn join_blocking<T: Send + 'static>(
     .await
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the context authority is explicit"
-)]
 pub fn tool_context(
     run_id: RunId,
     turn_id: TurnId,
@@ -832,10 +826,6 @@ pub fn projection_map(
     ToolProjectionMap::new(registry, target, entries)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one pass-through of the exposure constructor"
-)]
 pub fn projection_exposure(
     canonical_operations: impl IntoIterator<
         Item = (CanonicalProcessOperationV2, RegisteredToolIdentity),
@@ -862,10 +852,6 @@ pub fn projection_exposure(
     )
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one pass-through of the custom exposure constructor"
-)]
 pub fn projection_exposure_custom(
     canonical_operations: impl IntoIterator<
         Item = (CanonicalProcessOperationV2, RegisteredToolIdentity),

@@ -37,10 +37,6 @@
 
 #![cfg(unix)]
 #![forbid(unsafe_code)]
-#![allow(
-    clippy::too_many_lines,
-    reason = "the matrix keeps its scenarios, classifier and cell table visibly together"
-)]
 
 use std::collections::BTreeMap;
 use std::error::Error;

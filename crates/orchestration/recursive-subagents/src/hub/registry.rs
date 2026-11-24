@@ -102,10 +102,6 @@ impl LiveChildTable {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "reserve the exact child slot and install its independently owned release worker atomically"
-    )]
     pub(super) fn start_retire(
         &mut self,
         live: Arc<tokio::sync::Mutex<Self>>,

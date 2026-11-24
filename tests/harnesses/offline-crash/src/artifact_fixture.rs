@@ -75,10 +75,6 @@ pub(super) fn seal_fixture_artifact(
     })
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the fixture keeps exact producer facts adjacent to its native output"
-)]
 fn seal(
     plan: &ValidatedRequestPlan,
     response: &ModelResponse,

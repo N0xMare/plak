@@ -1365,10 +1365,6 @@ fn unsigned_current_reasoning_stays_live_and_lenient_projection_stays_portable()
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one replay fixture exercises completed and active history boundaries"
-)]
 fn completed_thinking_projects_changed_bindings_but_active_turn_stays_exact() -> TestResult {
     let source = policy()?.with_strict_thinking_replay(true);
     let mut effort_target = source.clone();

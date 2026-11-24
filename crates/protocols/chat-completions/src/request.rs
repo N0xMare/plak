@@ -148,10 +148,6 @@ pub const OPENROUTER_DISABLE_CONTEXT_COMPRESSION_PLUGINS: &[ChatRequestPlugin] =
 
 impl ChatRequestPolicy {
     /// Creates a complete credential-free lowering policy.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "complete credential-free wire policy"
-    )]
     pub fn new(
         protocol: ProtocolId,
         requested_model: ModelId,
@@ -681,10 +677,6 @@ struct FunctionCallWire {
 }
 
 /// Lowers one already validated canonical plan into bounded Chat JSON.
-#[allow(
-    clippy::too_many_lines,
-    reason = "the complete immutable request and its operation digest stay visibly adjacent"
-)]
 pub fn lower_request(
     plan: &ValidatedRequestPlan,
     policy: &ChatRequestPolicy,
@@ -1068,10 +1060,6 @@ struct PendingTool {
     invalid_arguments: bool,
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the ordered actor state machine keeps adjacency and correlation checks visible"
-)]
 fn lower_history(
     plan: &ValidatedRequestPlan,
     policy: &ChatRequestPolicy,

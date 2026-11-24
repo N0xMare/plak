@@ -16,14 +16,6 @@ exclude.workspace = true
 layer = "host"
 class = "published-internal"
 
-[package.metadata.plakous-lint]
-too-many-lines-ceiling = 100
-too-many-arguments-ceiling = 29
-large-file-ceiling = 0
-missing-docs-ceiling = 2
-crate-wide-allows = []
-reason = "Existing lint and size debt; agent construction and product observations retain module documentation exceptions while their public contracts are completed."
-
 [dependencies]
 plakous-host-protocol.workspace = true
 plakous = { workspace = true, features = [

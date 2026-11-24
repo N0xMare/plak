@@ -202,10 +202,6 @@ impl StableRequestPrefix {
     ///
     /// Returns an error for duplicate tools, unsatisfiable tool selection,
     /// structural limits, or canonical serialization failure.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the fields are the closed stable request algebra"
-    )]
     pub fn new(
         selected_provider_configuration: SelectedProviderConfigurationId,
         effective_provider_configuration: EffectiveProviderConfigurationId,
@@ -240,10 +236,6 @@ impl StableRequestPrefix {
         )
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the fields are the closed stable request algebra"
-    )]
     fn seal(
         selected_provider_configuration: SelectedProviderConfigurationId,
         effective_provider_configuration: EffectiveProviderConfigurationId,

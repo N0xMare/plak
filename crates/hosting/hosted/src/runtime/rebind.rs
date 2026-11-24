@@ -161,10 +161,6 @@ pub(super) async fn release_profile_build_lease<P: plakous_host_protocol::Protoc
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Native rebind resolution names the source authority, target tuple, plan namespace, and selected topology explicitly."
-)]
 pub(super) async fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &HostConfig<P>,

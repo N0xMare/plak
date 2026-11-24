@@ -1,7 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Session-info scenarios populate every usage vertical to verify the complete typed information projection."
-)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use super::*;

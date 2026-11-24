@@ -140,10 +140,6 @@ impl ContextStatus {
         )
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "status retains every authority-bearing evaluation input"
-    )]
     fn new(
         descriptor_binding: Digest,
         model_input_identity: Digest,

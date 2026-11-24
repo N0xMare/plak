@@ -732,10 +732,6 @@ fn tool_request(
 }
 
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one production exchange and reconstructed successor prove exact encrypted and tool-result replay together"
-)]
 async fn tool_result_and_encrypted_reasoning_replay_use_production_executor() -> TestResult {
     use plakous_model::{ToolExecutionOwner, ToolResultBlock, ToolResultKind, ToolResultPart};
     let facts = OpenAiPlatformModelFacts::Gpt56Luna;

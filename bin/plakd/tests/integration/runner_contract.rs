@@ -5,7 +5,6 @@
 //! idle, and a root in or around the runner home is refused.
 
 #![allow(
-    missing_docs,
     clippy::unwrap_used,
     clippy::expect_used,
     reason = "integration test crate may unwrap"

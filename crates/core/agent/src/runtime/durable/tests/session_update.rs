@@ -1,8 +1,3 @@
-#![allow(
-    clippy::too_many_lines,
-    reason = "Session-update scenarios reconcile joined process ownership, cleanup dispositions, and the checkpoint metadata they publish"
-)]
-
 use super::*;
 
 pub(super) fn one_tool_registry() -> TestResult<FrozenToolRegistry> {
