@@ -16,7 +16,7 @@ fn protocol_thirteen_schema_has_an_exact_build_independent_pin() {
     print(&mut output, true).unwrap();
     assert!(
         output.as_slice()
-            == include_bytes!("../../../../docs/protocol/13/wire-schema.json").as_slice(),
+            == include_bytes!("../../tests/fixtures/protocol-13-wire-schema.json").as_slice(),
         "regenerate the artifact with plakd wire schema --protocol 13",
     );
     let document: Value = serde_json::from_slice(&output).unwrap();

@@ -1,7 +1,7 @@
 # Client protocol 13 draft
 
-Use [wire-schema.json](wire-schema.json), generated with
-`plakd wire schema --protocol 13`. It has both frame directions and the
+Use [protocol-13-wire-schema.json](../../../bin/plakd/tests/fixtures/protocol-13-wire-schema.json),
+generated with `plakd wire schema --protocol 13`. It has both frame directions and the
 shared JSON Schema draft 2020-12 definitions. `binary_id` is null because this
 is a definitions artifact, not the schema of a serving build. For validation,
 select `client_frame` or `host_frame` as the root and keep the document's
