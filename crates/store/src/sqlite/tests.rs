@@ -1,4 +1,7 @@
 use std::error::Error;
+
+#[cfg(unix)]
+mod epochs;
 use std::fs;
 #[cfg(unix)]
 use std::num::NonZeroU64;

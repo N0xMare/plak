@@ -388,30 +388,43 @@ fn a_record_above_the_page_bound_does_not_encode() -> TestResult {
     Ok(())
 }
 
-/// The frozen bytes of every record shape. A change here is a codec version
-/// bump (or a runtime epoch bump), never a silent re-pin.
-#[test]
-fn every_record_shape_has_frozen_bytes() -> TestResult {
-    const GOLDEN: [&str; 7] = [
-        "acf564a9eefd8ba04f8044cc6b0d2b75cd2544d7c2dc38742483ccc16437264f",
-        "e2de9dc183a6c95a0b6f9bdd013588ea61b202c1c1f8062fd0e82218acab05b5",
-        "63134aa97d484d4b4605bd0d617d1f61eb6fb403507a2d2d005962bc9f6bae6e",
-        "1a317141c7e1329b080503a271c82d2ed34e41430eb1f044bf029f0dd0781d38",
-        "0e87c69a435119875e56da75f35485a7995a9cde0ce348fccd77440ec762d19f",
-        "1b1d8526a6f15faee9e7728cade9e2c1cde3098366a7fe9564fabd5b2627cc6a",
-        "3677bfb459132679a5bea77a252bfae6de8d55a74df49ca67316fc5fb4a935b1",
-    ];
-    let actual = every_shape()?
+const V1_PINS: [&str; 7] = [
+    "acf564a9eefd8ba04f8044cc6b0d2b75cd2544d7c2dc38742483ccc16437264f",
+    "e2de9dc183a6c95a0b6f9bdd013588ea61b202c1c1f8062fd0e82218acab05b5",
+    "63134aa97d484d4b4605bd0d617d1f61eb6fb403507a2d2d005962bc9f6bae6e",
+    "1a317141c7e1329b080503a271c82d2ed34e41430eb1f044bf029f0dd0781d38",
+    "0e87c69a435119875e56da75f35485a7995a9cde0ce348fccd77440ec762d19f",
+    "1b1d8526a6f15faee9e7728cade9e2c1cde3098366a7fe9564fabd5b2627cc6a",
+    "3677bfb459132679a5bea77a252bfae6de8d55a74df49ca67316fc5fb4a935b1",
+];
+
+pub(crate) fn feed_pins(epoch: u32) -> TestResult<[&'static str; 7]> {
+    match epoch {
+        38 | 39 => Ok(V1_PINS),
+        _ => Err(format!("no feed pin for checkpoint encoding epoch {epoch}").into()),
+    }
+}
+
+fn fingerprints(
+    encode: impl Fn(&FeedRecord) -> Result<Vec<u8>, FeedCodecError>,
+) -> TestResult<Vec<String>> {
+    every_shape()?
         .iter()
-        .map(|record| {
-            let digest = Digest::sha256(DigestDomain::Blob, 1, &[&record.encode()?])?;
-            Ok(digest.bytes().iter().fold(String::new(), |mut text, byte| {
-                let _ = std::fmt::Write::write_fmt(&mut text, format_args!("{byte:02x}"));
-                text
-            }))
-        })
-        .collect::<TestResult<Vec<_>>>()?;
-    assert_eq!(actual, GOLDEN, "feed record golden bytes changed");
+        .map(|record| Ok(Digest::sha256(DigestDomain::Blob, 1, &[&encode(record)?])?.to_string()))
+        .collect()
+}
+
+pub(crate) fn fixed_feed_fingerprints() -> TestResult<Vec<String>> {
+    fingerprints(|record| record.encode_at(1))
+}
+
+#[test]
+fn every_record_shape_has_frozen_bytes_by_checkpoint_epoch() -> TestResult {
+    let actual = fingerprints(FeedRecord::encode)?;
+    assert_eq!(
+        actual,
+        feed_pins(crate::checkpoint_bundle::RUNTIME_FORMAT_EPOCH)?
+    );
     Ok(())
 }
 

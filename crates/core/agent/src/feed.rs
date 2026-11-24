@@ -856,3 +856,5 @@ mod session_revision {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::{feed_pins, fixed_feed_fingerprints};

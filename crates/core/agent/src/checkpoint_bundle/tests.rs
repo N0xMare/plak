@@ -5,6 +5,8 @@
 
 use super::object::object_address;
 use super::*;
+
+mod epoch_pins;
 use crate::RuntimeComponentKind;
 use crate::SessionWorkflowId;
 use crate::manifest::{
@@ -797,113 +799,6 @@ fn named_state_advance_reuses_prior_value_addresses() -> TestResult {
             .all(|object| object.address().kind() != RuntimeObjectKind::NamedStateValue)
     );
     assert_eq!(bundle.validated_checkpoint()?.as_ref(), &next);
-    Ok(())
-}
-
-#[test]
-fn v39_graph_goldens_pin_quiescent_and_working_closures() -> TestResult {
-    let cases = [
-        (
-            named_state_fixture(3)?,
-            [
-                193, 146, 109, 226, 142, 138, 188, 177, 62, 86, 7, 88, 55, 160, 23, 86, 133, 17,
-                211, 187, 53, 94, 223, 151, 161, 126, 174, 84, 102, 250, 68, 245,
-            ],
-            [
-                2, 168, 122, 19, 114, 89, 143, 162, 183, 29, 140, 83, 117, 144, 148, 144, 36, 15,
-                108, 161, 31, 210, 79, 46, 210, 249, 112, 165, 228, 30, 199, 4,
-            ],
-            [
-                109, 180, 132, 63, 168, 246, 255, 217, 7, 148, 38, 49, 135, 122, 114, 157, 174,
-                183, 249, 135, 145, 2, 146, 52, 60, 164, 201, 217, 127, 248, 51, 98,
-            ],
-        ),
-        (
-            fixture(3, 3, false)?,
-            [
-                183, 65, 248, 248, 30, 238, 195, 207, 64, 134, 152, 216, 158, 130, 153, 249, 64,
-                235, 164, 157, 214, 191, 110, 210, 11, 126, 92, 68, 221, 46, 214, 28,
-            ],
-            [
-                167, 191, 237, 167, 171, 79, 240, 212, 61, 223, 104, 86, 233, 86, 141, 236, 158,
-                219, 194, 102, 134, 181, 163, 128, 10, 169, 39, 77, 42, 72, 116, 195,
-            ],
-            [
-                61, 94, 218, 17, 218, 253, 25, 227, 18, 120, 140, 59, 20, 39, 86, 167, 73, 91, 12,
-                40, 78, 233, 202, 122, 27, 202, 115, 243, 147, 245, 250, 66,
-            ],
-        ),
-        (
-            compaction_working_fixture(5)?,
-            [
-                207, 169, 180, 25, 54, 212, 14, 106, 7, 76, 6, 250, 45, 236, 193, 48, 239, 48, 246,
-                179, 67, 204, 33, 113, 248, 81, 176, 181, 200, 137, 73, 144,
-            ],
-            [
-                22, 195, 189, 45, 180, 95, 3, 203, 81, 72, 232, 13, 1, 141, 252, 85, 149, 130, 242,
-                167, 169, 53, 85, 205, 247, 157, 76, 197, 131, 254, 236, 177,
-            ],
-            [
-                180, 23, 117, 168, 39, 253, 18, 228, 81, 2, 211, 38, 253, 15, 191, 33, 125, 26,
-                118, 19, 56, 153, 86, 104, 103, 143, 238, 106, 69, 76, 45, 210,
-            ],
-        ),
-        (
-            anchored_quiescent_fixture()?,
-            [
-                242, 167, 97, 207, 199, 152, 197, 107, 214, 202, 23, 143, 133, 113, 137, 29, 105,
-                163, 156, 64, 181, 68, 198, 35, 169, 108, 144, 76, 122, 150, 51, 30,
-            ],
-            [
-                113, 163, 97, 54, 26, 29, 94, 208, 157, 233, 194, 144, 60, 244, 174, 46, 37, 155,
-                121, 111, 146, 113, 70, 129, 26, 16, 240, 137, 133, 82, 191, 29,
-            ],
-            [
-                13, 69, 173, 252, 27, 118, 44, 163, 4, 242, 176, 144, 222, 252, 252, 194, 173, 179,
-                91, 102, 43, 121, 68, 147, 174, 206, 205, 61, 63, 121, 8, 252,
-            ],
-        ),
-    ];
-    let mut actual = Vec::new();
-    let mut expected = Vec::new();
-    for (checkpoint, root, integrity, closure) in cases {
-        let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
-        assert_eq!(
-            bundle.objects().len(),
-            34 + checkpoint.manifest().named_state().values().len()
-        );
-        let mut exact_closure = Vec::new();
-        for object in bundle.objects() {
-            exact_closure.push(object.address().kind() as u8);
-            exact_closure.extend_from_slice(&object.address().codec_revision().to_be_bytes());
-            exact_closure.extend_from_slice(object.address().digest().bytes());
-            exact_closure
-                .extend_from_slice(&u32::try_from(object.canonical_bytes().len())?.to_be_bytes());
-            exact_closure.extend_from_slice(object.canonical_bytes());
-            exact_closure.extend_from_slice(&u32::try_from(object.children().len())?.to_be_bytes());
-            for child in object.children() {
-                exact_closure.push(child.kind() as u8);
-                exact_closure.extend_from_slice(&child.codec_revision().to_be_bytes());
-                exact_closure.extend_from_slice(child.digest().bytes());
-            }
-        }
-        let actual_closure = Digest::sha256(
-            DigestDomain::Blob,
-            RUNTIME_FORMAT_EPOCH,
-            &[
-                b"plakous-agent/runtime-checkpoint-exact-closure-golden-v1",
-                &exact_closure,
-            ],
-        )?;
-        actual.push((
-            *bundle.root().digest().bytes(),
-            *bundle.checkpoint_integrity().bytes(),
-            *actual_closure.bytes(),
-        ));
-        expected.push((root, integrity, closure));
-        assert_eq!(RuntimeCheckpointCodec::materialize(&bundle)?, checkpoint);
-    }
-    assert_eq!(actual, expected);
     Ok(())
 }
 
