@@ -149,6 +149,7 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.env.pop('PLAK_TEST_BINARY', None)
         self.env.pop('PLAK_NEXTEST_PARTITION', None)
         self.env.pop('PLAK_BATCH_BASE', None)
+        self.env.pop('GATE_REAL_PROCESS_GUARD', None)
         self.env['CARGO_BUILD_JOBS'] = '8'
         # The offline musl container exports this; the package group must decide it itself.
         self.env.pop('CARGO_NET_OFFLINE', None)
@@ -251,7 +252,17 @@ if args[0] == 'test':
             'python3',
             r'''import json, os, sys, time
 from pathlib import Path
-if sys.argv[1] == '-' or sys.argv[1].endswith(('vcs_listing.py', 'test-processes.py')):
+if sys.argv[1].endswith('test-processes.py'):
+    if os.environ.get('GATE_REAL_PROCESS_GUARD'):
+        os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+    # These cases exercise the driver's group selection, not the host process
+    # table. No fixture can start a real product process through the fake Cargo.
+    if sys.argv[2:] == ['--check']:
+        raise SystemExit(0)
+    if sys.argv[2:5] == ['--', 'cargo', 'nextest']:
+        os.execvp('cargo', sys.argv[3:])
+    raise SystemExit('unexpected process-guard invocation')
+if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
@@ -341,7 +352,9 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             env=self.env,
             text=True,
             capture_output=True,
-            timeout=15,
+            # Hang watchdog only. A full mock tier starts dozens of
+            # subprocesses; its assertions concern results, not elapsed time.
+            timeout=60,
         )
         calls = (
             [json.loads(line) for line in self.log.read_text().splitlines()]
@@ -985,6 +998,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         )
 
     def test_tests_and_tooling_run_with_an_isolated_git_config(self):
+        self.env['GATE_REAL_PROCESS_GUARD'] = '1'
         result, calls, _ = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         scratch = self.root / 'test-tmp'
