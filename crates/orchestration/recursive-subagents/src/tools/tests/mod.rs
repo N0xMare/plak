@@ -35,7 +35,7 @@ fn spawn_request() -> SpawnAgentRequest {
     SpawnAgentRequest::test_review()
 }
 
-fn bootstrap_tree(tree_id: &str, root: &Path) -> ProductAgentTree {
+pub(super) fn bootstrap_tree(tree_id: &str, root: &Path) -> ProductAgentTree {
     let mut tree = ProductAgentTree::bootstrap_root_for_test(
         tree_id,
         "root",
@@ -118,7 +118,7 @@ fn supervisor_on_an_older_epoch(tree: &mut ProductAgentTree) -> String {
 }
 
 /// The driver a tool runs on: the tree, `store`, and the tree's own port.
-fn driver_on(tree: ProductAgentTree, store: Arc<dyn TreeStore>) -> TreeDriver {
+pub(super) fn driver_on(tree: ProductAgentTree, store: Arc<dyn TreeStore>) -> TreeDriver {
     let vcs = tree.vcs_port();
     TreeDriver::new(Arc::new(Mutex::new(tree)), store, vcs, None)
 }

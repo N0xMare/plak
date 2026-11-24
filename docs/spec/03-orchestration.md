@@ -2239,8 +2239,9 @@ revision. A receipt for an older revision cannot cover a newer one. The
 read-only trace commands (chapter 02 §2.5.1) neither set nor check receipts;
 a same-user shipper records one only after verifying the durable remote
 artifact. The host does not contact the archive. Missing, stale, invalid or
-unreadable evidence defers the affected child; it never weakens the existing
-retirement proof. Explicit product session deletion is outside this guard.
+unreadable evidence defers the affected child with bounded probe backoff; it
+never weakens the existing retirement proof. Explicit product session
+deletion is outside this guard.
 
 An accepted command carrying the selected result can still return it, even
 when its root or child recipient looks idle. Retirement requires durable
@@ -2274,7 +2275,9 @@ archive and delete. Recovery checks the approved pre-archive revision, not
 the successor revision created by archive. A guarded intent keeps its receipt
 requirement even if configuration changes. An outstanding unguarded intent
 with a runtime to collect defers while the home requires receipts; inventory
-outstanding intents before enabling the requirement.
+outstanding intents before enabling the requirement. For pending intents
+blocked by the guard, the host emits rate-limited housekeeping diagnostics
+naming the affected children and their remedies.
 
 Only the facade may archive the released session at the approved branch head
 and session revision and delete its next, archived revision. The store checks

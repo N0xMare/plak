@@ -874,6 +874,12 @@ Leave retirement off until the archive and receipt backfill run cleanly.
 On an archive-managed home set `runtime_store.retire_requires_archive_receipt = true`
 before enabling `runtime_store.retire_finished_children`, then restart the
 host to apply the settings. A child without an exact receipt is deferred.
+Enable `PLAK_LOG=plak.topology=warn` on the host to see rate-limited
+warnings for pending intents blocked by the receipt guard. Inventory pending
+intents before switching it on. An older intent with no receipt must be
+resolved before enabling the guard or aborted while the home is stopped.
+For a guarded intent with invalid local evidence, recover the original
+verified receipt from a consistent backup or abort if still possible.
 
 `show` labels a Working checkpoint `working (live owner present)` while the
 process named by the branch's runtime holder record is still running,

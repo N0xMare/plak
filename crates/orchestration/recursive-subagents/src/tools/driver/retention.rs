@@ -24,17 +24,29 @@ pub(super) struct Retries {
 const HOUSEKEEPING_WARNING_INTERVAL: Duration = Duration::from_secs(3600);
 
 #[derive(Default)]
-struct HousekeepingWarnings(Vec<(TopologyErrorCode, Instant)>);
+struct HousekeepingWarnings(Vec<(Warning, Instant)>);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Warning {
+    Refused(TopologyErrorCode),
+    Archive(ArchiveStall),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ArchiveStall {
+    Unguarded,
+    InvalidReceipt,
+}
 
 impl HousekeepingWarnings {
-    fn due(&mut self, code: TopologyErrorCode, now: Instant) -> bool {
-        if let Some((_, last)) = self.0.iter_mut().find(|(prior, _)| *prior == code) {
+    fn due(&mut self, warning: Warning, now: Instant) -> bool {
+        if let Some((_, last)) = self.0.iter_mut().find(|(prior, _)| *prior == warning) {
             if now.duration_since(*last) < HOUSEKEEPING_WARNING_INTERVAL {
                 return false;
             }
             *last = now;
         } else {
-            self.0.push((code, now));
+            self.0.push((warning, now));
         }
         true
     }
@@ -106,7 +118,6 @@ impl TreeDriver {
                 None
             };
             if let Some(revision) = revision {
-                self.retry_clear(&agent, Action::Probe);
                 let archive = if requires_archive_receipt {
                     let Some(receipt) = self
                         .store
@@ -114,12 +125,14 @@ impl TreeDriver {
                         .ok()
                         .flatten()
                     else {
+                        self.retry_refused(&agent, Action::Probe, &raw);
                         continue;
                     };
                     Some(receipt)
                 } else {
                     None
                 };
+                self.retry_clear(&agent, Action::Probe);
                 approved.insert(
                     agent,
                     ApprovedHead {
@@ -242,15 +255,25 @@ impl TreeDriver {
                 snapshot = Some(before.clone());
             });
             let result = result.and_then(|mut tickets| {
+                let (mut unguarded, mut invalid) = (Vec::new(), Vec::new());
                 tickets.retain(|ticket| {
-                    !occupied.contains(&ticket.agent_id)
-                        && driver.retirement_archive_matches(tree, ticket, requires_archive_receipt)
-                        && driver.retry_ready(
-                            &ticket.agent_id,
-                            Action::Delete,
-                            ticket.locator.as_deref().unwrap_or_default(),
-                        )
+                    if occupied.contains(&ticket.agent_id) {
+                        return false;
+                    }
+                    match driver.retirement_archive_stall(tree, ticket, requires_archive_receipt) {
+                        Some(ArchiveStall::Unguarded) => unguarded.push(ticket.agent_id.clone()),
+                        Some(ArchiveStall::InvalidReceipt) => invalid.push(ticket.agent_id.clone()),
+                        None => {
+                            return driver.retry_ready(
+                                &ticket.agent_id,
+                                Action::Delete,
+                                ticket.locator.as_deref().unwrap_or_default(),
+                            );
+                        }
+                    }
+                    false
                 });
+                driver.warn_archive_stalls(&tree.tree_id, &unguarded, &invalid);
                 // Even an old ticket needs the custody check before dispatch.
                 if !tickets.is_empty() || snapshot.is_some() {
                     driver.save_guarded(tree)?;
@@ -269,26 +292,24 @@ impl TreeDriver {
 
     // Recovered tickets must prove coverage and pass the guarded save too.
     // Receipts are immutable and removed only with the whole tree under custody.
-    fn retirement_archive_matches(
+    fn retirement_archive_stall(
         &self,
         tree: &ProductAgentTree,
         ticket: &RetirementTicket,
         required: bool,
-    ) -> bool {
-        let Some(head) = &ticket.locator else {
-            return true; // No runtime operation remains.
-        };
+    ) -> Option<ArchiveStall> {
+        let head = ticket.locator.as_ref()?; // No runtime operation remains without a locator.
+        if !ticket.receipt_required {
+            return required.then_some(ArchiveStall::Unguarded);
+        }
         let summary = tree.retired_children().get(&ticket.agent_id);
         let archive = summary.and_then(|summary| summary.archive.as_ref());
-        if !required && !ticket.receipt_required {
-            return true;
-        }
         let (Some(summary), Some(archive), Some(revision)) =
             (summary, archive, ticket.session_revision)
         else {
-            return false;
+            return Some(ArchiveStall::InvalidReceipt);
         };
-        tree.nodes().get(&ticket.agent_id).is_some_and(|node| {
+        let matches = tree.nodes().get(&ticket.agent_id).is_some_and(|node| {
             node.attempt_id.as_ref() == Some(&summary.attempt)
                 && node.session_locator.as_deref() == Some(head)
         }) && self
@@ -300,7 +321,8 @@ impl TreeDriver {
                 head,
                 revision,
             )
-            .is_ok_and(|receipt| receipt.as_ref() == Some(archive))
+            .is_ok_and(|receipt| receipt.as_ref() == Some(archive));
+        (!matches).then_some(ArchiveStall::InvalidReceipt)
     }
 
     fn retry_ready(&self, agent: &str, action: Action, locator: &str) -> bool {
@@ -322,14 +344,27 @@ impl TreeDriver {
             .clear(agent, action);
     }
 
-    pub(crate) fn warn_child_housekeeping(&self, code: TopologyErrorCode, phase: &'static str) {
-        let due = self
-            .child_retirement_retry
+    fn warning_due(&self, warning: Warning) -> bool {
+        self.child_retirement_retry
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .warnings
-            .due(code, Instant::now());
-        if due {
+            .due(warning, Instant::now())
+    }
+
+    fn warn_archive_stalls(&self, tree: &str, unguarded: &[String], invalid: &[String]) {
+        if !unguarded.is_empty() && self.warning_due(Warning::Archive(ArchiveStall::Unguarded)) {
+            tracing::warn!(target: "plak.topology", tree, children = ?unguarded,
+                "child retirement stalled: intent has no archive receipt; with all home writers stopped, use plakd tree abort-retirement before archive or deletion");
+        }
+        if !invalid.is_empty() && self.warning_due(Warning::Archive(ArchiveStall::InvalidReceipt)) {
+            tracing::warn!(target: "plak.topology", tree, children = ?invalid,
+                "child retirement stalled: intent's archive receipt is missing, invalid or unreadable; restore the verified original receipt from a consistent backup, or stop all home writers and use plakd tree abort-retirement before archive or deletion");
+        }
+    }
+
+    pub(crate) fn warn_child_housekeeping(&self, code: TopologyErrorCode, phase: &'static str) {
+        if self.warning_due(Warning::Refused(code)) {
             tracing::warn!(target: "plak.topology", ?code, phase, "child retirement housekeeping remains unsettled");
         }
     }
@@ -494,23 +529,156 @@ async fn finish_legacy_archive(
 #[cfg(test)]
 mod tests {
     use super::{
-        Action, Duration, HOUSEKEEPING_WARNING_INTERVAL, HousekeepingWarnings, Instant, Retries,
-        TopologyErrorCode,
+        Action, ApprovedHead, ArchiveStall, Duration, HOUSEKEEPING_WARNING_INTERVAL,
+        HousekeepingWarnings, Instant, Retries, TopologyErrorCode, Warning,
     };
+    use crate::protocol::SpawnAgentRequest;
+    use crate::tools::tests::{bootstrap_tree, driver_on};
+    use crate::tree::{ChildArchiveReceipt, MemoryTreeStore, ProductAgentTree};
+    use plakous::sessions::*;
+    use plakous_offline_crash_harness::{
+        BoundaryController, protocol::CrashBoundary, text_runtime_binding,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::Path;
+    use std::sync::Arc;
+
+    fn due_child(root: &Path, locator: SessionLocator) -> (ProductAgentTree, String) {
+        let mut tree = bootstrap_tree("receipt-retention", root);
+        let child = tree
+            .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+            .unwrap()
+            .agent_id;
+        tree.bind_session_locator(&child, locator.to_string())
+            .unwrap();
+        tree.record_turn_completed(&child).unwrap();
+        tree.settle_for_test();
+        let mail = tree.pending_result_mail("root").remove(0);
+        tree.acknowledge_mail(&mail.message_id).unwrap();
+        tree.attempt_mut_for_test(&child).ended_at = Some(1);
+        (tree, child)
+    }
+
+    #[tokio::test]
+    async fn missing_receipt_after_a_successful_probe_backs_off() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = AgentSessions::new(
+            SessionBackend::sqlite(root.path().join("runtime.sqlite3")).unwrap(),
+        )
+        .unwrap();
+        let controller = BoundaryController::quiet_from_evidence_path(
+            CrashBoundary::None,
+            root.path().join("evidence.jsonl"),
+        )
+        .unwrap();
+        let binding = text_runtime_binding(root.path(), controller, "fixture", "fixture").unwrap();
+        let request = CreateSessionRequest::new(
+            SessionOperationId::new("retention:receipt").unwrap(),
+            binding,
+        );
+        let CreateSessionOutcome::Created { session, .. } = sessions.create(request).await.unwrap()
+        else {
+            panic!("created session required");
+        };
+        let locator = session.release().await.unwrap();
+        assert!(sessions.child_retirement_revision(locator).await.is_ok());
+        let (tree, child) = due_child(root.path(), locator);
+        let driver = driver_on(tree, Arc::new(MemoryTreeStore::new()));
+        driver
+            .collect_dormant_children(&sessions, true, true, BTreeSet::new(), None)
+            .await
+            .unwrap();
+        assert!(
+            driver
+                .read(|tree| tree.retired_children().is_empty())
+                .unwrap()
+        );
+        let retries = driver.child_retirement_retry.lock().unwrap();
+        let retry = &retries.heads[&(child.clone(), Action::Probe)];
+        assert_eq!(retry.failures, 1);
+        assert!(!retries.ready(
+            &child,
+            Action::Probe,
+            &locator.to_string(),
+            retry.next.checked_sub(Duration::from_millis(1)).unwrap()
+        ));
+        assert!(retries.ready(&child, Action::Probe, &locator.to_string(), retry.next));
+    }
+
+    #[tokio::test]
+    async fn pending_intents_distinguish_unguarded_and_invalid_receipt_stalls() {
+        let root = tempfile::tempdir().unwrap();
+        let locator = "00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-000000000003"
+            .parse::<SessionLocator>()
+            .unwrap();
+        for (archive, stall) in [
+            (None, ArchiveStall::Unguarded),
+            (
+                Some(ChildArchiveReceipt {
+                    id: "fixture".into(),
+                    sha256: "a".repeat(64),
+                }),
+                ArchiveStall::InvalidReceipt,
+            ),
+        ] {
+            let (mut tree, child) = due_child(root.path(), locator);
+            let approved = BTreeMap::from([(
+                child.clone(),
+                ApprovedHead {
+                    attempt: tree.attempt(&child).unwrap().attempt_id.clone(),
+                    locator: locator.to_string(),
+                    revision: 1,
+                    archive,
+                },
+            )]);
+            let tickets = tree
+                .prepare_child_retention_guarded(u64::MAX, Some(&approved), |_| {})
+                .unwrap();
+            let driver = driver_on(tree, Arc::new(MemoryTreeStore::new()));
+            driver
+                .read(|tree| {
+                    assert_eq!(
+                        driver.retirement_archive_stall(tree, &tickets[0], true),
+                        Some(stall)
+                    );
+                    assert_eq!(
+                        driver.retirement_archive_stall(tree, &tickets[0], false),
+                        (stall == ArchiveStall::InvalidReceipt).then_some(stall)
+                    );
+                })
+                .unwrap();
+            assert_eq!(
+                driver
+                    .prepare_due_retirements(u64::MAX, BTreeMap::new(), &BTreeSet::new(), true)
+                    .await
+                    .unwrap(),
+                []
+            );
+            assert!(
+                !driver.warning_due(Warning::Archive(stall)),
+                "the blocked pass already warned"
+            );
+        }
+    }
 
     #[test]
     fn child_retirement_warning_interval_is_independent_per_error_class() {
-        use TopologyErrorCode::{OperationRecoveryRequired, WorkspaceRecoveryRequired};
+        let refusal = Warning::Refused(TopologyErrorCode::OperationRecoveryRequired);
+        let unguarded = Warning::Archive(ArchiveStall::Unguarded);
+        let invalid = Warning::Archive(ArchiveStall::InvalidReceipt);
         let mut warnings = HousekeepingWarnings::default();
         let start = Instant::now();
-        assert!(warnings.due(OperationRecoveryRequired, start));
+        assert!(warnings.due(refusal, start));
         let later = start + Duration::from_secs(1);
-        assert!(warnings.due(WorkspaceRecoveryRequired, later));
-        assert!(!warnings.due(OperationRecoveryRequired, later));
+        assert!(warnings.due(unguarded, later));
+        assert!(warnings.due(invalid, later));
+        assert!(!warnings.due(refusal, later));
+        assert!(!warnings.due(unguarded, later));
+        assert!(!warnings.due(invalid, later));
         let due = start + HOUSEKEEPING_WARNING_INTERVAL;
-        assert!(warnings.due(OperationRecoveryRequired, due));
-        assert!(!warnings.due(WorkspaceRecoveryRequired, due));
-        assert!(warnings.due(WorkspaceRecoveryRequired, due + Duration::from_secs(1)));
+        assert!(warnings.due(refusal, due));
+        assert!(!warnings.due(unguarded, due));
+        assert!(warnings.due(unguarded, due + Duration::from_secs(1)));
     }
 
     #[test]
@@ -530,5 +698,10 @@ mod tests {
         assert!(retries.ready("a", probe, "head1", next + Duration::from_secs(4)));
         retries.clear("a", probe);
         assert!(retries.ready("a", probe, "head1", next));
+        for _ in 0..20 {
+            retries.refused("a", probe, "head1", start);
+        }
+        assert!(!retries.ready("a", probe, "head1", start + Duration::from_secs(511)));
+        assert!(retries.ready("a", probe, "head1", start + Duration::from_secs(512)));
     }
 }
