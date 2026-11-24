@@ -4588,6 +4588,13 @@ remove only its build-specific `binary_id` field. The offline schema contract
 checks this build-independent pin. The schema title is `plakd wire v2`;
 frame and protocol identifiers retain their exact protocol-12 spellings.
 
+On the protocol-13 definitions branch, `plakd wire schema --protocol 13`
+prints the [draft client contract](../protocol/13/README.md), not a schema
+the host serves. The draft's normalized SHA-256 pin is
+`57c64dba0df2ac898699e8d401e89240d820927957c2bb0101302d891b1e4f42`.
+Plain `plakd wire schema` and exact-match Hello admission remain on 12.
+The coordinated serving switch changes both together.
+
 Protocol 7 adds process-local `operator_prepare {action}` and
 `operator_confirm {nonce}` through that same attachment-free seam. Prepare
 returns a host-authored consequence and a random nonce; confirm replaces it

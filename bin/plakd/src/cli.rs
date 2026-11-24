@@ -665,7 +665,10 @@ enum HostAction {
 #[derive(Debug, Subcommand)]
 enum WireAction {
     /// Print this build's wire v2 JSON Schema, with its protocol version.
-    Schema,
+    Schema {
+        #[arg(long, hide = true, value_parser = ["13"])]
+        protocol: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]

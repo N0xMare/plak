@@ -11,6 +11,72 @@ use crate::views::ToolOperation;
 use crate::views::transcript::{ToolItem, TranscriptItem, TranscriptRow, TranscriptStreamDelta};
 use crate::{ProtocolExtension, SessionObservation};
 
+/// An observation encoded with the framed tool-operation overlay.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(
+    transparent,
+    bound(
+        serialize = "P::Intent: Serialize, P::Observation: Serialize",
+        deserialize = "P::Intent: DeserializeOwned, P::Observation: DeserializeOwned"
+    )
+)]
+pub struct FramedObservation<P: ProtocolExtension>(
+    #[serde(
+        serialize_with = "serialize_observation",
+        deserialize_with = "deserialize_observation"
+    )]
+    pub SessionObservation<P>,
+);
+
+impl<P: ProtocolExtension> schemars::JsonSchema for FramedObservation<P>
+where
+    P::Intent: schemars::JsonSchema,
+    P::Observation: schemars::JsonSchema,
+{
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "FramedObservation".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        ObservationSchema::<P>::json_schema(generator)
+    }
+}
+
+/// A transcript row encoded with the framed tool-operation overlay, not store serde.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FramedTranscriptRow(pub TranscriptRow);
+
+impl Serialize for FramedTranscriptRow {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut value = serde_json::to_value(&self.0).map_err(serde::ser::Error::custom)?;
+        encode_row(&mut value, &self.0).map_err(serde::ser::Error::custom)?;
+        value.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FramedTranscriptRow {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = Value::deserialize(deserializer)?;
+        let operation = overlay(&value);
+        row(&mut value).map_err(serde::de::Error::custom)?;
+        let mut decoded = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        if let TranscriptRow::Tool(tool) = &mut decoded {
+            tool.wire_operation = operation;
+        }
+        Ok(Self(decoded))
+    }
+}
+
+impl schemars::JsonSchema for FramedTranscriptRow {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "WireTranscriptRow".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schema::<TranscriptRow>(generator)
+    }
+}
+
 fn overlay(value: &Value) -> Option<ToolOperation> {
     value
         .get("operation")

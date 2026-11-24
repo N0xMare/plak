@@ -12,6 +12,7 @@ mod accounts;
 pub use accounts::{AccountChoice, AccountChoiceRefusal};
 pub mod console;
 pub mod lifecycle;
+pub mod v13;
 
 mod reload;
 pub use reload::{CarryCapacityProbe, ReloadProbe, ReloadRequest, ReloadTarget, ReopenProbe};

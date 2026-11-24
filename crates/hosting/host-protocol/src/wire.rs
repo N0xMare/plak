@@ -63,6 +63,7 @@ pub use placement::{
     SessionOptions, WorkspaceOptions, WorkspaceProbe, WorkspaceRefusalKind,
 };
 pub use tool::WireToolItem;
+pub use tool_rows::{FramedObservation, FramedTranscriptRow};
 
 /// The wire protocol version; a peer with another is refused. 3 dropped
 /// `hello`'s locality; 4 lets a welcome name no session and adds the

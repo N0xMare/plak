@@ -1,0 +1,10 @@
+{"frame":"hello","proto":13,"binary_id":"example-client","caps":[]}
+{"frame":"request","id":1,"op":{"op":"attach","node":{"tree_id":"tree-1","agent_id":"root"}}}
+{"frame":"request","id":2,"op":{"op":"older_history","attachment":7,"cursor":"older-30"}}
+{"frame":"request","id":3,"op":{"op":"read_transcript_row","attachment":7,"row":{"anchor":41,"lane":"runtime","ordinal":0},"offset":3}}
+{"frame":"request","id":4,"op":{"op":"attachment_status","attachment":7}}
+{"frame":"request","id":5,"op":{"op":"attach","node":{"tree_id":"tree-1","agent_id":"root"},"retained":{"host_generation":42,"revision":10,"token":"viewport-1"}}}
+{"frame":"request","id":6,"op":{"op":"host","request":{"request":"accounts_usage","window":"24h"}}}
+{"frame":"request","id":7,"op":{"op":"older_history","attachment":7,"cursor":"expired-20"}}
+{"frame":"request","id":8,"op":{"op":"host","request":{"request":"changes_status","target":{"session":"session-1","node":"root"}}}}
+{"frame":"request","id":9,"op":{"op":"read_transcript_row","attachment":7,"row":{"anchor":31,"lane":"runtime","ordinal":0},"offset":2}}

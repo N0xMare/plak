@@ -469,13 +469,13 @@ pub enum ReadAction {
     Retry,
 }
 
-fn required<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned>(
+pub(crate) fn required<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned>(
     deserializer: D,
 ) -> Result<T, D::Error> {
     T::deserialize(deserializer)
 }
 
-fn nullable<T: schemars::JsonSchema>(
+pub(crate) fn nullable<T: schemars::JsonSchema>(
     generator: &mut schemars::SchemaGenerator,
 ) -> schemars::Schema {
     <Option<T> as schemars::JsonSchema>::json_schema(generator)

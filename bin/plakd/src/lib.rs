@@ -362,7 +362,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
     }
 
     match command {
-        Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
+        Command::WireSchema { draft } => {
+            return wire_schema::print(&mut io::stdout().lock(), draft);
+        }
         Command::BuildInfo => return build_identity::print_build_info(&mut io::stdout().lock()),
         Command::Deploy(action) => return deploy::run(action),
         Command::DeployTarget => return deploy::target(),
@@ -1266,7 +1268,7 @@ fn execute_command<Backend: AccountOps>(
         | Command::HostConnect { .. }
         | Command::HostUpgrade { .. }
         | Command::HostUpgradeVerdict { .. }
-        | Command::WireSchema
+        | Command::WireSchema { .. }
         | Command::BuildInfo
         | Command::SessionCheckBinding { .. }
         | Command::SessionTraceReceipt(_)
