@@ -327,6 +327,7 @@ another session's jobs.
       host.lock                   held by this build's `plakd host` for its life, naming its pid and binary (section 4.6); not state
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
+  traces/<id>.cN.<uuid>.json settled child traces, 0600 in 0700 (§2.5.1)
   references/<id>.json        obsolete archives, retained only for cleanup (§2.5)
   telemetry/telemetry-v22.sqlite3 disposable analytics, schema 22
   logs/plak.log               PLAK_LOG boundary spans
@@ -1738,6 +1739,97 @@ upgrade invocation reports the existing mappings. Source stores,
 exports and executable remain available for reference, not automatic deletion.
 Keep both installed snapshots and their sidecars through acknowledged success.
 
+##### Settled child traces
+
+`plakd session trace <root-id>.cN [--out PATH]` writes one plain UTF-8 JSON
+document and prints its path. It uses the child show/log address grammar:
+the full root product id or a unique root prefix from the current workspace,
+plus the exact child suffix. A full address from the inventory can be used
+from any workspace. The default destination is
+`$PLAK_HOME/traces/<root-id>.cN.<uuid>.json` in a 0700 directory. Files publish
+atomically with mode 0600 and never overwrite an existing destination. The
+256 MiB file bound refuses instead of excerpting; callers may gzip a
+published file themselves.
+
+`plakd session traces --settled [--since RFC3339] --json` emits one JSON
+array, oldest settlement first, then by child address. It covers the current
+root product session of each tree in the selected home, including archived
+roots and other workspaces. The lower time bound is inclusive. Entries use
+the same fields as `source` below; the listing reads checkpoint metadata,
+not conversation objects, and is not a transactional promise that every
+entry remains eligible by the time it is captured.
+An ambiguous root line or an ineligible individual runtime head is skipped
+without suppressing other entries. Stderr identifies the skipped root or
+child and its reason (`ambiguous_root`, or `runtime_read` with the typed
+session error kind). Ordinary ineligible tree states are not reported as
+errors. The listing first admits the tree and runtime stores read-only.
+Without saved roots, as in a new home, absent stores are allowed. With
+saved roots, a missing tree or runtime database is an error, not an empty
+inventory: a product root record alone cannot prove its tree was never
+persisted. Unreadable stores, refused schemas or revisions, and integrity
+errors encountered during admission or inspection fail the command before
+it writes any JSON. Failure to read the product inventory or write the CLI
+streams also fails the command.
+
+Both operations read the product, tree and runtime stores through separate
+read-only snapshots. Neither catches up projectors, takes a lease or starts
+or contacts a host, runner or provider. Capture requires the selected child
+to have a stopped attempt with a settlement time and an exact, retained
+quiescent checkpoint with durable terminal evidence for its jobs. Pending,
+Running, Paused, Sealing, recovery-required, retiring or collected children,
+and children with pending input or recovery, are ineligible. Parent and
+sibling work and delivery of the selected child's result to its parent do
+not block capture. Capture rechecks the selected child, attempt, exact head
+and runtime session revision after reading; unrelated tree advances do not
+invalidate it. Retry if the selected facts moved.
+
+The independent research format is `{"format":"plak-child-trace","version":1}`,
+not a carry document and never importable. In v1:
+
+- `state_key` and nullable `producer_binary_id` identify the source build's
+  state format and executable. `captured_at_unix_ms` is observation time.
+- `source` carries `child_id` (a full CLI address), `child_agent_id`, `tree_id`,
+  `root_session_id`, `root_agent_id`, `parent_agent_id`, `attempt_id`, `head` (the slash-joined
+  `runtime_session_id`, `branch_id` and `checkpoint_id`), `revision` (the
+  runtime session revision), and `settled_at_unix_ms`. Archive identity is
+  scoped to the source home: use the state key, runtime session and revision,
+  and verify the branch, checkpoint and attempt, not just the `cN` ordinal.
+- `model` and `route` are the exact checkpoint's requested model and route
+  ids; nullable `effort` is the child's recorded selection, not a
+  per-request effective-effort ledger. `attempt` records status, nullable
+  retry and failure kind, start time in Unix milliseconds and the nullable
+  submitted `result`: `output_json` is the submitted text as a JSON string,
+  subject to redaction. `source_sha256` hashes the UTF-8 bytes of that
+  displayed, redacted text, not the unredacted source.
+- `mail` records retained incoming and outgoing message identities, endpoints,
+  purposes, priorities, reply links, disposition and durable delivery state
+  in message-id order from the initial tree snapshot. A result mail can
+  include the recorded `result_attempt_id`; other mail has null there.
+- `history.groups` contains the ordered committed canonical groups, messages
+  and blocks, with the neutral field and tag vocabulary described above
+  (as fixed for trace v1, not whatever a later carry version writes). It
+  preserves tool calls and all retained result parts rather than display
+  previews. Arguments are strings; text and structured values use the
+  shared display redaction rules, with additional authorization/cookie
+  field and URI credential redaction. Changed structured values are
+  re-encoded; otherwise their raw text is retained. Media keeps inline
+  bytes/data URLs and HTTPS references; references are never fetched.
+  Reasoning keeps recorded visibility and text, with `replay: null`. Opaque
+  items keep their fallback and place in the sequence, with `replay: null`;
+  compaction keeps the summary and counts, with `native` and `binding` null.
+  There are no replay-account or replay-model fields.
+- `unavailable` names omissions: compacted or clipped material, hidden
+  reasoning and provider replay, independent mailbox bodies, uncommitted
+  events, raw process captures, workspaces, stored credentials, account
+  authority, named state, per-request route and usage history, and a full timeline.
+  Canonical messages do not have individual timestamps. Display redaction
+  is best effort for arbitrary conversation text; inline media is not
+  scanned. A trace remains private conversation data.
+
+Compatible optional additions do not change v1's existing meanings. A carry
+version bump does not change the trace version. Publication is not a
+retirement receipt (chapter 03 §6.7).
+
 #### 2.5.2 Session lifecycle: rename, archive, delete
 
 
@@ -2850,6 +2942,7 @@ version. There is no top-level prompt positional or terminal resume command.
 | `gateway check` | version negotiation and account list |
 | `usage [--account <id>] [--session <uuid>]` | the two options conflict |
 | `session list`, `session show <id>[.cN]`, `session log <id>[.cN] [--kind <k>] [--tail <n>] [--json]`, `session recover <id>`, `session export <id> [--out <path>]`, `session import <path>`, `session delete <id> [--yes] [--abandon-children]`, `session gc <id> \| --all` | log `--tail` defaults to 100; it must be at least 1; `recover` opens the session, abandons an unfinished turn once, and releases it; `export` and `import` implement the cross-build session reference (§2.5.1); `delete` removes a session and its retained history (§2.5.2); `gc` reclaims superseded history (§2.5.3) |
+| `session trace <id>.cN [--out <path>]`, `session traces --settled [--since RFC3339] --json` | capture a settled child's research trace or list eligible revisions in the home (§2.5.1); neither attaches or mutates stores |
 | `state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` | Confirm and delete unused non-current state and older-schema telemetry (including its SQLite sidecars); retain current/newer telemetry and session references unless explicitly selected; refuse locks or unsafe paths (§2.5). |
 | `telemetry status [--views]`, `telemetry sql [<query>] [--json]`, `telemetry prune [--max-age-days <n>] [--max-bytes <n>] [--yes]` | the local analytics store |
 | `models [<account>]` | read-only catalog discovery, in every build |
@@ -2909,7 +3002,7 @@ snapshot it inspects, never a writable store.
 session's persisted tree and displays its node/attempt status, recorded locator
 and canonical recovery state. `N` is a non-negative integer in the tree's
 canonical decimal spelling (no leading zeroes). This address is read-only and
-accepted only by `show` and `log`, never `delete` or a session mutation.
+accepted only by `show`, `log` and `trace`, never `delete` or a session mutation.
 An unknown child fails without opening or changing a runtime.
 
 `session log <id>.cN` reads the child's canonical conversation through its
@@ -3038,10 +3131,10 @@ the rule for `login`, `logout`, `refresh`, `key`, `key set`, `key clear`,
 `secret`, `secret set`, `secret rm`, `mcp` and each `mcp` verb without its id
 (`login`, `logout` and `prompts` included),
 `run`, `config`, `config set` without a key, `session`, `session show`,
-`session log`, `session recover`, `session export`, `session import`, `session delete`, `session gc`, `telemetry`, `telemetry sql`, and `models`. The exceptions are
+`session log`, `session recover`, `session export`, `session trace`, `session import`, `session delete`, `session gc`, `telemetry`, `telemetry sql`, and `models`. The exceptions are
 the bare forms that are themselves complete commands — `status` (every
 vertical), `key status`, `secret list`, `mcp list`, `usage`, `resume`, `session list`, `doctor`, and
-`agent` — and `telemetry prune`, which refuses (§3.4).
+`agent` — and `telemetry prune` and `session traces`, which refuse without their required arguments.
 
 Global help closes with the warning that agents use full coding tools by
 default with no approval gates, and that process tools are worker-isolated,

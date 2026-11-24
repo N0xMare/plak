@@ -1056,6 +1056,23 @@ enum SessionAction {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Write the retained canonical trace of one settled child.
+    Trace {
+        id: Option<String>,
+        /// Where to write it; default a new private file under `~/.plak/traces/`.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
+    /// List eligible child trace revisions across this Plak home.
+    Traces {
+        #[arg(long, required = true)]
+        settled: bool,
+        /// Include children settled at or after this RFC 3339 timestamp.
+        #[arg(long, value_parser = parse_trace_since)]
+        since: Option<time::OffsetDateTime>,
+        #[arg(long, required = true)]
+        json: bool,
+    },
     /// Create a new session from an export document.
     Import { path: Option<std::path::PathBuf> },
     /// Delete a session and all of its retained history. Refused while it is
@@ -1127,6 +1144,7 @@ impl SessionAction {
             | Self::Log { id: None, .. }
             | Self::Recover { id: None }
             | Self::Export { id: None, .. }
+            | Self::Trace { id: None, .. }
             | Self::Import { path: None }
             | Self::Delete { id: None, .. }
             | Self::Gc {
@@ -1140,6 +1158,13 @@ impl SessionAction {
             #[cfg(feature = "maintainer")]
             Self::Rehearse { id } => Ok(Command::SessionRehearse { id }),
             Self::Export { id: Some(id), out } => Ok(Command::SessionExport { id, out }),
+            Self::Trace { id: Some(id), out } => Ok(Command::SessionTrace { id, out }),
+            Self::Traces {
+                settled: true,
+                since,
+                json: true,
+            } => Ok(Command::SessionTraces { since }),
+            Self::Traces { .. } => Err("session traces requires --settled and --json".to_owned()),
             Self::Reload {
                 id: Some(id),
                 expect_binary: Some(expect_binary),
@@ -1179,6 +1204,11 @@ impl SessionAction {
             }
         }
     }
+}
+
+fn parse_trace_since(value: &str) -> Result<time::OffsetDateTime, String> {
+    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+        .map_err(|_| "expected an RFC 3339 timestamp".to_owned())
 }
 
 /// The prompt words after `--` and the `--image` paths of one `plakd run`.

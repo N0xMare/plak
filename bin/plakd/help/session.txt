@@ -10,6 +10,8 @@ USAGE:
   plakd session log <session>[.cN] [--kind kind] [--tail N (default 100)] [--json]
   plakd session recover <session>
   plakd session export <session> [--out <path>]
+  plakd session trace <session>.cN [--out <path>]
+  plakd session traces --settled [--since RFC3339] --json
   plakd session import <path>
   plakd session delete <session> [--yes] [--abandon-children] [--abandon-jobs]
   plakd session gc <session> | --all
@@ -17,6 +19,10 @@ USAGE:
 
   show/log accept .cN to read only that child. Child log reads its canonical
   history, not the root event log; --kind filters its actor (e.g. user).
+
+  trace writes a settled child's retained canonical history as private
+  plak-child-trace v1 JSON (default ~/.plak/traces/). traces lists eligible
+  child revisions across the home. Neither opens a runtime or needs a host.
 
   recover reopens a session whose turn was interrupted, records once what that
   turn left unobserved, and releases it; the next prompt does the same on its own.

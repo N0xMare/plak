@@ -1,4 +1,5 @@
-//! Plak-owned export-v12/v13 history vocabulary. Never serialize canonical runtime values here.
+//! Neutral canonical block vocabulary shared by carry and child trace v1.
+//! A carry grammar change must preserve the trace v1 encoding.
 use base64::Engine as _;
 use plakous::model::{
     Actor, AudioBlock, CallId, CanonicalHistory, CitationBlock, CitationRange, CitationSource,
@@ -15,6 +16,31 @@ use plakous::sessions::PortableSessionHistory;
 use serde::{Deserialize, Serialize};
 
 use super::document::ImportError;
+
+mod trace_redaction;
+pub(crate) use trace_redaction::redact_payload;
+
+#[derive(Clone, Copy)]
+enum Disclosure {
+    Carry,
+    Trace,
+}
+
+impl Disclosure {
+    fn text(self, text: &str) -> String {
+        match self {
+            Self::Carry => text.to_owned(),
+            Self::Trace => redact_payload(text),
+        }
+    }
+
+    fn uri(self, uri: &str) -> String {
+        match self {
+            Self::Carry => uri.to_owned(),
+            Self::Trace => trace_redaction::uri(uri),
+        }
+    }
+}
 
 type Result<T> = std::result::Result<T, ImportError>;
 fn invalid(error: impl std::fmt::Display) -> ImportError {
@@ -54,6 +80,18 @@ struct Group {
     kind: String,
     messages: Vec<Message>,
 }
+#[derive(Serialize)]
+pub(crate) struct TraceHistory {
+    groups: Vec<Group>,
+}
+
+impl TraceHistory {
+    pub(crate) fn encode(segments: &[HistorySegment]) -> Result<Self> {
+        Ok(Self {
+            groups: encode_groups(segments, Disclosure::Trace)?,
+        })
+    }
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Message {
@@ -74,7 +112,7 @@ enum Source {
     DataUrl { data_url: String },
 }
 impl Source {
-    fn export(source: &MediaSource) -> Result<Self> {
+    fn export(source: &MediaSource, disclosure: Disclosure) -> Result<Self> {
         if let Some(bytes) = source.as_bytes() {
             return Ok(Self::Bytes {
                 bytes: base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -83,7 +121,7 @@ impl Source {
         if let Some(uri) = source.as_uri() {
             Self::validate_uri(uri)?;
             return Ok(Self::Uri {
-                uri: uri.to_owned(),
+                uri: disclosure.uri(uri),
             });
         }
         if let Some(data_url) = source.as_data_url() {
@@ -129,14 +167,14 @@ enum Owner {
     Provider { namespace: String },
 }
 impl Owner {
-    fn export(owner: &ToolExecutionOwner) -> Result<Self> {
+    fn export(owner: &ToolExecutionOwner, disclosure: Disclosure) -> Result<Self> {
         Ok(match owner {
             ToolExecutionOwner::Local => Self::Local {},
             ToolExecutionOwner::Mcp { server } => Self::Mcp {
-                server: server.as_str().to_owned(),
+                server: disclosure.text(server.as_str()),
             },
             ToolExecutionOwner::ProviderHosted { provider_kind } => Self::Provider {
-                namespace: provider_kind.as_str().to_owned(),
+                namespace: disclosure.text(provider_kind.as_str()),
             },
             _ => return Err(invalid("unsupported execution owner")),
         })
@@ -184,12 +222,12 @@ fn entry_id(id: &str) -> Result<EntryId> {
     EntryId::try_from(uuid::Uuid::parse_str(id).map_err(invalid)?).map_err(invalid)
 }
 impl Correlation {
-    fn export(c: &ToolCorrelation) -> Self {
+    fn export(c: &ToolCorrelation, disclosure: Disclosure) -> Self {
         let caller = match c.caller_lineage() {
             ToolCallerLineage::Direct => Caller::Direct {},
             ToolCallerLineage::ProviderProgrammatic { kind, execution_id } => Caller::Provider {
-                namespace: kind.as_str().to_owned(),
-                execution_id: execution_id.clone(),
+                namespace: disclosure.text(kind.as_str()),
+                execution_id: disclosure.text(execution_id),
             },
             ToolCallerLineage::LocalProgrammatic {
                 evaluation_operation_id,
@@ -201,15 +239,15 @@ impl Correlation {
             } => Caller::Local {
                 operation: *evaluation_operation_id,
                 generation: *interpreter_generation,
-                cell: cell_id.clone(),
+                cell: disclosure.text(cell_id),
                 sequence: *request_sequence,
                 child: child_call_id.to_string(),
                 depth: *depth,
             },
         };
         Self {
-            remote_call: c.remote_call_id().map(str::to_owned),
-            container: c.container_id().map(str::to_owned),
+            remote_call: c.remote_call_id().map(|id| disclosure.text(id)),
+            container: c.container_id().map(|id| disclosure.text(id)),
             caller,
         }
     }
@@ -450,7 +488,7 @@ enum Block {
         binding: Option<NativeBinding>,
     },
     Opaque {
-        replay: Replay,
+        replay: Option<Replay>,
         fallback: Fallback,
     },
 }
@@ -466,77 +504,71 @@ impl Block {
         clippy::too_many_lines,
         reason = "exhaustive neutral content conversion"
     )]
-    fn export(block: &ContentBlock) -> Result<Self> {
+    fn export(block: &ContentBlock, disclosure: Disclosure) -> Result<Self> {
         Ok(match block {
             ContentBlock::Text(b) => Self::Text {
-                text: b.text().to_owned(),
+                text: disclosure.text(b.text()),
                 phase: b.phase().map(phase_out).transpose()?,
             },
             ContentBlock::Image(b) => Self::Image {
-                mime: b.media_type().to_owned(),
-                source: Source::export(b.source())?,
+                mime: disclosure.text(b.media_type()),
+                source: Source::export(b.source(), disclosure)?,
                 detail: b.detail().map(detail_out).transpose()?,
             },
             ContentBlock::Document(b) => Self::Document {
-                mime: b.media_type().to_owned(),
-                source: Source::export(b.source())?,
+                mime: disclosure.text(b.media_type()),
+                source: Source::export(b.source(), disclosure)?,
             },
             ContentBlock::Audio(b) => Self::Audio {
-                mime: b.media_type().to_owned(),
-                source: Source::export(b.source())?,
+                mime: disclosure.text(b.media_type()),
+                source: Source::export(b.source(), disclosure)?,
             },
             ContentBlock::ToolCall(b) => Self::Call {
                 id: b.call_id().to_string(),
-                name: b.exposed_name().as_str().to_owned(),
-                canonical_name: b.canonical_name().as_str().to_owned(),
-                owner: Owner::export(b.owner())?,
+                name: disclosure.text(b.exposed_name().as_str()),
+                canonical_name: disclosure.text(b.canonical_name().as_str()),
+                owner: Owner::export(b.owner(), disclosure)?,
                 state: state_out(b.state())?,
-                correlation: Correlation::export(b.correlation()),
-                arguments: b.raw_arguments().to_owned(),
+                correlation: Correlation::export(b.correlation(), disclosure),
+                arguments: disclosure.text(b.raw_arguments()),
             },
             ContentBlock::ToolResult(b) => Self::Result {
                 id: b.call_id().to_string(),
-                owner: Owner::export(b.owner())?,
+                owner: Owner::export(b.owner(), disclosure)?,
                 outcome: result_out(b.kind())?,
                 parts: b
                     .parts()
                     .iter()
-                    .map(|p| match p {
-                        ToolResultPart::Text(b) => Self::export(&ContentBlock::Text(b.clone())),
-                        ToolResultPart::Image(b) => Self::export(&ContentBlock::Image(b.clone())),
-                        ToolResultPart::Document(b) => {
-                            Self::export(&ContentBlock::Document(b.clone()))
-                        }
-                        ToolResultPart::Audio(b) => Self::export(&ContentBlock::Audio(b.clone())),
-                        ToolResultPart::Opaque(b) => Self::export(&ContentBlock::Opaque(b.clone())),
-                        _ => Err(invalid("unsupported tool result part")),
-                    })
+                    .map(|p| Self::export_part(p, disclosure))
                     .collect::<Result<_>>()?,
-                correlation: Correlation::export(b.correlation()),
+                correlation: Correlation::export(b.correlation(), disclosure),
             },
             ContentBlock::ToolResultUpdate(b) => Self::Update {
                 id: b.call_id().to_string(),
-                owner: Owner::export(b.owner())?,
-                text: b.text().text().to_owned(),
+                owner: Owner::export(b.owner(), disclosure)?,
+                text: disclosure.text(b.text().text()),
                 phase: b.text().phase().map(phase_out).transpose()?,
-                correlation: Correlation::export(b.correlation()),
+                correlation: Correlation::export(b.correlation(), disclosure),
             },
             ContentBlock::Reasoning(b) => Self::Reasoning {
                 visibility: visibility_out(b.visibility())?,
-                text: b.text().map(str::to_owned),
-                replay: b.replay().map(Replay::export).transpose()?,
+                text: b.text().map(|text| disclosure.text(text)),
+                replay: match disclosure {
+                    Disclosure::Carry => b.replay().map(Replay::export).transpose()?,
+                    Disclosure::Trace => None,
+                },
             },
             ContentBlock::Refusal(b) => Self::Refusal {
-                text: b.text().to_owned(),
+                text: disclosure.text(b.text()),
             },
             ContentBlock::Citation(b) => Self::Citation {
                 citation: Citation {
                     item: b.target().item().to_string(),
                     block: b.target().block_index(),
-                    source: b.source().source_id().to_owned(),
-                    annotation: b.source().annotation_id().to_owned(),
-                    uri: b.source().uri().map(str::to_owned),
-                    title: b.source().title().map(str::to_owned),
+                    source: disclosure.text(b.source().source_id()),
+                    annotation: disclosure.text(b.source().annotation_id()),
+                    uri: b.source().uri().map(|uri| disclosure.uri(uri)),
+                    title: b.source().title().map(|title| disclosure.text(title)),
                     range: b
                         .range()
                         .map(|r| {
@@ -550,24 +582,47 @@ impl Block {
                 },
             },
             ContentBlock::Compaction(b) => Self::Compaction {
-                summary: b.summary().to_owned(),
+                summary: disclosure.text(b.summary()),
                 turns: b.summarized_turns().map(|t| [t.prompts(), t.turns()]),
-                native: b.native_item().map(str::to_owned),
-                binding: b.native_binding().map(NativeBinding::export).transpose()?,
+                native: match disclosure {
+                    Disclosure::Carry => b.native_item().map(str::to_owned),
+                    Disclosure::Trace => None,
+                },
+                binding: match disclosure {
+                    Disclosure::Carry => {
+                        b.native_binding().map(NativeBinding::export).transpose()?
+                    }
+                    Disclosure::Trace => None,
+                },
             },
             ContentBlock::Opaque(b) => Self::Opaque {
-                replay: Replay::export(b.replay())?,
+                replay: match disclosure {
+                    Disclosure::Carry => Some(Replay::export(b.replay())?),
+                    Disclosure::Trace => None,
+                },
                 fallback: match b.fallback() {
                     OpaqueFallback::Omit => Fallback::Omit {},
-                    OpaqueFallback::SemanticSummary(text) => {
-                        Fallback::Summary { text: text.clone() }
-                    }
+                    OpaqueFallback::SemanticSummary(text) => Fallback::Summary {
+                        text: disclosure.text(text),
+                    },
                     OpaqueFallback::CompatibleReplay => Fallback::CompatibleReplay {},
                     _ => return Err(invalid("unsupported opaque fallback")),
                 },
             },
             _ => return Err(invalid("unsupported content block")),
         })
+    }
+
+    fn export_part(part: &ToolResultPart, disclosure: Disclosure) -> Result<Self> {
+        let block = match part {
+            ToolResultPart::Text(b) => ContentBlock::Text(b.clone()),
+            ToolResultPart::Image(b) => ContentBlock::Image(b.clone()),
+            ToolResultPart::Document(b) => ContentBlock::Document(b.clone()),
+            ToolResultPart::Audio(b) => ContentBlock::Audio(b.clone()),
+            ToolResultPart::Opaque(b) => ContentBlock::Opaque(b.clone()),
+            _ => return Err(invalid("unsupported tool result part")),
+        };
+        Self::export(&block, disclosure)
     }
     #[allow(
         clippy::too_many_lines,
@@ -704,7 +759,9 @@ impl Block {
             }
             Self::Opaque { replay, fallback } => ContentBlock::Opaque(
                 OpaqueBlock::new(
-                    replay.import()?,
+                    replay
+                        .ok_or_else(|| invalid("opaque replay is missing"))?
+                        .import()?,
                     match fallback {
                         Fallback::Omit {} => OpaqueFallback::Omit,
                         Fallback::Summary { text } => OpaqueFallback::SemanticSummary(text),
@@ -724,38 +781,42 @@ impl std::fmt::Debug for History {
     }
 }
 
+fn encode_groups(segments: &[HistorySegment], disclosure: Disclosure) -> Result<Vec<Group>> {
+    segments
+        .iter()
+        .map(|g| {
+            Ok(Group {
+                kind: group_out(g.kind())?,
+                messages: g
+                    .items()
+                    .iter()
+                    .map(|m| {
+                        Ok(Message {
+                            id: m.id().to_string(),
+                            actor: actor_out(m.actor())?,
+                            origin: origin_out(m.provenance())?,
+                            presentation_subject: m
+                                .presentation_subject()
+                                .map(|text| disclosure.text(text)),
+                            blocks: m
+                                .blocks()
+                                .iter()
+                                .map(|block| Block::export(block, disclosure))
+                                .collect::<Result<_>>()?,
+                        })
+                    })
+                    .collect::<Result<_>>()?,
+            })
+        })
+        .collect()
+}
+
 impl History {
     pub(super) fn export(history: &PortableSessionHistory) -> Result<Self> {
-        let groups = history
-            .segments()
-            .iter()
-            .map(|g| {
-                Ok(Group {
-                    kind: group_out(g.kind())?,
-                    messages: g
-                        .items()
-                        .iter()
-                        .map(|m| {
-                            Ok(Message {
-                                id: m.id().to_string(),
-                                actor: actor_out(m.actor())?,
-                                origin: origin_out(m.provenance())?,
-                                presentation_subject: m.presentation_subject().map(str::to_owned),
-                                blocks: m
-                                    .blocks()
-                                    .iter()
-                                    .map(Block::export)
-                                    .collect::<Result<_>>()?,
-                            })
-                        })
-                        .collect::<Result<_>>()?,
-                })
-            })
-            .collect::<Result<_>>()?;
         let history = Self {
             replay_account: history.replay_account().to_owned(),
             replay_model: history.replay_model().as_str().to_owned(),
-            groups,
+            groups: encode_groups(history.segments(), Disclosure::Carry)?,
         };
         history.validate_size()?;
         let mut counter = ByteCounter(0);

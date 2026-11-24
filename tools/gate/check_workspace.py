@@ -1721,6 +1721,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    # Child traces share the transcript redactor without inheriting preview bounds.
+    ("plakd", "src/carry/history/trace_redaction.rs"): {"tools": {"preview_redaction"}},
     # Deploy distinguishes API refusals without exposing provider bodies,
     # and its Codex cutoff must refuse an explicit loss of output events.
     ("plakd", "src/deploy/canary.rs"): {"gateway": {"ApiCanaryFailure"}},

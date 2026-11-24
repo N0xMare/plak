@@ -71,6 +71,10 @@ impl Command {
                 id,
                 out: out.map(at),
             },
+            Self::SessionTrace { id, out } => Self::SessionTrace {
+                id,
+                out: out.map(at),
+            },
             Self::SessionImport { path } => Self::SessionImport { path: at(path) },
             Self::WriteBinaryManifest { directory } => Self::WriteBinaryManifest {
                 directory: at(directory),
@@ -261,6 +265,13 @@ pub(crate) enum Command {
     SessionExport {
         id: String,
         out: Option<PathBuf>,
+    },
+    SessionTrace {
+        id: String,
+        out: Option<PathBuf>,
+    },
+    SessionTraces {
+        since: Option<time::OffsetDateTime>,
     },
     SessionImport {
         path: PathBuf,
@@ -571,6 +582,8 @@ impl Command {
             | Self::SessionShow { .. }
             | Self::SessionRecover { .. }
             | Self::SessionExport { .. }
+            | Self::SessionTrace { .. }
+            | Self::SessionTraces { .. }
             | Self::SessionImport { .. }
             | Self::SessionDelete { .. }
             | Self::SessionGc { .. }
@@ -661,6 +674,8 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
             )
             | Command::ConfigShow
             | Command::SessionShow { .. }
+            | Command::SessionTrace { .. }
+            | Command::SessionTraces { .. }
             | Command::SessionCheckBinding { .. }
             | Command::SessionLog { .. }
     )

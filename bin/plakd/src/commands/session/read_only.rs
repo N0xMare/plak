@@ -58,7 +58,7 @@ fn selected_child(
     Ok((node.clone(), attempt))
 }
 
-fn child_locator(node: &NodeRecord) -> CliResult<SessionLocator> {
+pub(super) fn child_locator(node: &NodeRecord) -> CliResult<SessionLocator> {
     node.session_locator
         .as_deref()
         .ok_or_else(|| CliFailure::new("child canonical locator unavailable"))?

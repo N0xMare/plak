@@ -103,23 +103,8 @@ impl AgentSessions {
         path: impl AsRef<Path>,
         locator: SessionLocator,
     ) -> Result<PortableSessionHistory, AgentSessionsError> {
-        let loaded =
-            SqliteSessionStore::inspect_branch(path, locator.session_ref()).map_err(store_error)?;
-        let exact = ExactSource::validate(locator, &loaded)?;
+        let exact = Self::read_export_source(path, locator)?;
         let manifest = exact.checkpoint.manifest();
-        if !matches!(manifest.lifecycle(), RuntimeLifecycle::Quiescent) {
-            return Err(AgentSessionsError::new(
-                AgentSessionsErrorKind::InvalidInput,
-                "session head is an unfinished turn; recover it before carrying its history",
-            ));
-        }
-        require_export_job_terminals(
-            manifest
-                .jobs()
-                .rows()
-                .iter()
-                .any(|row| row.terminal.is_none()),
-        )?;
         let mut history = PortableSessionHistory::new(
             manifest.canonical().history().segments().to_vec(),
             manifest.binding().account().subject().to_owned(),
@@ -127,6 +112,56 @@ impl AgentSessions {
         );
         history.named_state = manifest.named_state().clone();
         Ok(history)
+    }
+
+    /// Reads the revision of an exact live, quiescent head with terminal job
+    /// evidence, without loading its canonical history.
+    ///
+    /// # Errors
+    /// As in [`Self::export_history_sqlite`]; individual history objects are not read.
+    #[doc(hidden)]
+    pub fn inspect_settled_revision_sqlite(
+        path: impl AsRef<Path>,
+        locator: SessionLocator,
+    ) -> Result<u64, AgentSessionsError> {
+        let (session, head, inspection) =
+            SqliteSessionStore::inspect_live_head_metadata(path, locator.session_ref())
+                .map_err(store_error)?;
+        check_head_locator(locator, head)?;
+        Self::require_quiescent(&inspection.lifecycle)?;
+        require_export_job_terminals(inspection.has_unsettled_jobs)?;
+        Ok(session.revision().get())
+    }
+
+    /// Reads the settled revision, exact historical route and model binding,
+    /// and canonical segments from one read-only snapshot. No named state is carried.
+    ///
+    /// # Errors
+    /// As in [`Self::export_history_sqlite`].
+    #[doc(hidden)]
+    pub fn inspect_settled_history_sqlite(
+        path: impl AsRef<Path>,
+        locator: SessionLocator,
+    ) -> Result<
+        (
+            u64,
+            super::SessionBindingReport,
+            Vec<plakous_model::HistorySegment>,
+        ),
+        AgentSessionsError,
+    > {
+        let exact = Self::read_export_source(path, locator)?;
+        Ok((
+            exact.session_revision.get(),
+            super::SessionBindingReport::from_checkpoint(&exact.checkpoint),
+            exact
+                .checkpoint
+                .manifest()
+                .canonical()
+                .history()
+                .segments()
+                .to_vec(),
+        ))
     }
 
     /// Process ids (`pN`) of durable job rows that have no terminal evidence.
@@ -165,6 +200,35 @@ impl AgentSessions {
                 }
                 Err(error) => return Err(error),
             }
+        }
+    }
+    fn read_export_source(
+        path: impl AsRef<Path>,
+        locator: SessionLocator,
+    ) -> Result<ExactSource, AgentSessionsError> {
+        let loaded =
+            SqliteSessionStore::inspect_branch(path, locator.session_ref()).map_err(store_error)?;
+        let exact = ExactSource::validate(locator, &loaded)?;
+        let manifest = exact.checkpoint.manifest();
+        Self::require_quiescent(manifest.lifecycle())?;
+        require_export_job_terminals(
+            manifest
+                .jobs()
+                .rows()
+                .iter()
+                .any(|row| row.terminal.is_none()),
+        )?;
+        Ok(exact)
+    }
+
+    fn require_quiescent(lifecycle: &RuntimeLifecycle) -> Result<(), AgentSessionsError> {
+        if matches!(lifecycle, RuntimeLifecycle::Quiescent) {
+            Ok(())
+        } else {
+            Err(AgentSessionsError::new(
+                AgentSessionsErrorKind::InvalidInput,
+                "session head is an unfinished turn; recover it before carrying its history",
+            ))
         }
     }
 }

@@ -2232,6 +2232,13 @@ mail disposition is also accepted; an absent result witness is not evidence.
 New intents are disabled by default; already-published intents still settle
 after restart or after the policy is disabled.
 
+The read-only child trace commands (chapter 02 §2.5.1) can capture a retained,
+settled child independently of its root and siblings. They neither set nor
+check a retirement receipt and do not replace the stricter retirement proof.
+A retirement prerequisite that consumes a durable receipt for the exact
+child, attempt, head and pre-archive revision is a follow-up, not implemented.
+Leave retirement off when preserving conversations depends on the archive.
+
 An accepted command carrying the selected result can still return it, even
 when its root or child recipient looks idle. Retirement requires durable
 evidence that the projector applied that command's non-withheld closing

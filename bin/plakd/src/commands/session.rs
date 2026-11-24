@@ -11,6 +11,7 @@ mod lookup;
 mod read_only;
 pub(crate) mod rebind;
 mod recovery;
+pub(crate) mod trace;
 
 pub(crate) use attached::{
     probe_carry_capacity, probe_prepared_capacity, probe_upgrade_capacity, run_attached_action,

@@ -79,11 +79,25 @@ impl SqliteSessionStore {
         path: impl AsRef<Path>,
         selector: SessionRef,
     ) -> Result<(BranchHead, RuntimeCheckpointInspection), SessionStoreError> {
+        Self::inspect_live_head_metadata(path, selector)
+            .map(|(_, head, inspection)| (head, inspection))
+    }
+
+    /// Includes the owning live session revision in the same read snapshot.
+    ///
+    /// # Errors
+    /// Returns the same failures as [`Self::inspect_branch_metadata`].
+    pub fn inspect_live_head_metadata(
+        path: impl AsRef<Path>,
+        selector: SessionRef,
+    ) -> Result<(SessionHead, BranchHead, RuntimeCheckpointInspection), SessionStoreError> {
         let connection =
             Self::open_inspection(path.as_ref())?.ok_or(SessionStoreError::NotFound)?;
         let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
         admit_inspection_snapshot(&snapshot)?;
-        branch_metadata(&snapshot, selector)
+        let session = live_session(&snapshot, selector.session_id())?;
+        let (head, inspection) = branch_metadata_for_session(&snapshot, selector, session)?;
+        Ok((session, head, inspection))
     }
 
     /// Read current branch revisions through one read-only snapshot.

@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::OptionalExtension as _;
 
-use super::{ProductStore, decode_node, decode_root_profile, from_i64, sessions};
+use super::{
+    ProductStore, ProductStoreOpenError, decode_node, decode_root_profile, from_i64, sessions,
+};
 
 /// The most rows one directory read returns.
 pub const MAX_DIRECTORY_ROWS: i64 = 256;
@@ -64,7 +66,48 @@ pub struct DirectoryEntry {
     pub locator: Option<plakous::sessions::SessionLocator>,
 }
 
+pub(crate) enum TraceRoot {
+    Unique(String),
+    Ambiguous(String),
+}
+
 impl ProductStore {
+    /// The current root product address of each tree, including archived roots.
+    pub(crate) fn trace_roots(
+        paths: &crate::home::paths::PlakPaths,
+    ) -> Result<Vec<TraceRoot>, ProductStoreOpenError> {
+        if matches!(std::fs::symlink_metadata(paths.product_database()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+        {
+            return Ok(Vec::new());
+        }
+        Self::read_only_snapshot(paths, |snapshot| {
+            let roots = snapshot
+                .prepare(
+                    "SELECT s.node_tree_id, s.id FROM sessions s
+                     WHERE s.node_agent_id=s.node_tree_id AND NOT EXISTS (
+                       SELECT 1 FROM sessions successor WHERE successor.source_session_id=s.id
+                       AND successor.node_tree_id=s.node_tree_id
+                       AND successor.node_agent_id=s.node_agent_id
+                     ) ORDER BY s.node_tree_id, s.id",
+                )
+                .and_then(|mut statement| {
+                    statement
+                        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get(1)?)))?
+                        .collect::<Result<Vec<(String, String)>, _>>()
+                })
+                .map_err(|_| "could not read product session roots".to_owned())?;
+            Ok(roots
+                .chunk_by(|a, b| a.0 == b.0)
+                .filter_map(|group| match group {
+                    [(_, id)] => Some(TraceRoot::Unique(id.clone())),
+                    [(tree_id, _), ..] => Some(TraceRoot::Ambiguous(tree_id.clone())),
+                    [] => None,
+                })
+                .collect())
+        })
+    }
+
     /// Recovery candidates are not bounded by the presentation directory.
     #[allow(dead_code, reason = "only the optional host scans recovery candidates")]
     pub(crate) fn continuation_candidates(&self) -> Result<Vec<String>, String> {

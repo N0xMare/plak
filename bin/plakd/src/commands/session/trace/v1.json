@@ -1,0 +1,113 @@
+{
+  "format": "plak-child-trace",
+  "version": 1,
+  "state_key": "example-state",
+  "producer_binary_id": null,
+  "captured_at_unix_ms": 30,
+  "source": {
+    "child_id": "00000000-0000-0000-0000-000000000001.c1",
+    "child_agent_id": "c1",
+    "tree_id": "00000000-0000-0000-0000-000000000001",
+    "root_session_id": "00000000-0000-0000-0000-000000000001",
+    "root_agent_id": "00000000-0000-0000-0000-000000000001",
+    "parent_agent_id": "00000000-0000-0000-0000-000000000001",
+    "attempt_id": "c1-a1",
+    "head": "00000000-0000-0000-0000-000000000010/00000000-0000-0000-0000-000000000011/00000000-0000-0000-0000-000000000012",
+    "runtime_session_id": "00000000-0000-0000-0000-000000000010",
+    "branch_id": "00000000-0000-0000-0000-000000000011",
+    "checkpoint_id": "00000000-0000-0000-0000-000000000012",
+    "revision": 2,
+    "settled_at_unix_ms": 20
+  },
+  "model": "fixture-model",
+  "route": "fixture-route",
+  "effort": "high",
+  "attempt": {
+    "status": "completed",
+    "retry_of": null,
+    "started_at_unix_ms": 10,
+    "failure_kind": null,
+    "result": null
+  },
+  "mail": [],
+  "history": {
+    "groups": [
+      {
+        "kind": "conversation",
+        "messages": [
+          {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "actor": "user",
+            "origin": "user_input",
+            "presentation_subject": null,
+            "blocks": [
+              { "kind": "text", "text": "Inspect this input.", "phase": null },
+              {
+                "kind": "image",
+                "mime": "image/png",
+                "source": { "kind": "bytes", "bytes": "AQID" },
+                "detail": null
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "tool_exchange",
+        "messages": [
+          {
+            "id": "00000000-0000-0000-0000-000000000002",
+            "actor": "assistant",
+            "origin": "model_output",
+            "presentation_subject": null,
+            "blocks": [
+              {
+                "kind": "reasoning",
+                "visibility": "summary",
+                "text": "Recorded reasoning.",
+                "replay": null
+              },
+              {
+                "kind": "call",
+                "id": "00000000-0000-0000-0000-000000000009",
+                "name": "inspect",
+                "canonical_name": "inspect",
+                "owner": { "kind": "local" },
+                "state": "requested",
+                "correlation": { "remote_call": null, "container": null, "caller": { "kind": "direct" } },
+                "arguments": "{\"Authorization\":\"[redacted]\",\"q\":\"input\"}"
+              }
+            ]
+          },
+          {
+            "id": "00000000-0000-0000-0000-000000000003",
+            "actor": "tool",
+            "origin": "tool_execution",
+            "presentation_subject": null,
+            "blocks": [
+              {
+                "kind": "result",
+                "id": "00000000-0000-0000-0000-000000000009",
+                "owner": { "kind": "local" },
+                "outcome": "success",
+                "parts": [
+                  { "kind": "text", "text": "First part.", "phase": null },
+                  { "kind": "text", "text": "Second part.", "phase": null }
+                ],
+                "correlation": { "remote_call": null, "container": null, "caller": { "kind": "direct" } }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "unavailable": [
+    "compacted_or_clipped_material",
+    "hidden_reasoning_and_provider_replay",
+    "mail_bodies_outside_canonical_history",
+    "uncommitted_events_raw_process_captures_and_workspaces",
+    "stored_credentials_account_authority_and_named_state",
+    "per_request_route_usage_and_complete_event_timeline"
+  ]
+}

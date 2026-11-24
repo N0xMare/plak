@@ -302,6 +302,10 @@ impl CarryDocument {
 /// Writes `document` to a new file only the owner can read. An existing file
 /// is refused rather than overwritten.
 pub(crate) fn write_document(path: &Path, document: &CarryDocument) -> Result<(), String> {
+    write_private_json(path, document)
+}
+
+pub(crate) fn write_private_json(path: &Path, document: &impl Serialize) -> Result<(), String> {
     write_document_with_directory_sync(path, document, |parent| {
         fs::File::open(parent).and_then(|dir| dir.sync_all())
     })
@@ -309,33 +313,33 @@ pub(crate) fn write_document(path: &Path, document: &CarryDocument) -> Result<()
 
 fn write_document_with_directory_sync(
     path: &Path,
-    document: &CarryDocument,
+    document: &impl Serialize,
     sync_directory: impl FnOnce(&Path) -> std::io::Result<()>,
 ) -> Result<(), String> {
     let bytes = serde_json::to_vec(document)
-        .map_err(|error| format!("the export document could not be encoded: {error}"))?;
+        .map_err(|error| format!("the JSON document could not be encoded: {error}"))?;
     validate_size("document", bytes.len(), MAX_DOCUMENT_BYTES).map_err(|e| e.to_string())?;
     // The CLI edge made every operator path absolute; a relative one here
     // would resolve against the process working directory.
     if path.is_relative() {
         return Err(format!(
-            "the export path {} is not absolute",
+            "the output path {} is not absolute",
             path.display()
         ));
     }
     let parent = path
         .parent()
-        .ok_or_else(|| format!("the export path {} names no directory", path.display()))?;
+        .ok_or_else(|| format!("the output path {} names no directory", path.display()))?;
     let mut file = tempfile::NamedTempFile::new_in(parent)
-        .map_err(|error| format!("could not create export temporary file: {error}"))?;
+        .map_err(|error| format!("could not create output temporary file: {error}"))?;
     file.write_all(&bytes)
         .and_then(|()| file.as_file().sync_all())
         .map_err(|error| format!("could not write {}: {error}", path.display()))?;
     file.persist_noclobber(path)
         .map_err(|error| format!("could not publish {}: {error}", path.display()))?;
-    // Publication already succeeded; reporting a refusal would hide the kept export.
+    // Publication already succeeded; reporting a refusal would hide the kept file.
     if let Err(error) = sync_directory(parent) {
-        tracing::warn!(path = %path.display(), %error, "export published but directory sync failed");
+        tracing::warn!(path = %path.display(), %error, "output published but directory sync failed");
     }
     Ok(())
 }
@@ -435,7 +439,7 @@ fn raw_history_field<'de, D: serde::Deserializer<'de>>(
     <&serde_json::value::RawValue>::deserialize(d).map(Some)
 }
 
-pub(super) fn private_dir(dir: &Path) -> Result<PathBuf, String> {
+pub(crate) fn private_dir(dir: &Path) -> Result<PathBuf, String> {
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {

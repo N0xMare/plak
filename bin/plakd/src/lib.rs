@@ -1124,6 +1124,14 @@ fn execute_command<Backend: AccountOps>(
             commands::session::export_session(services, &id, out, stdout)?;
             Ok(ProcessOutcome::Success)
         }
+        Command::SessionTrace { id, out } => {
+            commands::session::trace::write_trace(services.paths()?, &id, out, stdout)?;
+            Ok(ProcessOutcome::Success)
+        }
+        Command::SessionTraces { since } => {
+            commands::session::trace::list_traces(services.paths()?, since, stdout, stderr)?;
+            Ok(ProcessOutcome::Success)
+        }
         Command::SessionReloadRequest { id, expect_binary } => {
             commands::session::request_reload(services, &id, &expect_binary, stdout)?;
             Ok(ProcessOutcome::Success)

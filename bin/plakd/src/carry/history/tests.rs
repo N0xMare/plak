@@ -164,7 +164,7 @@ fn entry(id: u128, actor: Actor, blocks: Vec<ContentBlock>) -> ConversationItem 
 fn blocks() -> Vec<ContentBlock> {
     let call = CallId::try_from(uuid::Uuid::from_u128(3)).unwrap();
     let owner = ToolExecutionOwner::Mcp {
-        server: McpServerId::new("docs").unwrap(),
+        server: McpServerId::new("notes").unwrap(),
     };
     let correlation = ToolCorrelation::new(
         Some("remote".into()),
@@ -208,7 +208,7 @@ fn blocks() -> Vec<ContentBlock> {
                 "{\"q\":\"carry\"}",
             )
             .unwrap()
-            .with_canonical_name(ToolName::new("mcp__docs__search").unwrap()),
+            .with_canonical_name(ToolName::new("mcp__notes__search").unwrap()),
         ),
         ContentBlock::ToolResult(
             ToolResultBlock::new(
@@ -269,7 +269,8 @@ fn blocks() -> Vec<ContentBlock> {
 #[test]
 fn every_neutral_block_round_trips_without_runtime_serde() {
     for original in blocks() {
-        let encoded = serde_json::to_vec(&Block::export(&original).unwrap()).unwrap();
+        let encoded =
+            serde_json::to_vec(&Block::export(&original, Disclosure::Carry).unwrap()).unwrap();
         let decoded: Block = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded.import().unwrap(), original);
     }
@@ -277,7 +278,13 @@ fn every_neutral_block_round_trips_without_runtime_serde() {
         MediaSource::uri("https://example.com/image.png").unwrap(),
         MediaSource::data_url("data:image/png;base64,AQID").unwrap(),
     ] {
-        assert_eq!(Source::export(&source).unwrap().import().unwrap(), source);
+        assert_eq!(
+            Source::export(&source, Disclosure::Carry)
+                .unwrap()
+                .import()
+                .unwrap(),
+            source
+        );
     }
     let lineage = ToolCallerLineage::local_programmatic(
         1,
@@ -290,9 +297,79 @@ fn every_neutral_block_round_trips_without_runtime_serde() {
     .unwrap();
     let correlation = ToolCorrelation::new(None, None, lineage).unwrap();
     assert_eq!(
-        Correlation::export(&correlation).import().unwrap(),
+        Correlation::export(&correlation, Disclosure::Carry)
+            .import()
+            .unwrap(),
         correlation
     );
+}
+
+#[test]
+fn exhaustive_child_trace_v1_block_golden() {
+    let mut samples = blocks();
+    let document = DocumentBlock::new(
+        "application/pdf",
+        MediaSource::uri("https://example.com/media.pdf").unwrap(),
+    )
+    .unwrap();
+    let audio = AudioBlock::new(
+        "audio/wav",
+        MediaSource::data_url("data:audio/wav;base64,AQID").unwrap(),
+    )
+    .unwrap();
+    let provider = ToolExecutionOwner::ProviderHosted {
+        provider_kind: NamespaceId::new("hosted.tools").unwrap(),
+    };
+    let local = ToolCallerLineage::local_programmatic(
+        1,
+        2,
+        "cell",
+        3,
+        CallId::try_from(uuid::Uuid::from_u128(4)).unwrap(),
+        1,
+    )
+    .unwrap();
+    let call = CallId::try_from(uuid::Uuid::from_u128(5)).unwrap();
+    samples.extend([
+        ContentBlock::Document(document.clone()),
+        ContentBlock::Audio(audio.clone()),
+        ContentBlock::ToolResult(
+            ToolResultBlock::new(
+                call,
+                provider,
+                ToolResultKind::Failure,
+                vec![
+                    ToolResultPart::Document(document),
+                    ToolResultPart::Audio(audio),
+                ],
+                ToolCorrelation::new(None, None, local).unwrap(),
+            )
+            .unwrap(),
+        ),
+        ContentBlock::Reasoning(
+            ReasoningBlock::new(ReasoningVisibility::Visible, Some("visible".into()), None)
+                .unwrap(),
+        ),
+        ContentBlock::Reasoning(
+            ReasoningBlock::new(ReasoningVisibility::Omitted, None, None).unwrap(),
+        ),
+        ContentBlock::Reasoning(
+            ReasoningBlock::new(ReasoningVisibility::Redacted, None, None).unwrap(),
+        ),
+        ContentBlock::Reasoning(
+            ReasoningBlock::new(ReasoningVisibility::OpaqueReplay, None, Some(replay())).unwrap(),
+        ),
+        ContentBlock::Opaque(OpaqueBlock::new(replay(), OpaqueFallback::Omit).unwrap()),
+        ContentBlock::Opaque(OpaqueBlock::new(replay(), OpaqueFallback::CompatibleReplay).unwrap()),
+    ]);
+
+    let encoded: Vec<_> = samples
+        .iter()
+        .map(|block| Block::export(block, Disclosure::Trace).unwrap())
+        .collect();
+    let expected: serde_json::Value =
+        serde_json::from_str(include_str!("trace-v1-blocks.json")).unwrap();
+    assert_eq!(serde_json::to_value(encoded).unwrap(), expected);
 }
 
 #[test]
@@ -615,7 +692,11 @@ fn closed_unit_variants_refuse_extra_fields_and_media_urls_are_https_only() {
         .import()
         .is_ok()
     );
-    let source = Source::export(&MediaSource::bytes(vec![1, 2, 3]).unwrap()).unwrap();
+    let source = Source::export(
+        &MediaSource::bytes(vec![1, 2, 3]).unwrap(),
+        Disclosure::Carry,
+    )
+    .unwrap();
     assert_eq!(
         serde_json::to_value(source).unwrap(),
         serde_json::json!({"kind":"bytes","bytes":"AQID"})
@@ -691,9 +772,15 @@ fn cumulative_minimal_blocks_and_result_parts_are_bounded_across_messages() {
 #[test]
 fn export_refuses_media_urls_import_would_reject() {
     for uri in ["file:///etc/passwd", "http://example.com/image.png"] {
-        assert!(Source::export(&MediaSource::uri(uri).unwrap()).is_err());
+        assert!(Source::export(&MediaSource::uri(uri).unwrap(), Disclosure::Carry).is_err());
     }
-    assert!(Source::export(&MediaSource::uri("https://example.com/image.png").unwrap()).is_ok());
+    assert!(
+        Source::export(
+            &MediaSource::uri("https://example.com/image.png").unwrap(),
+            Disclosure::Carry
+        )
+        .is_ok()
+    );
 }
 
 #[test]

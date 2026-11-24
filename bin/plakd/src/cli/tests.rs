@@ -1679,6 +1679,10 @@ fn relative_paths_resolve_against_the_launch_directory() {
         Command::SessionExport { out: Some(out), .. } if out == launch.join("x.json")
     ));
     assert!(matches!(
+        resolved(&["session", "trace", "aaaa.c1", "--out", "x.json"]),
+        Command::SessionTrace { id, out: Some(out) } if id == "aaaa.c1" && out == launch.join("x.json")
+    ));
+    assert!(matches!(
         resolved(&["session", "import", "/tmp/x.json"]),
         Command::SessionImport { path } if path.as_os_str() == "/tmp/x.json"
     ));
@@ -1690,4 +1694,26 @@ fn relative_paths_resolve_against_the_launch_directory() {
         parse(args(&["session", "import", "x.json"])).unwrap().resolved_against(None),
         Command::SessionImport { path } if path.as_os_str() == "x.json"
     ));
+}
+
+#[test]
+fn traces_requires_settled_json_and_parses_the_cutoff() {
+    assert!(matches!(
+        parse(args(&["session", "traces", "--settled", "--since", "1970-01-01T01:00:00+01:00", "--json"])).unwrap(),
+        Command::SessionTraces { since: Some(since) } if since == time::OffsetDateTime::UNIX_EPOCH
+    ));
+    for argv in [
+        &["session", "traces", "--settled"][..],
+        &["session", "traces", "--json"],
+        &[
+            "session",
+            "traces",
+            "--settled",
+            "--json",
+            "--since",
+            "yesterday",
+        ],
+    ] {
+        assert!(parse(args(argv)).is_err());
+    }
 }

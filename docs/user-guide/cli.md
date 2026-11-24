@@ -817,7 +817,7 @@ Safe independent entries may be removed while protected entries are kept.
 Review `kept:` reasons before manually removing anything. Export files under
 `carry/` are never selected. Implementation details live in spec 02 §2.5.
 
-### `plakd session list|rename|archive|unarchive|show|log|recover|export|import|reload|delete|gc`
+### `plakd session list|rename|archive|unarchive|show|log|recover|export|trace|traces|import|reload|delete|gc`
 
 ```
 plakd session list [--include-archived]
@@ -829,6 +829,8 @@ plakd session show <uuid>[.cN]
 plakd session log <uuid>[.cN] [--kind tool] [--tail N] [--json]
 plakd session recover <uuid>
 plakd session export <uuid> [--out <path>]
+plakd session trace <uuid>.cN [--out <path>]
+plakd session traces --settled [--since <RFC3339 timestamp>] --json
 plakd session import <path>
 plakd session reload <uuid> --expect-binary <binary-id>
 plakd session delete <uuid> [--yes] [--abandon-children] [--abandon-jobs]
@@ -844,11 +846,22 @@ full id or an unambiguous prefix of at least
 four characters among this workspace's sessions, as the other session commands and the
 exit line print it. For `show` and `log`, append `.cN` to select child `cN` in that root session's
 agent tree, for example `plakd session log <uuid>.c1`. These are read-only child
-views; other session commands do not accept child selectors. `log <uuid>.cN`
+views; only `trace` also accepts a child selector. `log <uuid>.cN`
 is that child's committed history, not the root event log. A committed
 compaction is a row of kind `compaction` (`compacted N earlier segments
 (<pass>)` when the checkpoint recorded the pass); the summary itself is not
 shown. `--kind compaction` selects those rows.
+
+`traces --settled --json` lists eligible children across this Plak home,
+including archived roots. Use the full `child_id` with `trace` to save a
+private `plak-child-trace` v1 JSON file, even while the root or siblings are
+working. Neither command needs a host or a runner. The file includes retained
+canonical messages and full canonical tool results, subject to redaction;
+it cannot recover clipped or compacted material or hidden reasoning. It is
+not importable. The default directory is `~/.plak/traces/`; `--out` never
+overwrites a file. For a recurring archive, deduplicate within each source
+home by runtime session and revision. Leave child retirement off while an
+archive receipt is not enforced. See [the format contract](../spec/02-plak-product.md#settled-child-traces).
 
 `show` labels a Working checkpoint `working (live owner present)` while the
 process named by the branch's runtime holder record is still running,

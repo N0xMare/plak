@@ -19,8 +19,10 @@ mod reload;
 pub(crate) mod upgrade;
 
 pub(crate) use document::{
-    CarryDocument, IMPORTABLE_VERSIONS, VERSION, read_document, write_document,
+    CarryDocument, IMPORTABLE_VERSIONS, VERSION, private_dir, read_document, write_document,
+    write_private_json,
 };
+pub(crate) use history::{TraceHistory, redact_payload};
 
 #[cfg(feature = "web")]
 pub(crate) use export::ExportRefusal;

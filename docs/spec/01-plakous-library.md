@@ -3163,6 +3163,21 @@ session and send a prompt to deliver its process notices before exporting.
 Lease-release metadata is not evidence that a process stopped. The product
 export encoding is owned by chapter 02 §2.5.1.
 
+The product also uses three unsupported SQLite inspection seams for child
+traces (chapter 02 §2.5.1). `SqliteSessionStore::inspect_live_head_metadata`
+reads the owning non-archived session row, current branch head and verified
+checkpoint metadata in one read-only snapshot. It validates the metadata
+and obligation paths, not the conversation objects. The facade's
+`AgentSessions::inspect_settled_revision_sqlite` requires the exact locator,
+a Quiescent head and durable terminal evidence for every job, and returns
+the owning session revision without loading history.
+`AgentSessions::inspect_settled_history_sqlite` makes the same settledness
+checks when reading the full checkpoint and returns its session revision,
+binding report and ordered canonical segments together, without named state.
+Neither read acquires a lease, opens a runtime, or writes durable state.
+Each result describes only its own snapshot; callers coordinating with other
+stores recheck the relevant identities separately.
+
 `PortableSessionHistory` is plain data: the segments, oldest first, and the
 account reference (lowercase hex of the admitted account binding) and model
 the provider replay material is bound to. `PortableSessionHistory::new`

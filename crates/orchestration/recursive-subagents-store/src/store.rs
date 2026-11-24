@@ -82,6 +82,16 @@ impl SqliteTreeStore {
         SubagentsDatabase::inspect_node_locators(database)
     }
 
+    /// Admits the tree database read-only without loading a tree; returns
+    /// false only if the file is absent.
+    ///
+    /// # Errors
+    /// Refuses unreadable files or an unsupported schema or revision.
+    #[doc(hidden)]
+    pub fn inspect_store(database: &Path) -> Result<bool, OpenError> {
+        SubagentsDatabase::inspect_rows(database, false, |_| Ok(true))
+    }
+
     /// Identifies trees with a child on the given paired runner without
     /// decoding any tree images or acquiring custody.
     ///

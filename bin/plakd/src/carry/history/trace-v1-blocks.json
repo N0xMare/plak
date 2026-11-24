@@ -1,0 +1,129 @@
+[
+  { "kind": "text", "text": "tool contents", "phase": "commentary" },
+  {
+    "kind": "image",
+    "mime": "image/png",
+    "source": { "kind": "bytes", "bytes": "AQIDBA==" },
+    "detail": "original"
+  },
+  {
+    "kind": "document",
+    "mime": "application/pdf",
+    "source": { "kind": "bytes", "bytes": "BQY=" }
+  },
+  {
+    "kind": "audio",
+    "mime": "audio/wav",
+    "source": { "kind": "bytes", "bytes": "Bwg=" }
+  },
+  {
+    "kind": "call",
+    "id": "00000000-0000-0000-0000-000000000003",
+    "name": "search",
+    "canonical_name": "mcp__notes__search",
+    "owner": { "kind": "mcp", "server": "notes" },
+    "state": "requested",
+    "correlation": {
+      "remote_call": "remote",
+      "container": "container",
+      "caller": { "kind": "provider", "namespace": "hosted.program", "execution_id": "program-1" }
+    },
+    "arguments": "{\"q\":\"carry\"}"
+  },
+  {
+    "kind": "result",
+    "id": "00000000-0000-0000-0000-000000000003",
+    "owner": { "kind": "mcp", "server": "notes" },
+    "outcome": "success",
+    "parts": [
+      { "kind": "text", "text": "tool contents", "phase": "commentary" },
+      {
+        "kind": "image",
+        "mime": "image/png",
+        "source": { "kind": "bytes", "bytes": "AQIDBA==" },
+        "detail": "original"
+      },
+      { "kind": "opaque", "replay": null, "fallback": { "kind": "summary", "text": "result fallback" } }
+    ],
+    "correlation": {
+      "remote_call": "remote",
+      "container": "container",
+      "caller": { "kind": "provider", "namespace": "hosted.program", "execution_id": "program-1" }
+    }
+  },
+  {
+    "kind": "update",
+    "id": "00000000-0000-0000-0000-000000000003",
+    "owner": { "kind": "mcp", "server": "notes" },
+    "text": "tool contents",
+    "phase": "commentary",
+    "correlation": {
+      "remote_call": "remote",
+      "container": "container",
+      "caller": { "kind": "provider", "namespace": "hosted.program", "execution_id": "program-1" }
+    }
+  },
+  { "kind": "reasoning", "visibility": "summary", "text": "visible summary", "replay": null },
+  { "kind": "refusal", "text": "refusal" },
+  {
+    "kind": "citation",
+    "citation": {
+      "item": "00000000-0000-0000-0000-000000000001",
+      "block": 0,
+      "source": "source",
+      "annotation": "annotation",
+      "uri": "https://example.com",
+      "title": "title",
+      "range": { "start": 0, "end": 3, "unit": "utf8_byte" }
+    }
+  },
+  { "kind": "compaction", "summary": "summary", "turns": [3, 4], "native": null, "binding": null },
+  { "kind": "opaque", "replay": null, "fallback": { "kind": "summary", "text": "fallback" } },
+  {
+    "kind": "document",
+    "mime": "application/pdf",
+    "source": { "kind": "uri", "uri": "https://example.com/media.pdf" }
+  },
+  {
+    "kind": "audio",
+    "mime": "audio/wav",
+    "source": { "kind": "data_url", "data_url": "data:audio/wav;base64,AQID" }
+  },
+  {
+    "kind": "result",
+    "id": "00000000-0000-0000-0000-000000000005",
+    "owner": { "kind": "provider", "namespace": "hosted.tools" },
+    "outcome": "failure",
+    "parts": [
+      {
+        "kind": "document",
+        "mime": "application/pdf",
+        "source": { "kind": "uri", "uri": "https://example.com/media.pdf" }
+      },
+      {
+        "kind": "audio",
+        "mime": "audio/wav",
+        "source": { "kind": "data_url", "data_url": "data:audio/wav;base64,AQID" }
+      }
+    ],
+    "correlation": {
+      "remote_call": null,
+      "container": null,
+      "caller": {
+        "kind": "local",
+        "operation": 1,
+        "generation": 2,
+        "cell": "cell",
+        "sequence": 3,
+        "child": "00000000-0000-0000-0000-000000000004",
+        "depth": 1
+      }
+    }
+  },
+  { "kind": "reasoning", "visibility": "visible", "text": "visible", "replay": null },
+  { "kind": "reasoning", "visibility": "omitted", "text": null, "replay": null },
+  { "kind": "reasoning", "visibility": "redacted", "text": null, "replay": null },
+  { "kind": "reasoning", "visibility": "opaque_replay", "text": null, "replay": null },
+  { "kind": "opaque", "replay": null, "fallback": { "kind": "omit" } },
+  { "kind": "opaque", "replay": null, "fallback": { "kind": "compatible_replay" } }
+]
