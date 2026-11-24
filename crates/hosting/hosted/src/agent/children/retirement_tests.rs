@@ -872,7 +872,7 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
             if committed_handoff {
                 let pause = runtime.pause_step_admissions().await.unwrap();
                 pause.begin_committed_handoff();
-                super::waiter::turn_watch(
+                turn_watch(
                     TurnWaiterRegistration::register(runtime.driver(), &child)
                         .await
                         .unwrap(),
