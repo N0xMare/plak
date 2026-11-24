@@ -1283,8 +1283,9 @@ attempt the close settles `failed` with that refusal's code as its kind.
 Close stops the promoted jobs of every closed node before its seal.
 Failed child turns, including recovery-required outcomes, stop their own
 promoted jobs with attempt-end attribution before the owner is parked or
-released. A cleanup failure remains recovery-required rather than reporting
-successful cleanup. Parked jobs still appear with their child owner in the
+released, except for a child the committed same-key release leaves to the
+next owner (§14.1). A cleanup failure remains recovery-required rather than
+reporting successful cleanup. Parked jobs still appear with their child owner in the
 Processes view and count toward the live process HUD until they stop.
 Interrupt leaves promoted jobs running and preserves their host-owned services
 for the next same-branch attachment.
@@ -4360,6 +4361,8 @@ During a committed same-key release, a joined child's old waiter that receives
 recycle the child or stop its promoted jobs as attempt-end work, whether or
 not its handoff row was saved. Ordinary child recovery outside the committed
 release still stops attempt-owned jobs.
+If no successor runs, the next open's handoff or loss law governs the child,
+and its promoted jobs stay with the attempt.
 Only the releasing host writes handoff records; the face never touches
 the stores. The next host continues each handed-off node once by itself,
 under either policy: a child through the continuation pass of its first

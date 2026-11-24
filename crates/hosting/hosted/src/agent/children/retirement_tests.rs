@@ -878,8 +878,11 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                         .unwrap(),
                     runtime.live.clone(),
                     None,
-                    Some(feed),
-                    handle,
+                    Some(ChildFeedSource {
+                        sessions: Arc::clone(&feed.sessions),
+                        session: feed.session,
+                    }),
+                    handle.clone(),
                 )
                 .await;
                 // An unpublished terminal during committed release belongs
@@ -894,11 +897,9 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                         assert!(tree.loss_continuation(&child).is_none());
                     })
                     .unwrap();
-                service
-                    .stop(job, plakous::tools::JobStopReason::SessionExit)
-                    .unwrap();
-                retire_live_child(runtime.driver(), &runtime.live, &child, turn).await;
-                continue;
+                // Once the pause ends, the same recovery-required outcome
+                // takes the ordinary attempt-end path.
+                drop(pause);
             }
             watcher.watch(
                 TurnWaiterRegistration::register(runtime.driver(), &child)

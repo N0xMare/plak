@@ -358,8 +358,8 @@ fn release_child_wait(
             runner::alive(child_pid),
             "the original child job stopped before the test released it"
         );
-        // The resumed script issues Wait first. The shell stays alive until
-        // Wait has the observation, so the two terminal paths cannot race.
+        // Keep the shell alive until the resumed script dispatches Wait.
+        // Dispatch precedes plan resolution; it does not claim the terminal.
         if let Some(wait) = operations()
             .into_iter()
             .filter(|op| op.kind == "effect" && op.operation > before)
