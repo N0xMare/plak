@@ -8,7 +8,7 @@ use crate::agent::rendered_prompts::suite::{self as prompts, Occupancy, Provider
 use plakous::agent::{HarnessProfileSpec, ReasoningEffort, ResolvedContextSourceFact};
 use plakous::model::{CompiledProviderConfiguration, Digest, DigestDomain, ModelId, Timestamp};
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 use std::path::Path;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -121,16 +121,29 @@ fn compact_fixture(mut matrix: Value) -> TestResult<Value> {
         }
     }
     map_canonical_bytes(&mut matrix, compact_canonical_bytes)?;
+    let rows = matrix.as_object_mut().unwrap();
+    // Name each block for its first route in lexical order, so editing a
+    // block without changing its sharing does not move it in the fixture.
+    let names = rows.keys().cloned().collect::<BTreeSet<_>>();
     let mut fixture = json!({});
     for field in INTERNED_FIELDS {
         let mut table = serde_json::Map::new();
-        for row in matrix.as_object_mut().unwrap().values_mut() {
+        let mut keys_by_block = BTreeMap::<_, String>::new();
+        for name in &names {
+            let row = rows.get_mut(name).unwrap();
             let block = row[field].take();
-            let key = plakous::model::sha256_hex(&[&serde_json::to_vec(&block)?]);
-            let interned = table.entry(key.clone()).or_insert_with(|| block.clone());
-            if *interned != block {
-                return Err(format!("ambiguous {field} fixture key {key}").into());
-            }
+            let key = match keys_by_block.entry(serde_json::to_vec(&block)?) {
+                Entry::Occupied(entry) => entry.get().clone(),
+                Entry::Vacant(entry) => {
+                    if table.insert(name.clone(), block).is_some() {
+                        return Err(
+                            format!("different {field} fixture blocks claim key {name}").into()
+                        );
+                    }
+                    entry.insert(name.clone());
+                    name.clone()
+                }
+            };
             row[field] = Value::String(key);
         }
         fixture[field] = Value::Object(table);
