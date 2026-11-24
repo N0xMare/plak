@@ -2,8 +2,6 @@ use super::*;
 
 #[test]
 fn revision_forward_qualification_reads_two_durable_scripted_trees() {
-    use plakous_recursive_subagents_store::{SqliteTreeStore, TreeInspection};
-
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     fixture.write_script(&json!({
@@ -35,11 +33,22 @@ fn revision_forward_qualification_reads_two_durable_scripted_trees() {
     let stores = scratch.path().join("stores");
     let tree_store = stores.join("subagents.sqlite3");
     assert!(has_index(&tree_store, "subagents_revision_fixture"));
-    for session in &sessions {
-        assert!(matches!(
-            SqliteTreeStore::inspect(&tree_store, session).unwrap(),
-            TreeInspection::Tree(_)
-        ));
+    {
+        let copy = rusqlite::Connection::open_with_flags(
+            tree_store,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        for session in &sessions {
+            let exists: bool = copy
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM agent_trees WHERE tree_id=?1)",
+                    [session],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(exists, "no durable tree for {session}");
+        }
     }
     assert_parallel_inspection(&command, &stores, &sessions);
     stop(&mut source);
