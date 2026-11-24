@@ -401,7 +401,7 @@ mod tests {
         crate::commands::runner::private_directory(&paths.home().join("host")).unwrap();
         let path = crate::wire_transport::hosts::home_lock(&paths);
         let mut child = Command::new("python3")
-            .args(["-c", "import fcntl, os, sys; f=open(sys.argv[1], 'w'); os.chmod(sys.argv[1], 0o600); fcntl.flock(f, fcntl.LOCK_EX); f.write(str(os.getpid())+' fixture\\n'); f.flush(); sys.stdin.read()"])
+            .args(["-c", "import fcntl, os, sys; os.umask(0o077); f=open(sys.argv[1], 'w'); fcntl.flock(f, fcntl.LOCK_EX); f.write(str(os.getpid())+' fixture\\n'); f.flush(); sys.stdin.read()"])
             .arg(&path)
             .stdin(Stdio::piped())
             .spawn().unwrap();
