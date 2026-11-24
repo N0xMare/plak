@@ -78,22 +78,7 @@ fn publication_and_list_project_the_same_draft_row_and_clear_live_attention() {
         )
         .unwrap();
     directory.settle();
-    slots.insert(
-        record.id.clone(),
-        DirectorySlot {
-            residency: SessionResidency::Resident,
-            open_failed: false,
-            resident: Some((
-                KeptActivity::default(),
-                KeptDirectoryAttention {
-                    approval: Some(3),
-                    credential: Some(5),
-                    runtime: Some(RuntimeReason::ContextCapacity),
-                    ..KeptDirectoryAttention::default()
-                },
-            )),
-        },
-    );
+    slots.insert(record.id.clone(), resident_slot());
     let listed = read(&slots);
     assert_eq!(
         listener.refresh(|| vec![read(&slots)]),
@@ -130,6 +115,22 @@ fn publication_and_list_project_the_same_draft_row_and_clear_live_attention() {
     )));
 }
 
+fn resident_slot() -> DirectorySlot {
+    DirectorySlot {
+        residency: SessionResidency::Resident,
+        open_failed: false,
+        resident: Some((
+            KeptActivity::default(),
+            KeptDirectoryAttention {
+                approval: Some(3),
+                credential: Some(5),
+                runtime: Some(RuntimeReason::ContextCapacity),
+                ..KeptDirectoryAttention::default()
+            },
+        )),
+    }
+}
+
 #[test]
 fn categories_are_deduplicated_and_keep_only_current_occurrences() {
     let mut previous = BTreeMap::new();
@@ -154,7 +155,10 @@ fn categories_are_deduplicated_and_keep_only_current_occurrences() {
         first,
         publish_attention(&mut previous, active.clone(), || 11)
     );
-    assert!(publish_attention(&mut previous, Candidates::default(), || 12).is_empty());
+    assert_eq!(
+        publish_attention(&mut previous, Candidates::default(), || 12),
+        Vec::<v13::AttentionReason>::new()
+    );
     assert_eq!(
         publish_attention(&mut previous, active, || 17)[0],
         v13::AttentionReason::RecoveryRequired { since: 17 }

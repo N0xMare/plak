@@ -219,7 +219,7 @@ fn typed_directory_attention_keeps_concurrent_live_causes_until_each_clears() {
     service.observe(Observation::CredentialWait { account: None });
     assert_eq!(
         service.kept_directory_attention(),
-        super::KeptDirectoryAttention::default()
+        KeptDirectoryAttention::default()
     );
 }
 
