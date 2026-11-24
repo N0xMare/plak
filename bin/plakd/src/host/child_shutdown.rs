@@ -43,7 +43,7 @@ pub(super) fn close() {
         match report.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
             Ok(0) => {}
             Ok(unreaped) => {
-                tracing::warn!(target: "plak.host", kind, unreaped, "host_child_reap_incomplete")
+                tracing::warn!(target: "plak.host", kind, unreaped, "host_child_reap_incomplete");
             }
             Err(_) => tracing::warn!(target: "plak.host", kind, "host_child_reap_incomplete"),
         }
