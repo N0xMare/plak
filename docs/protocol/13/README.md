@@ -126,6 +126,15 @@ Profile roles carry the exact template name in `template`; `label` is
 for display and may omit the profile prefix. A session root with no
 recorded template carries null.
 
+`templates_get` keeps the declared extras in `tools`. The separate
+`resolved_tools` list contains up to 128 model-visible names with an origin
+of `core` or `template_extra`, compiled at the template's declared access
+ceiling and composition (the catalog default if unset). For programmatic
+composition this is the callable menu inside the program. Workspace skills,
+topology grants and MCP listings are bound at runtime, not by this definition
+read. A menu that cannot be compiled is empty with a
+`tool_resolution_unavailable` diagnostic.
+
 The host serves only 13. Use the exact build's schema and pair it with
 matching client artifacts before connecting. A Hello for 12 receives
 `{"frame":"refused","kind":"version_mismatch","host":13,"client":12}` and no

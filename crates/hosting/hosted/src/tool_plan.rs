@@ -781,7 +781,7 @@ impl ToolRoute {
     }
 
     /// The tool vocabulary the route's coding presentation uses.
-    const fn presentation(self) -> CodingPresentation {
+    pub(crate) const fn presentation(self) -> CodingPresentation {
         match self {
             Self::Claude | Self::Anthropic => CodingPresentation::Claude,
             Self::Codex | Self::OpenAi => CodingPresentation::Codex,

@@ -266,6 +266,7 @@ fn template_body(template: &AgentTemplate) -> TemplateBody {
             .iter()
             .map(ToString::to_string)
             .collect(),
+        resolved_tools: None,
         spawns: template.spawns.iter().map(ToString::to_string).collect(),
         may_adopt: template.may_adopt,
         delegation: template.delegation,
@@ -330,7 +331,7 @@ impl super::Console {
         let snapshot = tokio::task::spawn_blocking(move || Snapshot::read(&paths, &nonce))
             .await
             .map_err(|_| unavailable(ReadScope::Config, UnavailableCode::Storage))??;
-        let response = if let HostRequest::ConsoleMetadataGet { account_id, .. } = &request {
+        let mut response = if let HostRequest::ConsoleMetadataGet { account_id, .. } = &request {
             let catalog = catalog::page(
                 self,
                 account_id.as_deref(),
@@ -356,6 +357,11 @@ impl super::Console {
         } else {
             snapshot.response(&request)?
         };
+        if let HostResponse::TemplatesGet { template } = &mut response
+            && let Some((_, definition)) = snapshot.templates.get(&template.id)
+        {
+            template.body.resolved_tools = resolved_tools(&snapshot.config, definition).ok();
+        }
         // Fence cached catalog changes as well as definition changes. The
         // digest stays private; public etags are generation-salted above.
         if super::wire_size::size(&response, super::limits::DEPENDENCY_BYTES).is_none() {
@@ -390,4 +396,38 @@ impl super::Console {
             pages.start(response, context, selection, revision, limit)
         }
     }
+}
+
+fn resolved_tools(
+    config: &ProductConfig,
+    template: &AgentTemplate,
+) -> Result<Vec<plakd_wire_types::v13::ResolvedTool>, ()> {
+    use plakd_wire_types::v13::{MAX_RESOLVED_TEMPLATE_TOOLS, ResolvedTool, ToolOrigin};
+    let account = template.account.parse().map_err(|_| ())?;
+    let tools = plakous_hosted::agent::template_tools(
+        &account,
+        &template.model,
+        template.composition_or_default(),
+        template.max_tier,
+        &plakous_hosted::tool_plan::NodeToolSelection {
+            selection: template.tools.clone(),
+            tool_sections: config.tool_sections.reached(&template.tools),
+            mcp_tools: None,
+        },
+    )
+    .map_err(|_| ())?;
+    if tools.len() > MAX_RESOLVED_TEMPLATE_TOOLS {
+        return Err(());
+    }
+    Ok(tools
+        .into_iter()
+        .map(|tool| ResolvedTool {
+            name: tool.name,
+            origin: if tool.extra {
+                ToolOrigin::TemplateExtra
+            } else {
+                ToolOrigin::Core
+            },
+        })
+        .collect())
 }

@@ -469,20 +469,7 @@ pub(in crate::agent) fn bind_node_tool_plan(
     // Optional tools first: hosted-retrieval wrappers bind on the route's
     // deferred retrieval slot, and a refusal there starts no MCP server.
     // MCP entries then bind on the process pool.
-    let plan = crate::tool_plan::bind_tool_plan(selection, route, route_label)
-        .map_err(|refusal| CliFailure::new(refusal.to_string()))?
-        .with_fetch_url_limits(
-            crate::frozen_tables::fetch_url_limits(&tools.tool_sections)
-                .map_err(CliFailure::new)?,
-        )
-        .with_retrieval_options(
-            selection,
-            route,
-            route_label,
-            crate::frozen_tables::retrieval_options(&tools.tool_sections)
-                .map_err(CliFailure::new)?,
-        )
-        .map_err(|refusal| CliFailure::new(refusal.to_string()))?;
+    let plan = bind_optional_tool_plan(tools, route, route_label)?;
     let mcp = match mcp_binding {
         crate::mcp_binding::McpBinding::Lease => crate::mcp_binding::bind_mcp_tools(
             selection,
@@ -507,6 +494,43 @@ pub(in crate::agent) fn bind_node_tool_plan(
         ),
     }?;
     Ok(plan.with_mcp(selection, mcp))
+}
+
+pub(super) fn bind_optional_tool_plan(
+    tools: &crate::tool_plan::NodeToolSelection,
+    route: crate::tool_plan::ToolRoute,
+    route_label: &str,
+) -> CliResult<crate::tool_plan::ToolPlan> {
+    if tools.selection.is_empty() {
+        return Ok(crate::tool_plan::ToolPlan::default());
+    }
+    crate::tool_plan::bind_tool_plan(&tools.selection, route, route_label)
+        .map_err(|refusal| CliFailure::new(refusal.to_string()))?
+        .with_fetch_url_limits(
+            crate::frozen_tables::fetch_url_limits(&tools.tool_sections)
+                .map_err(CliFailure::new)?,
+        )
+        .with_retrieval_options(
+            &tools.selection,
+            route,
+            route_label,
+            crate::frozen_tables::retrieval_options(&tools.tool_sections)
+                .map_err(CliFailure::new)?,
+        )
+        .map_err(|refusal| CliFailure::new(refusal.to_string()))
+}
+
+pub(super) fn composition_runtime(
+    composition: CompositionSelection,
+    native_code_mode: bool,
+) -> Option<CompositionRuntime> {
+    match composition {
+        CompositionSelection::PySdk => Some(CompositionRuntime::PythonHarnessSdk),
+        CompositionSelection::JsPtc => Some(CompositionRuntime::ProductJavaScript),
+        CompositionSelection::PyPtc => Some(CompositionRuntime::PythonPtc),
+        _ if native_code_mode => Some(CompositionRuntime::CodexNative),
+        _ => None,
+    }
 }
 
 /// One Direct extension as the provider configuration states it. A tool an

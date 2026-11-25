@@ -9,7 +9,9 @@ mod injected;
 mod policy;
 mod profile;
 mod session;
+mod template_tools;
 mod tools;
+pub use template_tools::{TemplateTool, template_tools};
 pub(crate) use tools::coding_tool_registry_for_plan;
 pub(crate) mod topology;
 

@@ -93,6 +93,9 @@ pub struct TemplateBody {
     pub description: String,
     pub max_tier: Tier,
     pub tools: Vec<String>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub resolved_tools: Option<Vec<crate::v13::ResolvedTool>>,
     pub spawns: Vec<String>,
     pub may_adopt: bool,
     pub delegation: Delegation,

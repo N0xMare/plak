@@ -115,6 +115,7 @@ pub(crate) use build::{
     open_api_coding_session_with_fence, verify_api_coding_session, verify_coding_session,
     vocabulary_for_presentation,
 };
+pub use build::{TemplateTool, template_tools};
 #[cfg(any(test, feature = "test-support"))]
 pub use build::{
     build_or_open_bound_session, injected_root_tool_registrations, verify_bound_session,

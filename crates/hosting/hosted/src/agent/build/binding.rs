@@ -40,8 +40,8 @@ use plakous::subscriptions::{
     NativeProvider, NativeToolMode, ResolvedProvider, native_provider_route_selection,
 };
 use plakous::tools::{
-    CodexMinimalLocalCodeModeV1, CompositionRuntime, ProductJavaScriptCompositionV1,
-    PythonPtcPresentationV1, PythonPtcV1, plan_restoration_note,
+    CodexMinimalLocalCodeModeV1, ProductJavaScriptCompositionV1, PythonPtcPresentationV1,
+    PythonPtcV1, plan_restoration_note,
 };
 use std::io::Write;
 use std::num::NonZeroU32;
@@ -720,17 +720,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
     // It is the nested catalog the PTC descriptors list, the names the PTC
     // base instruction names, and the set the earned agreement paragraphs are
     // judged against.
-    let runtime = if product_sdk {
-        Some(CompositionRuntime::PythonHarnessSdk)
-    } else if product_javascript {
-        Some(CompositionRuntime::ProductJavaScript)
-    } else if product_python {
-        Some(CompositionRuntime::PythonPtc)
-    } else if code_mode_candidate {
-        Some(CompositionRuntime::CodexNative)
-    } else {
-        None
-    };
+    let runtime = super::tools::composition_runtime(composition, code_mode_candidate);
     let NodeSession {
         configured_model,
         configuration: session_configuration,

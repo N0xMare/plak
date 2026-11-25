@@ -237,12 +237,20 @@ fn host_response(
         },
         R::TemplatesGet { template } => {
             let body = template.body;
+            let mut diagnostics = template.diagnostics;
+            if body.resolved_tools.is_none() {
+                diagnostics.push(console::Diagnostic {
+                    code: "tool_resolution_unavailable".into(),
+                    subject: None,
+                    detail: "the template's tool menu could not be resolved".into(),
+                });
+            }
             D::TemplatesGet {
                 template: Box::new(v13::TemplateDefinition {
                     id: template.id,
                     source: template.source,
                     etag: template.etag,
-                    diagnostics: template.diagnostics,
+                    diagnostics,
                     body: v13::TemplateBody {
                         account: body.account,
                         model: body.model,
@@ -253,6 +261,7 @@ fn host_response(
                         description: body.description,
                         max_tier: body.max_tier,
                         tools: body.tools,
+                        resolved_tools: body.resolved_tools.unwrap_or_default(),
                         spawns: body.spawns,
                         may_adopt: body.may_adopt,
                         delegation: body.delegation,

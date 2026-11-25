@@ -219,6 +219,8 @@ pub struct TemplateBody {
     pub description: String,
     pub max_tier: Tier,
     pub tools: Vec<String>,
+    #[schemars(length(max = 128))]
+    pub resolved_tools: Vec<ResolvedTool>,
     pub spawns: Vec<String>,
     pub may_adopt: bool,
     pub delegation: Delegation,
@@ -232,3 +234,19 @@ pub struct TemplateBody {
     pub on_mint: ProtectedText,
     pub env: Vec<ProtectedEnvironment>,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedTool {
+    pub name: String,
+    pub origin: ToolOrigin,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolOrigin {
+    Core,
+    TemplateExtra,
+}
+
+pub const MAX_RESOLVED_TEMPLATE_TOOLS: usize = 128;

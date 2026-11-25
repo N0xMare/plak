@@ -371,3 +371,44 @@ fn missing_home_stays_missing_and_config_is_the_exact_home_allowlist() -> TestRe
     }
     Ok(())
 }
+
+#[test]
+fn definition_tool_menu_uses_the_composition_and_access_fence() -> TestResult {
+    use plakd_wire_types::v13::ToolOrigin;
+    use plakous_hosted::agent_tree_protocol::Tier;
+    use plakous_hosted::binding::CompositionSelection;
+    use plakous_hosted::tool_plan::TemplateToolSelection;
+
+    let config = ProductConfig::default_product();
+    let mut template = AgentTemplate {
+        account: "codex".into(),
+        model: "gpt-5.3-codex".into(),
+        composition: Some(CompositionSelection::Direct),
+        tools: TemplateToolSelection::parse(["fetch_url"])?,
+        ..AgentTemplate::default()
+    };
+    let names = |template: &AgentTemplate| {
+        resolved_tools(&config, template).map_err(|()| "tool menu did not compile")
+    };
+    let direct = names(&template)?;
+    assert!(
+        direct
+            .iter()
+            .any(|row| row.name == "apply_patch" && row.origin == ToolOrigin::Core)
+    );
+    assert!(
+        direct
+            .iter()
+            .any(|row| row.name == "fetch_url" && row.origin == ToolOrigin::TemplateExtra)
+    );
+    assert!(direct.iter().any(|row| row.name == "view_image"));
+    template.composition = Some(CompositionSelection::JsPtc);
+    assert!(!names(&template)?.iter().any(|row| row.name == "view_image"));
+    template.max_tier = Tier::ReadOnly;
+    assert!(
+        !names(&template)?
+            .iter()
+            .any(|row| row.name == "apply_patch")
+    );
+    Ok(())
+}

@@ -4554,6 +4554,10 @@ Protocol 13 includes `session_profile` in the root attach snapshot and
 publishes the successor's row after a profile switch lands.
 In profile roles, `label` remains the display name and `template` is the
 exact template name, or null for a session root without a recorded template.
+`templates_get` projects a bounded `resolved_tools` menu from the same tool
+plan and surface compiler as runtime binding, at the template's declared
+access ceiling and composition. The menu labels core and template extras;
+it does not start MCP servers or resolve workspace skills or topology grants.
 The separate session model picker and settings still use the generic extras
 fields and only advertise a tier for an account and model offering it.
 
