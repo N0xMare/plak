@@ -1730,6 +1730,7 @@ all listed generators.
 | `bindings` | `crates/hosting/hosted/tests/fixtures/binding-contracts.json` |
 | `nextest` | Generated offline and install blocks in `.config/nextest.toml` |
 | `prompts` | Rendered route, lifecycle and compaction-wire digest tables in `crates/hosting/hosted/tests/common/rendered_{prompts,lifecycle,wire}.rs` |
+| `wire` | Protocol 13 schema fixture and its normalized digest in the pin test and served contract documentation |
 
 Regeneration does not approve binding changes
 (which still require exact predecessor reopen evidence), or prompt changes.
