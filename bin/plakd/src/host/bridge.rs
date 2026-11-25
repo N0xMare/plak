@@ -3,6 +3,7 @@
 use std::io::{self, BufRead as _, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::surface_protocol::PlakExtension;
@@ -205,19 +206,21 @@ fn marked(holder: Option<&str>, live: &[hosts::LiveHost], phase: &str) -> bool {
             .any(|host| host.holder.as_deref().is_some_and(matches))
 }
 
-fn relay(mut stream: UnixStream, hello: &str) -> CliResult<ProcessOutcome> {
-    stream.write_all(hello.as_bytes()).map_err(failed)?;
-    let mut writer = stream.try_clone().map_err(failed)?;
-    // Each direction has one bounded buffer. EOF closes the
-    // socket's write half; the host detaches this client, not its session.
+fn relay(stream: UnixStream, hello: &str) -> CliResult<ProcessOutcome> {
+    (&stream).write_all(hello.as_bytes()).map_err(failed)?;
+    let stream = Arc::new(stream);
+    let writer = Arc::clone(&stream);
+    // The input worker half-closes the socket but cannot close a descriptor
+    // while the output worker is still draining the host's last frames.
     let input = std::thread::spawn(move || {
-        let result = forward(&mut io::stdin().lock(), &mut writer);
+        let result = forward(&mut io::stdin().lock(), &mut writer.as_ref());
         let _ = writer.shutdown(Shutdown::Write);
         result
     });
-    let result = forward(&mut stream, &mut io::stdout().lock());
-    let _ = stream.shutdown(Shutdown::Both);
-    result.map_err(failed)?;
+    if let Err(error) = forward(&mut stream.as_ref(), &mut io::stdout().lock()) {
+        let _ = stream.shutdown(Shutdown::Both);
+        return Err(failed(error));
+    }
     // If the host closed first, stdin may still be waiting for its owner.
     // Do not park process exit on that read; it owns no host/session work.
     if input.is_finished() {

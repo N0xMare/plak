@@ -112,9 +112,12 @@ pub(crate) fn socket_until(
                     )
                 })?
         })?;
+        // Read credentials on the connecting descriptor before it changes
+        // mode, without registering and closing a duplicate.
+        let peer = stream.peer_cred().map(|peer| peer.uid());
         let stream = stream.into_std()?;
         stream.set_nonblocking(false)?;
-        Ok(stream)
+        Ok((stream, peer))
     })
 }
 

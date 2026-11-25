@@ -97,12 +97,16 @@ pub fn host_socket(path: &Path) -> io::Result<Transport> {
 
 /// The verified byte stream, before a client performs its own handshake.
 pub(crate) fn verified_socket(path: &Path) -> io::Result<UnixStream> {
-    verified_socket_with(path, |path| UnixStream::connect(path))
+    verified_socket_with(path, |path| {
+        let stream = UnixStream::connect(path)?;
+        let peer = peer_uid(&stream);
+        Ok((stream, peer))
+    })
 }
 
 fn verified_socket_with(
     path: &Path,
-    connect: impl FnOnce(&Path) -> io::Result<UnixStream>,
+    connect: impl FnOnce(&Path) -> io::Result<(UnixStream, io::Result<u32>)>,
 ) -> io::Result<UnixStream> {
     let refused = |what: String| io::Error::new(io::ErrorKind::PermissionDenied, what);
     let user = rustix::process::geteuid().as_raw();
@@ -123,10 +127,10 @@ fn verified_socket_with(
             path.display()
         )));
     }
-    let stream = connect(path)?;
+    let (stream, peer) = connect(path)?;
     // The path checks name what is wrong; the peer's credentials decide,
     // since a directory above the socket's may be another user's to swap.
-    peer_is(peer_uid(&stream), user)?;
+    peer_is(peer, user)?;
     Ok(stream)
 }
 
