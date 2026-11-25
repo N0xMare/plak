@@ -205,6 +205,11 @@ impl Bindings {
                     assert!(actual.remove("cost_root").is_some());
                     assert!(actual.remove("cost_tree").is_some());
                     actual.remove("preview");
+                    assert!(
+                        actual
+                            .remove("superseded_by")
+                            .is_some_and(|target| target.is_null() || target.is_string())
+                    );
                     self.compare_object(left, &actual, key);
                     return;
                 }
