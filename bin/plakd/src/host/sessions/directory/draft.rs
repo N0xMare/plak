@@ -397,7 +397,7 @@ fn draft_row(
     })
 }
 
-fn service_tier(tier: Option<&str>) -> Option<v13::ServiceTier> {
+pub(super) fn service_tier(tier: Option<&str>) -> Option<v13::ServiceTier> {
     match tier {
         Some("fast" | "priority") => Some(v13::ServiceTier::Fast),
         Some("ultrafast") => Some(v13::ServiceTier::Ultrafast),
@@ -407,8 +407,8 @@ fn service_tier(tier: Option<&str>) -> Option<v13::ServiceTier> {
 
 pub(super) fn differences(
     legacy: &[plakous_host_protocol::views::ProfileDifference],
-    session_tier: Option<&str>,
-    profile_tier: Option<Option<&str>>,
+    session_tier: Option<v13::ServiceTier>,
+    tier_differs: bool,
 ) -> Vec<v13::ProfileDifference> {
     use plakous_host_protocol::views::ProfileDifference as Old;
     use v13::ProfileDifference as New;
@@ -433,11 +433,9 @@ pub(super) fn differences(
             Old::Roster => Some(New::Roster),
         })
         .collect::<Vec<_>>();
-    if let Some(profile_tier) = profile_tier
-        && service_tier(profile_tier) != service_tier(session_tier)
-    {
+    if tier_differs {
         differences.push(New::RootServiceTier {
-            session: service_tier(session_tier),
+            session: session_tier,
         });
     }
     differences

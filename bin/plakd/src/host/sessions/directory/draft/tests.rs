@@ -11,19 +11,18 @@ fn draft_differences_preserve_the_exact_named_session_tier() {
     use plakous_host_protocol::views::ProfileDifference as Old;
     use v13::{ProfileDifference as New, ServiceTier};
 
-    assert!(differences(&[], Some("priority"), Some(Some("fast"))).is_empty());
+    let fast = service_tier(Some("fast"));
+    assert_eq!(fast, Some(ServiceTier::Fast));
+    assert_eq!(fast, service_tier(Some("priority")));
+    let ultrafast = service_tier(Some("ultrafast"));
     assert_eq!(
-        differences(&[], Some("ultrafast"), Some(Some("fast"))),
+        differences(&[], ultrafast, ultrafast != fast),
         vec![New::RootServiceTier {
             session: Some(ServiceTier::Ultrafast),
         }]
     );
     assert_eq!(
-        differences(
-            &[Old::RootFast { session: false }],
-            None,
-            Some(Some("fast"))
-        ),
+        differences(&[Old::RootFast { session: false }], None, true),
         vec![New::RootServiceTier { session: None }]
     );
 }

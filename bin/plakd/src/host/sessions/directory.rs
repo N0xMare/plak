@@ -761,6 +761,10 @@ fn summarize(
         && work.attention(activity.root, 0, activity.wakes).is_some();
     let (profile, differences) = profile(id, meta, profiles.zip(tree));
     let draft = projection.draft.map(|draft| {
+        let tier = draft::service_tier(meta.service_tier.as_deref());
+        let tier_differs = profiles
+            .and_then(|profiles| profiles.catalog.iter().find(|(row, _)| row.id == profile))
+            .is_some_and(|(_, prepared)| draft::service_tier(prepared.root.service_tier()) != tier);
         let remote = hosted_elsewhere.is_some()
             || meta
                 .runner
@@ -776,17 +780,7 @@ fn summarize(
                 remote,
                 policy,
             },
-            draft::differences(
-                &differences,
-                meta.service_tier.as_deref(),
-                profiles.and_then(|profiles| {
-                    profiles
-                        .catalog
-                        .iter()
-                        .find(|(row, _)| row.id == profile)
-                        .map(|(_, prepared)| prepared.root.service_tier())
-                }),
-            ),
+            draft::differences(&differences, tier, tier_differs),
         )
     });
     Ok((
