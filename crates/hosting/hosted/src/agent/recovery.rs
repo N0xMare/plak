@@ -753,7 +753,7 @@ fn owner_live() -> TopologyError {
 }
 
 /// [`recover_child`] for a child its caller holds.
-pub(super) async fn recover_claimed_child(
+async fn recover_claimed_child(
     runtime: &ProductTopologyRuntime,
     port: &dyn ChildSessionPort,
     agent_id: &str,
@@ -929,19 +929,16 @@ pub(super) async fn recover_claimed_child(
             })
         })
         .await?;
-    let (ended, clean_submission) = runtime
+    // No turn of the lost owner is left to lose on an attempt that already
+    // ended or submitted: only its session's release was unresolved, and
+    // that settles as before, a submitted result completing the attempt.
+    let ended = runtime
         .read(|tree| {
-            let attempt = tree.attempt(agent_id);
-            (
-                attempt.is_some_and(|attempt| {
-                    attempt.output_json.is_some()
-                        || (attempt.status.is_stopped()
-                            && attempt.status != AttemptStatus::RecoveryRequired)
-                }),
-                attempt.is_some_and(|attempt| {
-                    attempt.status == AttemptStatus::Submitted && attempt.failure.is_none()
-                }),
-            )
+            tree.attempt(agent_id).is_some_and(|attempt| {
+                attempt.output_json.is_some()
+                    || (attempt.status.is_stopped()
+                        && attempt.status != AttemptStatus::RecoveryRequired)
+            })
         })
         .map_err(|error| session_refusal(&error.message))?;
     if ended && rebuilding {
@@ -950,26 +947,11 @@ pub(super) async fn recover_claimed_child(
             .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), true))
             .map_err(|error| session_refusal(&error.message))?;
     }
-    if ended
-        && (!clean_submission
-            || matches!(resolution, RecoveryResolution::TurnAbandoned { .. })
-            || fence == Some(crate::runtime::root_loss::RecoveryFence::Other))
-    {
+    if ended {
         let recorded = runtime
             .record_then_apply(agent_id, {
                 let (agent_id, attempt_id) = (agent_id.to_owned(), attempt_id.clone());
-                move |tree| {
-                    if clean_submission
-                        && matches!(resolution, RecoveryResolution::RecoveredWithoutTurn { .. })
-                        && tree
-                            .attempt(&agent_id)
-                            .and_then(|attempt| attempt.turn_id.as_ref())
-                            != turn.as_ref()
-                    {
-                        return Ok(false);
-                    }
-                    tree.record_host_recovery(&agent_id, &attempt_id, resolution)
-                }
+                move |tree| tree.record_host_recovery(&agent_id, &attempt_id, resolution)
             })
             .await
             .map_err(|error| session_refusal(&error))?;
@@ -1062,15 +1044,6 @@ async fn release_reopened(
         .agent()
         .and_then(plakous::agent::Agent::abandoned_turn)
         .map(|report| crate::runtime::events::abandoned_turn_operator_line(report).to_owned());
-    if observed.is_none()
-        && !session
-            .sessions()
-            .head_is_quiescent(session.locator())
-            .await
-            .map_err(|error| session_refusal(&error.to_string()))?
-    {
-        return Err(session_refusal("the reopened child head is not quiescent"));
-    }
     let evidence = wait_evidence(session.sessions(), session.locator(), retained_waits)
         .await
         .map_err(|error| session_refusal(&error))?;

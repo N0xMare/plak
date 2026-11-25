@@ -97,26 +97,6 @@ pub(in crate::agent) async fn recover_owed_children(
             ) => continue,
         };
         if let Some(child) = bound.get(&agent_id) {
-            if runtime
-                .read(|tree| {
-                    tree.attempt(&agent_id).is_some_and(|attempt| {
-                        attempt.status == crate::agent_tree_protocol::AttemptStatus::Submitted
-                            && attempt.failure.is_none()
-                    })
-                })
-                .unwrap_or(false)
-            {
-                let port = crate::agent::recovery::ParentSessionPort {
-                    parent: parent.clone(),
-                };
-                if let Err(reason) =
-                    crate::agent::recovery::recover_claimed_child(runtime, &port, &agent_id, None)
-                        .await
-                {
-                    faults.push((agent_id, reason.message));
-                }
-                continue;
-            }
             match recover_bound_child(parent, runtime, child).await {
                 Ok(()) => {}
                 Err(reason) => faults.push((agent_id, reason)),
@@ -219,7 +199,14 @@ async fn recover_bound_child(
             .await
             {
                 Ok(Some(fence)) => {
-                    return settle_bound_fence(runtime, child, *attached, fence).await;
+                    return settle_bound_fence(
+                        runtime,
+                        &child.agent_id,
+                        &child.turn_id,
+                        *attached,
+                        fence,
+                    )
+                    .await;
                 }
                 Ok(None) => {}
                 Err(error) => {
@@ -264,15 +251,21 @@ async fn recover_bound_child(
 
 /// The exact open settled a fenced turn rather than abandoning a lost
 /// process's turn. Apply the old terminal before any continuation mark.
-async fn settle_bound_fence(
+pub(in crate::agent) async fn settle_bound_fence(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
-    child: &InflightChild,
+    id: &str,
+    turn_id: &str,
     attached: AttachedCodingSession,
     fence: crate::runtime::root_loss::RecoveryFence,
 ) -> Result<(), String> {
+    use crate::runtime::root_loss::RecoveryFence;
+
     let locator = attached.locator();
     let sessions = Arc::clone(&attached.sessions);
-    let id = &child.agent_id;
+    let abandoned = attached
+        .agent()
+        .and_then(plakous::agent::Agent::abandoned_turn)
+        .is_some();
     let proof = async {
         if !sessions
             .head_is_quiescent(locator)
@@ -291,8 +284,7 @@ async fn settle_bound_fence(
             .map_err(|error| error.message)?;
         let attempt =
             attempt.ok_or_else(|| "the fenced child no longer has an attempt".to_owned())?;
-        let turn = child
-            .turn_id
+        let turn = turn_id
             .parse::<TurnId>()
             .map_err(|error| error.to_string())?;
         let evidence = crate::driver::reopen::wait_evidence(&sessions, locator, waits).await?;
@@ -303,9 +295,42 @@ async fn settle_bound_fence(
     let (identity, evidence) = proof?;
     release.map_err(|error| error.to_string())?;
     crate::agent::ledger::project_feed(runtime, id, &sessions, locator.session_id()).await?;
-    crate::agent::recovery::settle_child_fence(runtime, id, identity, fence, evidence)
-        .await
-        .map_err(|error| error.message)?;
+    let completed = if fence == RecoveryFence::Other
+        && !abandoned
+        && runtime
+            .read(|tree| {
+                tree.attempt(id).is_some_and(|attempt| {
+                    attempt.status == crate::agent_tree_protocol::AttemptStatus::Submitted
+                        && attempt.failure.is_none()
+                })
+            })
+            .map_err(|error| error.message)?
+    {
+        let (agent, attempt, turn, waits) = (
+            id.to_owned(),
+            identity.attempt.clone(),
+            identity.turn.to_string(),
+            evidence.clone(),
+        );
+        runtime
+            .record_then_apply(id, move |tree| {
+                let completed = tree.record_reattached_submission(&agent, &attempt, &turn)?;
+                if completed {
+                    tree.settle_wait_receipts(&agent, &waits)?;
+                }
+                Ok(completed)
+            })
+            .await?
+    } else {
+        false
+    };
+    if completed {
+        settle_owed(runtime, id).await;
+    } else {
+        crate::agent::recovery::settle_child_fence(runtime, id, identity, fence, evidence)
+            .await
+            .map_err(|error| error.message)?;
+    }
     withdraw_unadmitted(&runtime.driver().for_agent(id), id).await
 }
 

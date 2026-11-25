@@ -1375,7 +1375,10 @@ non-lease fence belongs to its exact bound turn. The host records this as
 attempt recovery; it does not publish a second runtime terminal. A
 successor owes this recovery even if the last process projected the fence
 and cleared the active-turn flag: the submitted attempt still binds the
-turn. Absent that submission, the live waiter's successful recycle of a
+turn. Only a proven non-lease fence in bound-turn recovery can settle the
+submission this way. Restored and abandoned turns, lease loss, unproved
+fences and outstanding effect evidence follow their ordinary reopen rules.
+Absent that submission, the live waiter's successful recycle of a
 non-lease fence ends the attempt as `turn_abandoned`. When the waiter did
 not settle it, later recovery can keep the attempt open and record an
 interrupt without an owner-loss cause. A new parent followup

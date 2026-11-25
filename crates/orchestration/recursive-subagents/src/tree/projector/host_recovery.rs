@@ -52,10 +52,10 @@ impl ProductAgentTree {
                 resolution,
                 RecoveryResolution::RecoveredWithoutTurn { .. }
             ) && attempt.output_json.is_some()
-                && match &attempt.failure {
-                    Some(failure) => failure.kind == "session_retirement",
-                    None => attempt.status == AttemptStatus::Submitted,
-                },
+                && attempt
+                    .failure
+                    .as_ref()
+                    .is_some_and(|failure| failure.kind == "session_retirement"),
             resolution,
         };
         self.save_host_recovery(agent_id, &decision)
@@ -92,15 +92,54 @@ impl ProductAgentTree {
         if !self.has_recyclable_submission(agent_id, terminal) {
             return Ok(false);
         }
+        self.save_submitted_recovery(agent_id, &terminal.attempt_id, terminal.committed_at_ms)
+    }
+
+    /// Records a submitted attempt's completion after custody recovery has
+    /// proved its bound non-lease fence and released the quiescent session.
+    /// The caller may have yielded while opening, projecting, and releasing.
+    ///
+    /// # Errors
+    /// Refuses an unstarted fold or a recovery intent that cannot be saved.
+    pub fn record_reattached_submission(
+        &mut self,
+        agent_id: &str,
+        attempt_id: &AttemptId,
+        turn_id: &str,
+    ) -> Result<bool, TopologyError> {
+        self.require_fold_started(agent_id)?;
+        if !self.recovery_owed(agent_id)
+            || !self.node(agent_id).is_ok_and(|node| {
+                matches!(node.status, NodeStatus::Running | NodeStatus::Interrupted)
+            })
+            || !self.current_attempt(agent_id).is_some_and(|attempt| {
+                &attempt.attempt_id == attempt_id
+                    && attempt.turn_id.as_deref() == Some(turn_id)
+                    && attempt.status == AttemptStatus::Submitted
+                    && attempt.output_json.is_some()
+                    && attempt.failure.is_none()
+            })
+        {
+            return Ok(false);
+        }
+        self.save_submitted_recovery(agent_id, attempt_id, super::super::now_unix_millis())
+    }
+
+    fn save_submitted_recovery(
+        &mut self,
+        agent_id: &str,
+        attempt_id: &AttemptId,
+        observed_at_ms: u64,
+    ) -> Result<bool, TopologyError> {
         self.save_host_recovery(
             agent_id,
             &HostRecovery {
-                attempt_id: terminal.attempt_id.clone(),
+                attempt_id: attempt_id.clone(),
                 resolution: RecoveryResolution::RecoveredWithoutTurn {
                     message: "the child's submitted result survived exact local finalization"
                         .to_owned(),
                 },
-                observed_at_ms: terminal.committed_at_ms,
+                observed_at_ms,
                 closed: false,
                 submitted_retirement: true,
             },

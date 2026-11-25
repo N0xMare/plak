@@ -329,19 +329,26 @@ impl FencedTerminal {
             {
                 match terminal.result().outcome() {
                     plakous::agent::TurnResultOutcome::RecoveryRequired(error) => {
-                        if error.is_durable_lease_loss() {
-                            RecoveryFence::LeaseLoss
-                        } else if terminal.abandoned_turn().is_none() {
-                            RecoveryFence::Other
-                        } else {
-                            RecoveryFence::Unproved
-                        }
+                        classify_recovery_fence(error, terminal.abandoned_turn())
                     }
                     _ => RecoveryFence::Unproved,
                 }
             }
             _ => RecoveryFence::Unproved,
         }
+    }
+}
+
+pub(crate) fn classify_recovery_fence(
+    error: &plakous::agent::AgentError,
+    abandoned: Option<&plakous::agent::AbandonedTurnReport>,
+) -> RecoveryFence {
+    if error.is_durable_lease_loss() {
+        RecoveryFence::LeaseLoss
+    } else if abandoned.is_none() {
+        RecoveryFence::Other
+    } else {
+        RecoveryFence::Unproved
     }
 }
 

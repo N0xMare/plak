@@ -28,6 +28,7 @@ mod live_lease;
 mod parent_followup;
 mod saturated_retask;
 mod spawn_accounts;
+mod successor;
 use crate::agent::{ApiTopologyParent, NATIVE_RUN_MAX_MODEL_ROUNDS, ProductStateRoots};
 use crate::agent_tree::{
     CustodyClaim, MemoryTreeStore, PersistedTree, ProductAgentTree, Revision, TURN_ABANDONED,
