@@ -20,6 +20,9 @@ use super::{
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliFailureKind, CliResult};
 
+mod verdict;
+pub(in crate::host) use verdict::operate;
+
 const LIMIT: u64 = 512 << 20;
 const FRAME: u64 = 1024;
 
@@ -48,16 +51,10 @@ impl Failure {
         CliFailure::classified(
             CliFailureKind::RecoveryRequired,
             format!(
-                "host_upgrade_fix_forward_required: destination {phase} failed after surrender; inspect the destination host log and fix forward without restoring a store backup"
+                "host_upgrade_fix_forward_required: destination {phase} failed after surrender; inspect `plakd host upgrade-verdict` and the destination log; fix forward without restoring a store backup"
             ),
         )
     }
-}
-
-#[derive(Deserialize, Serialize)]
-struct Verdict {
-    nonce: Uuid,
-    outcome: Outcome,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -125,11 +122,7 @@ impl Ticket {
     }
 
     pub(super) fn outcome(&self, paths: &PlakPaths) -> CliResult<Option<Outcome>> {
-        let Some(file) = open(&verdict_path(paths), FRAME)? else {
-            return Ok(None);
-        };
-        let verdict: Verdict = decode(file, FRAME)?;
-        Ok((verdict.nonce == self.nonce).then_some(verdict.outcome))
+        verdict::outcome(paths, self.nonce)
     }
 
     pub(super) fn successor(&self, identity: &Identity) -> bool {
@@ -166,14 +159,8 @@ impl Ticket {
     fn record(&self, paths: &PlakPaths, outcome: Outcome) -> CliResult<()> {
         let path = verdict_path(paths);
         stage(&path, FRAME, |out| {
-            serde_json::to_writer(
-                out,
-                &Verdict {
-                    nonce: self.nonce,
-                    outcome,
-                },
-            )
-            .map_err(error)
+            serde_json::to_writer(out, &verdict::WriteVerdict::new(self.nonce, outcome))
+                .map_err(error)
         })
         .and_then(|file| {
             file.as_file().sync_all().map_err(error)?;
@@ -192,12 +179,10 @@ struct Payload<S, B> {
 }
 
 fn refuse_cold_start(paths: &PlakPaths) -> CliResult<()> {
-    if let Some(file) = open(&verdict_path(paths), FRAME)?
-        && !matches!(decode::<Verdict>(file, FRAME)?.outcome, Outcome::Ready(..))
-    {
+    if verdict::fenced(paths)? {
         return Err(CliFailure::classified(
             CliFailureKind::RecoveryRequired,
-            "host_upgrade_fix_forward_required: an inherited upgrade did not reach Ready; inspect the destination logs, repair the failure, then clear the stopped home's upgrade-checkpoint-verdict before restarting",
+            "host_upgrade_fix_forward_required: an inherited upgrade did not reach Ready; inspect with `plakd host upgrade-verdict`, repair the cause, stop any serving predecessor, then run `plakd host upgrade-verdict --acknowledge <id>`",
         ));
     }
     Ok(())

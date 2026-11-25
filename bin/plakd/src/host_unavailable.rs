@@ -62,3 +62,11 @@ pub(crate) fn upgrade(
 ) -> CliResult<ProcessOutcome> {
     run_host_command(services, &crate::command::HostCommand::default(), None)
 }
+
+pub(crate) fn upgrade_verdict(
+    services: &Services,
+    _acknowledge: Option<uuid::Uuid>,
+    _output: &mut dyn std::io::Write,
+) -> CliResult<ProcessOutcome> {
+    run_host_command(services, &crate::command::HostCommand::default(), None)
+}

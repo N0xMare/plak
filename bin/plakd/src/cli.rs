@@ -627,6 +627,12 @@ enum HostAction {
         #[arg(long, hide = true, requires = "inspect_runner")]
         inspect_source: Option<String>,
     },
+    /// Inspect an inherited upgrade verdict or clear a checked recovery fence.
+    UpgradeVerdict {
+        /// Clear this exact fenced verdict after stopping the host and checking the stores.
+        #[arg(long, value_name = "ID")]
+        acknowledge: Option<uuid::Uuid>,
+    },
     /// Relay wire bytes to this home's host without consuming its handshake.
     Connect {
         #[arg(long, required = true)]

@@ -438,6 +438,9 @@ pub(crate) enum Command {
         backup_store: bool,
         inspection: Option<crate::deploy::DeployRunnerInspection>,
     },
+    HostUpgradeVerdict {
+        acknowledge: Option<uuid::Uuid>,
+    },
     /// A byte-transparent bridge to the home's existing host.
     HostConnect {
         auto_start: bool,
@@ -615,7 +618,8 @@ impl Command {
             Self::Host(_)
             | Self::HostInstall(_)
             | Self::HostConnect { .. }
-            | Self::HostUpgrade { .. } => "host",
+            | Self::HostUpgrade { .. }
+            | Self::HostUpgradeVerdict { .. } => "host",
             Self::WireSchema => "wire",
         }
     }
@@ -669,6 +673,7 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
             | Command::StoreBackup { .. }
             | Command::WireSchema
             | Command::HostConnect { .. }
+            | Command::HostUpgradeVerdict { acknowledge: None }
             | Command::AccountsList
             | Command::AuthStatus(_)
             | Command::Doctor

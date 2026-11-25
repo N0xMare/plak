@@ -137,7 +137,23 @@ fn crash(flag: &str, cut: &str, lose_original: bool, paired: bool) {
         );
         // The crash is the injected cause; the operator acknowledges it
         // before restarting the destination on the unchanged stores.
-        std::fs::remove_file(fixture.home().join("host/upgrade-checkpoint-verdict")).unwrap();
+        let status = image_command(&fixture, &image)
+            .args(["host", "upgrade-verdict"])
+            .output()
+            .unwrap();
+        assert!(status.status.success(), "{status:?}");
+        let verdict: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+        assert_eq!(verdict["state"], "pending");
+        let acknowledge = image_command(&fixture, &image)
+            .args([
+                "host",
+                "upgrade-verdict",
+                "--acknowledge",
+                verdict["id"].as_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(acknowledge.status.success(), "{acknowledge:?}");
     }
     let mut replacement = await_serving_host(spawn_host(
         image_command(&fixture, &image)

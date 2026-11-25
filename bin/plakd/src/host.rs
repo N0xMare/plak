@@ -89,6 +89,14 @@ pub(crate) fn upgrade(
     upgrade::request(services, expect_binary, drain, backup_store, inspection)
 }
 
+pub(crate) fn upgrade_verdict(
+    services: &Services,
+    acknowledge: Option<uuid::Uuid>,
+    output: &mut dyn std::io::Write,
+) -> CliResult<ProcessOutcome> {
+    upgrade::checkpoint::operate(services.paths()?, acknowledge, output)
+}
+
 fn startup_runtime() -> CliResult<(
     tokio::runtime::Runtime,
     tokio::signal::unix::Signal,

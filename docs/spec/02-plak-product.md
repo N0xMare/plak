@@ -5938,13 +5938,33 @@ A predecessor that cannot capture under the holds supplies the weaker
 `host_upgrade_baseline_predates_drain` evidence level. Its early snapshot is
 read-only, including on the immediately previous product store revision. The
 destination then checks store identities, retained ancestry and feed overlap,
-non-decreasing revisions and fences, and existing identities unless a
-recorded delete accounts for their absence. Live choices, unadmitted drafts,
-consumable job receipts and mutable tree projections do not cause refusals
-against this early snapshot. Registered tree revisions still require the
+non-decreasing revisions and fences, and existing session and tree identities
+unless a recorded delete accounts for their absence. A queued draft must
+survive at the same content and revision, advance its revision, or have an
+owner-matching terminal queue binding or session delete. The early evidence
+does not assert queue order or exact admission of a removed draft. Tree
+nodes, attempts, commands, sealed candidates and durable operations must
+keep their recorded identities and owners unless the tree was deleted or
+the owner was retired since capture. Withdrawable followup openings and
+their unfacted attempts and commands, transient operation receipts, grants
+and mail projections are not part of that identity check. Live choices and
+consumable job receipts are not compared for this evidence level.
+Registered tree revisions still require the
 intact stopped-store backup of the prior revision. Destination binding
 health checks for regressions against the preflight source verdict, not for
 absence of issues the source already reported.
+
+Before inherited startup can write, the destination records a durable
+pending verdict. An unresolved or failed verdict fences a cold start,
+including after a startup error: the stage name is not proof that startup
+made no writes. The bounded verdict has a version; the envelope and Ready
+tag remain readable across same-key rollback. An unfamiliar outcome never
+authorizes a start. The operator may inspect with
+`plakd host upgrade-verdict`, then acknowledge the exact verdict after
+repair. Acknowledgement requires the destination state key, no serving host
+for that home (including a predecessor), exclusion of stand-alone writers,
+and successful read-only integrity checks. It clears the fence, not store
+data, and does not start a host or assert preservation.
 
 The host exposes `resolve_paused_drafts(pause, deadline)` for an upgrade
 coordinator to call before planned surrender. The pause must belong to that

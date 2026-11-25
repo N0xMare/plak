@@ -96,6 +96,24 @@ fn a_post_surrender_integrity_failure_blocks_service_manager_restarts() {
     // A manager configured to restart failures must not launch the old
     // service link. The requester still reported the typed failure.
     assert!(host.child.take().unwrap().wait().unwrap().success());
+    let mut verdict = image_command(&fixture, &image);
+    verdict.args(["host", "upgrade-verdict"]);
+    let inspected = verdict.output().unwrap();
+    assert!(inspected.status.success(), "{inspected:?}");
+    let report: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
+    assert_eq!(report["state"], "failed");
+    assert_eq!(report["phase"], "health");
+    assert_eq!(report["version"], 1);
+    let ack = |id: &str| {
+        image_command(&fixture, &image)
+            .args(["host", "upgrade-verdict", "--acknowledge", id])
+            .output()
+            .unwrap()
+    };
+    let id = report["id"].as_str().unwrap();
+    let refused = ack(id);
+    assert!(!refused.status.success(), "{refused:?}");
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("did not pass"));
     // Forcing an ordinary start on the successor is also fenced, even
     // after the cause has been repaired but not acknowledged.
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
@@ -115,6 +133,20 @@ fn a_post_surrender_integrity_failure_blocks_service_manager_restarts() {
         );
         assert!(!fixture.home().join("host/upgrade.sock").exists());
     }
+    let stale = ack(&uuid::Uuid::new_v4().to_string());
+    assert!(!stale.status.success(), "{stale:?}");
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("host_upgrade_verdict_changed"));
+    let cleared = ack(id);
+    assert!(cleared.status.success(), "{cleared:?}");
+    let cleared: serde_json::Value = serde_json::from_slice(&cleared.stdout).unwrap();
+    assert_eq!(cleared["acknowledged"], true);
+    let mut restarted =
+        await_serving_host(spawn_host(image_command(&fixture, &image).arg("host"))).unwrap();
+    assert_eq!(
+        Client::connect(&restarted).request(1, Op::Ping),
+        Outcome::Ok(Answer::Pong)
+    );
+    stop(&mut restarted);
 }
 
 fn assert_health_refused(result: &std::process::Output) {

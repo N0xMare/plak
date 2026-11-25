@@ -582,6 +582,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
                 inspection,
             );
         }
+        Command::HostUpgradeVerdict { acknowledge } => {
+            return host::upgrade_verdict(&services, acknowledge, &mut io::stdout());
+        }
         // The runner bridge owns raw stdin and stdout, so it runs before the
         // process takes their locks.
         Command::Runner(command) => {
@@ -1231,6 +1234,7 @@ fn execute_command<Backend: AccountOps>(
         | Command::HostInstall(_)
         | Command::HostConnect { .. }
         | Command::HostUpgrade { .. }
+        | Command::HostUpgradeVerdict { .. }
         | Command::WireSchema
         | Command::BuildInfo
         | Command::SessionCheckBinding { .. }

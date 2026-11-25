@@ -200,8 +200,24 @@ An additive product or tree store revision can advance in place without
 changing the state key. The new host revises the stores after the old host
 stops. Before any restart, point the service's stable executable link or
 pinned `ExecStart` (on macOS, the executable in `ProgramArguments`) at the
-destination. If the old binary refuses after an interrupted upgrade, start
-the destination; it finishes any remaining steps.
+destination.
+
+If an inherited upgrade did not reach Ready, a cold destination start
+refuses. With the destination executable and the same product home, run
+`plakd host upgrade-verdict`. It prints the verdict ID and, for a known
+failure, the phase. Check the destination logs and repair the cause before
+clearing the fence. Stop the service manager's restart attempts and any
+serving host for that home, including a predecessor started through the
+unchanged service link. Do not restore a backup or rerun the handoff to clear
+this failure.
+
+Run `plakd host upgrade-verdict --acknowledge <id>` with the ID you inspected.
+The command checks that the home is stopped and that the destination databases
+pass read-only integrity checks. It does not certify preservation or start
+the host. Point the service at the destination and start it deliberately. If
+systemd reached its restart limit, run
+`systemctl --user reset-failed plakd-host.service` before starting. On macOS,
+bootstrap the stopped LaunchAgent again if you unloaded it.
 
 If the source build used Monty or an earlier micro-monty release for Python
 cells, check Python-bound sessions before handoff. The micro-monty 0.0.3

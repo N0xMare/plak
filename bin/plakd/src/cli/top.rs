@@ -484,6 +484,10 @@ impl TopCommand {
                 })
             }
             Self::Host {
+                action: Some(HostAction::UpgradeVerdict { acknowledge }),
+                ..
+            } => Ok(Command::HostUpgradeVerdict { acknowledge }),
+            Self::Host {
                 action: None,
                 web,
                 ui,
