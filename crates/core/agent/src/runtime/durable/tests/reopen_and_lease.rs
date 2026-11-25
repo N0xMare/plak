@@ -768,12 +768,11 @@ async fn runtime_instance_owner_prevents_cross_runtime_operation_aliasing() -> T
     Ok(())
 }
 
-/// Every publication renews immediately before its commit, even when the
-/// heartbeat left most of the lease. A commit may block on slow storage, so
-/// spending an older lease's remainder here can strand the exact head during
-/// bounded shutdown.
+/// Publication skips redundant SQLite lease renewals while the held lease is
+/// well inside its TTL renewal threshold, and renews before committing once the
+/// lease ages past one-third of its TTL.
 #[tokio::test(start_paused = true)]
-async fn every_publication_renews_before_slow_storage_can_consume_its_lease() -> TestResult {
+async fn publication_skips_redundant_renewal_within_threshold_and_renews_past_it() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let store = Arc::new(TestCreateStore::default());
@@ -811,7 +810,39 @@ async fn every_publication_renews_before_slow_storage_can_consume_its_lease() ->
         .load(Ordering::Acquire)
         .saturating_sub(renewals);
     assert!(committed > 1);
-    assert_eq!(renewed, committed, "each commit gets fresh authority");
+    assert_eq!(
+        renewed, 0,
+        "fresh lease within threshold skips redundant publication renewals"
+    );
+
+    // Move the store's clock past one-third of the lease without triggering the
+    // periodic heartbeat: the next publication must renew once, and later commits
+    // in the same turn reuse that refreshed grant.
+    *lock_mutex(&store.publication_clock) = Some((
+        tokio::time::Instant::now(),
+        initial.expires_at().seconds() - 19,
+    ));
+    let renewals = store.renew_calls.load(Ordering::Acquire);
+    let commits = store.commit_calls.load(Ordering::Acquire);
+    let second = agent.prompt("aged commit burst").await?.result().await?;
+    assert!(
+        matches!(second.outcome(), TurnResultOutcome::Completed(_)),
+        "unexpected aged outcome: {:?}",
+        second.outcome()
+    );
+    let committed_after = store
+        .commit_calls
+        .load(Ordering::Acquire)
+        .saturating_sub(commits);
+    let renewed_after = store
+        .renew_calls
+        .load(Ordering::Acquire)
+        .saturating_sub(renewals);
+    assert!(committed_after > 1);
+    assert_eq!(
+        renewed_after, 1,
+        "aged lease renews once on publication and subsequent fresh commits skip renewal"
+    );
     let _ = agent.shutdown().await;
     Ok(())
 }

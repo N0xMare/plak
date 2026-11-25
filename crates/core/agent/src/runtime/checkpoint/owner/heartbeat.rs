@@ -256,6 +256,10 @@ async fn renew_once(authority: &Arc<Mutex<CheckpointAuthority>>) -> Result<(), R
 
 // The caller holds the branch lease gate across renewal and use of this exact
 // acknowledged authority, including checkpoint commit and receipt recovery.
+// When the held lease still has more than two-thirds of its TTL remaining on
+// the same authority clock (and storage is not recovering from unavailability),
+// publication reuses the freshly-acknowledged lease instead of paying an extra
+// renewal transaction before every commit.
 pub(super) async fn renew_for_publication(
     authority: &Arc<Mutex<CheckpointAuthority>>,
     session: plakous_model::SessionId,
@@ -266,7 +270,45 @@ pub(super) async fn renew_for_publication(
         ))
         .into_agent());
     }
+    if let Some(branch) = lock_mutex(authority).durable.clone()
+        && publication_lease_fresh(&branch)
+    {
+        return Ok(branch);
+    }
     renew_shared_durable_lease_under_gate(authority).await
+}
+
+fn publication_lease_fresh(branch: &DurableBranchContext) -> bool {
+    if branch.store.storage_unavailable() {
+        return false;
+    }
+    let Ok(now) = branch.store.lease_now() else {
+        return false;
+    };
+    let expires_at = branch.lease.expires_at();
+    if now.same_domain_cmp(expires_at) != Ok(std::cmp::Ordering::Less) {
+        return false;
+    }
+    let Some(remaining) = lease_remaining(now, expires_at) else {
+        return false;
+    };
+    let ttl = Duration::from_secs(branch.lease.lease_seconds().get());
+    let fresh_floor = ttl.saturating_sub(heartbeat_interval(branch.lease.lease_seconds()));
+    remaining > fresh_floor && remaining <= ttl
+}
+
+fn lease_remaining(
+    now: crate::lease::LeaseInstant,
+    expires_at: crate::lease::LeaseInstant,
+) -> Option<Duration> {
+    let mut secs = expires_at.seconds().checked_sub(now.seconds())?;
+    let nanos = if expires_at.nanoseconds() >= now.nanoseconds() {
+        expires_at.nanoseconds() - now.nanoseconds()
+    } else {
+        secs = secs.checked_sub(1)?;
+        1_000_000_000 - now.nanoseconds() + expires_at.nanoseconds()
+    };
+    Some(Duration::new(secs, nanos))
 }
 
 pub(super) async fn renew_shared_durable_lease_under_gate(

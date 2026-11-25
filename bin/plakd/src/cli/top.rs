@@ -343,8 +343,15 @@ impl TopCommand {
                 command: "store".to_owned(),
             }),
             Self::Store {
-                action: Some(super::StoreAction::Backup { directory }),
-            } => Ok(Command::StoreBackup { directory }),
+                action:
+                    Some(super::StoreAction::Backup {
+                        directory,
+                        budget_secs,
+                    }),
+            } => Ok(Command::StoreBackup {
+                directory,
+                budget_secs,
+            }),
             Self::State { action: None } => Ok(Command::CommandHelp {
                 command: "state".to_owned(),
             }),

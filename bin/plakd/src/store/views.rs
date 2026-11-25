@@ -836,6 +836,7 @@ fn commit_views(
             .map_err(|error| super::write_error(error, "product store write failed"))?;
     }
     for (key, row) in &writes.upserts {
+        #[cfg(debug_assertions)]
         if let Some(call_id) = row.call_id() {
             let duplicated: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM transcript_rows WHERE session_id=?1 AND call_id=?2 AND NOT (anchor=?3 AND lane=?4 AND ordinal=?5))",

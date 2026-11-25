@@ -1,6 +1,6 @@
 use super::{
     Arc, JobOutputFile, JobOutputRoot, JobOutputs, JoinedProcessSessionId, JoinedProcessSessions,
-    JoinedSession, JoinedSessionShared, Ordering, lock,
+    JoinedSession, JoinedSessionShared, Mutex, Ordering, lock,
 };
 
 impl JoinedProcessSessions {
@@ -20,12 +20,12 @@ impl JoinedProcessSessions {
             let Ok(session) = self.session(id) else {
                 return false;
             };
-            if self
-                .promotion_refusal(&lock(&self.inner.state), &session)
-                .is_some()
-            {
+            if Self::promotion_state_refusal(&lock(&self.inner.state), &session).is_some() {
                 return false;
             }
+        }
+        if self.observer_has_room().is_err() {
+            return false;
         }
         self.prepare_job_output()
     }
@@ -121,14 +121,15 @@ impl JoinedProcessSessions {
                 .filter(|next| u32::try_from(*next).is_ok())?;
             number
         };
-        let file = {
+        let (mut writer, file) = {
             let mut outputs = lock(&self.inner.outputs);
             let outputs = outputs.as_mut()?;
-            let mut writer = outputs.create(number).ok()?;
-            writer.append(bytes);
-            drop(writer);
-            outputs.file(number)?
+            let writer = outputs.create(number).ok()?;
+            let file = outputs.file(number)?;
+            (writer, file)
         };
+        writer.append(bytes);
+        drop(writer);
         self.release_job_outputs(vec![number]);
         Some(file)
     }
@@ -162,45 +163,84 @@ impl JoinedProcessSessions {
         }
     }
 
-    /// Creates the promoted job's file and moves spooling under the output
-    /// lock, so no record is lost or written twice. The caller reserved room
-    /// first. Failure never blocks promotion; the job then has no issued path.
+    /// Creates the promoted job's file and spools buffered records without
+    /// holding either the outputs lock or the session lock across disk writes.
+    /// The caller reserved room first. Failure never blocks promotion; the job
+    /// then has no issued path.
     pub(super) fn spool_promoted(&self, id: JoinedProcessSessionId, session: &JoinedSession) {
-        let mut shared = lock(&session.shared);
-        self.spool_output(id, &mut shared);
+        let (evicted, records, next_sequence) = {
+            let shared = lock(&session.shared);
+            let evicted = shared
+                .output
+                .records
+                .front()
+                .map_or(shared.output.next_cursor, |record| record.cursor);
+            let records = shared
+                .output
+                .records
+                .iter()
+                .map(|record| Arc::clone(&record.bytes))
+                .collect::<Vec<_>>();
+            (evicted, records, shared.output.next_sequence)
+        };
+        self.spool_snapshot(id, &session.shared, evicted, &records, next_sequence);
     }
 
-    pub(super) fn spool_output(
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "read only by the unix host backend")
+    )]
+    pub(in crate::environment::backend::process) fn prepare_and_spool_snapshot(
         &self,
         id: JoinedProcessSessionId,
-        shared: &mut JoinedSessionShared,
+        shared: &Mutex<JoinedSessionShared>,
+        evicted: u64,
+        records: &[Arc<[u8]>],
+        next_sequence: u64,
     ) {
-        let mut outputs = lock(&self.inner.outputs);
-        let Some(outputs) = outputs.as_mut() else {
-            return;
-        };
-        if outputs.file(Self::job_number(id)).is_some() {
-            return;
+        if self.prepare_job_output() {
+            self.spool_snapshot(id, shared, evicted, records, next_sequence);
         }
-        let Ok(mut writer) = outputs.create(Self::job_number(id)) else {
-            return;
+    }
+
+    fn spool_snapshot(
+        &self,
+        id: JoinedProcessSessionId,
+        shared: &Mutex<JoinedSessionShared>,
+        evicted: u64,
+        records: &[Arc<[u8]>],
+        next_sequence: u64,
+    ) {
+        let mut writer = {
+            let mut outputs = lock(&self.inner.outputs);
+            let Some(outputs) = outputs.as_mut() else {
+                return;
+            };
+            if outputs.file(Self::job_number(id)).is_some() {
+                return;
+            }
+            let Ok(writer) = outputs.create(Self::job_number(id)) else {
+                return;
+            };
+            writer
         };
-        let evicted = shared
-            .output
-            .records
-            .front()
-            .map_or(shared.output.next_cursor, |record| record.cursor);
         if evicted > 0 {
             writer.append(
                 format!("[... {evicted} bytes of output omitted before promotion ...]\n")
                     .as_bytes(),
             );
         }
-        for record in &shared.output.records {
-            writer.append(&record.bytes);
+        for bytes in records {
+            writer.append(bytes);
+        }
+        let mut state = lock(shared);
+        for record in &state.output.records {
+            if record.sequence >= next_sequence {
+                writer.append(&record.bytes);
+            }
         }
         // The job monitor closes the file once the job is terminal.
-        shared.spool = Some(writer);
-        shared.pending_spool = None;
+        state.spool = Some(writer);
+        state.pending_spool = None;
     }
 }

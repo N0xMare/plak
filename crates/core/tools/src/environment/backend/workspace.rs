@@ -404,24 +404,53 @@ pub(super) fn open_workspace_beneath(
     flags: OFlags,
 ) -> Result<fs::File, ExecutionBackendError> {
     let root = verified_workspace_root(workspace)?;
+    open_workspace_beneath_root(&root, workspace, relative, flags)
+}
+
+fn open_workspace_beneath_root(
+    root: &fs::File,
+    workspace: &ExecutionWorkspace,
+    relative: &Path,
+    flags: OFlags,
+) -> Result<fs::File, ExecutionBackendError> {
     let path = workspace_descriptor_path(workspace, relative)?;
     #[cfg(target_os = "linux")]
     {
         let descriptor = openat2(
-            &root,
+            root,
             &path,
             flags | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::empty(),
             ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
         )
         .map_err(|errno| {
-            workspace_open_error(relative, confined_link_errno(&root, &path, flags, errno))
+            workspace_open_error(relative, confined_link_errno(root, &path, flags, errno))
         })?;
         Ok(fs::File::from(descriptor))
     }
     #[cfg(not(target_os = "linux"))]
     {
-        open_workspace_beneath_at(&root, &path, flags)
+        open_workspace_beneath_at(root, &path, flags)
+    }
+}
+
+fn open_query_entry_beneath(
+    root: &fs::File,
+    workspace: &ExecutionWorkspace,
+    relative: &Path,
+    directory_only: bool,
+) -> RepositoryQueryEntry {
+    let mut flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOCTTY;
+    if directory_only {
+        flags |= OFlags::DIRECTORY;
+    }
+    match open_workspace_beneath_root(root, workspace, relative, flags) {
+        Ok(file) => RepositoryQueryEntry::Opened(file),
+        Err(error) => match error.kind() {
+            ExecutionBackendErrorKind::SymlinkEscape => RepositoryQueryEntry::Symlink,
+            ExecutionBackendErrorKind::NotFound => RepositoryQueryEntry::Vanished,
+            _ => RepositoryQueryEntry::Skipped,
+        },
     }
 }
 
@@ -619,7 +648,14 @@ pub(super) fn query_repository_sync(
         None => query.root().to_path_buf(),
     };
     let pruned = walk_root != query.root();
-    let start_descriptor = match open_workspace_beneath(
+    let glob_matcher = query
+        .path_glob
+        .as_deref()
+        .map(super::text_search::PathGlob::new)
+        .transpose()?;
+    let root_handle = verified_workspace_root(workspace)?;
+    let start_descriptor = match open_workspace_beneath_root(
+        &root_handle,
         workspace,
         &walk_root,
         OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOCTTY,
@@ -633,6 +669,7 @@ pub(super) fn query_repository_sync(
         .metadata()
         .map_err(|_| io_error("repository query root metadata failed"))?;
     let mut pending = BTreeMap::new();
+    let mut first_directory = None;
     let root_ignores = ancestor_ignores(workspace, &walk_root);
     if query.list_depth.is_some() && is_ignored(&root_ignores, &walk_root, start_metadata.is_dir())
     {
@@ -640,14 +677,16 @@ pub(super) fn query_repository_sync(
     }
     let mut files = Vec::new();
     if start_metadata.is_file() {
-        files.push((
-            walk_root.clone(),
-            start_metadata.len(),
-            FileObservation::capture(&start_metadata),
-            start_descriptor,
-        ));
+        files.push(query::DiscoveredRepositoryFile {
+            path: walk_root.clone(),
+            is_directory: false,
+            size: start_metadata.len(),
+            observation: FileObservation::capture(&start_metadata),
+        });
+        drop(start_descriptor);
     } else if start_metadata.is_dir() {
-        pending.insert(walk_root.clone(), (start_descriptor, root_ignores));
+        pending.insert(walk_root.clone(), root_ignores);
+        first_directory = Some((walk_root.clone(), start_descriptor));
     } else if pruned {
         return Ok(empty_repository_query_result(1));
     } else {
@@ -659,8 +698,18 @@ pub(super) fn query_repository_sync(
         mut files,
         entries_skipped,
         mut stop_reason,
-    } = walk_repository_query_directories(control, limits, pending, files, query)?;
-    retain_repository_query_glob_matches(query, &mut files)?;
+    } = walk_repository_query_directories(
+        workspace,
+        &root_handle,
+        control,
+        limits,
+        pending,
+        first_directory,
+        files,
+        query,
+        glob_matcher.as_ref(),
+    )?;
+    retain_repository_query_glob_matches(query, glob_matcher.as_ref(), &mut files);
     let files_considered = files.len().min(limits.max_files);
     if files.len() > files_considered {
         stop_reason = Some(RepositoryQueryStopReason::Files);
@@ -676,6 +725,8 @@ pub(super) fn query_repository_sync(
         );
     }
     scan_repository_query_files(
+        workspace,
+        &root_handle,
         query,
         control,
         limits,
@@ -710,7 +761,12 @@ fn read_unchanged_query_file(
             .map_err(|_| io_error("repository query file metadata failed"))
     };
     let opened = observe(file)?;
-    if opened != discovered {
+    if opened != discovered
+        || !file
+            .metadata()
+            .map_err(|_| io_error("repository query file metadata failed"))?
+            .is_file()
+    {
         return Ok(QueryFileRead::Changed);
     }
     if opened.length > max_file_bytes {

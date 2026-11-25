@@ -650,8 +650,20 @@ struct Pump {
 
 async fn pump_parked(pump: Pump) {
     let mut collected = CollectedOutput::default();
+    let mut pending_answers = tokio::task::JoinSet::new();
     loop {
-        let event = match pump.client.read_event().await {
+        let event = tokio::select! {
+            biased;
+            event = pump.client.read_event() => event,
+            Some(joined) = pending_answers.join_next(), if !pending_answers.is_empty() => {
+                if !matches!(joined, Ok(true)) && !pump.client.is_lost() {
+                    pump.lose("cell request answer closed".into()).await;
+                    break;
+                }
+                continue;
+            }
+        };
+        let event = match event {
             Ok(event) => event,
             Err(error) => {
                 pump.lose(error).await;
@@ -670,9 +682,11 @@ async fn pump_parked(pump: Pump) {
                 let Some((event, replied)) = pump.nested_call(call, name, input, None).await else {
                     break;
                 };
-                if !pump.forward(event, replied).await {
+                if pump.events_tx.send(event).await.is_err() {
+                    pump.lose("cell event delivery unavailable".into()).await;
                     break;
                 }
+                pending_answers.spawn(async move { replied.await.is_ok() });
             }
             CellEvent::Output {
                 item: OutputItem::Notify { text },
@@ -957,7 +971,7 @@ impl Pump {
     }
 
     async fn forward(&self, event: CellSessionEvent, answered: oneshot::Receiver<()>) -> bool {
-        if self.events_tx.try_send(event).is_err() {
+        if self.events_tx.send(event).await.is_err() {
             self.lose("cell event delivery unavailable".into()).await;
             return false;
         }

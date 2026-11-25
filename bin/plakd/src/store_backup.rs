@@ -16,7 +16,9 @@ use crate::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
 
 const SNAPSHOT_TRIES: usize = 5;
 const LOCK_WAIT: Duration = Duration::from_millis(200);
-const COPY_BUDGET: Duration = Duration::from_secs(120);
+pub(crate) const DEFAULT_COPY_BUDGET_SECS: u64 = 600;
+const COPY_BUDGET: Duration = Duration::from_secs(DEFAULT_COPY_BUDGET_SECS);
+const COPY_BUDGET_ENV: &str = "PLAK_STORE_BACKUP_BUDGET_SECS";
 type Cause = Box<dyn std::error::Error>;
 type BackupResult<T> = Result<T, Refusal>;
 
@@ -84,13 +86,48 @@ struct CopiedFile {
     sha256: String,
 }
 
+pub(crate) fn resolve_budget(cli_secs: Option<u64>) -> CliResult<Duration> {
+    resolve_budget_with_env(cli_secs, std::env::var(COPY_BUDGET_ENV).ok().as_deref())
+}
+
+fn resolve_budget_with_env(cli_secs: Option<u64>, env_value: Option<&str>) -> CliResult<Duration> {
+    let seconds = match cli_secs {
+        Some(seconds) => seconds,
+        None => match env_value.map(str::trim).filter(|value| !value.is_empty()) {
+            Some(raw) => raw.parse::<u64>().map_err(|_| {
+                CliFailure::classified(
+                    CliFailureKind::Usage,
+                    format!("{COPY_BUDGET_ENV} must be a positive integer number of seconds"),
+                )
+            })?,
+            None => return Ok(COPY_BUDGET),
+        },
+    };
+    if seconds == 0 {
+        return Err(CliFailure::classified(
+            CliFailureKind::Usage,
+            "store backup budget must be at least 1 second",
+        ));
+    }
+    Ok(Duration::from_secs(seconds))
+}
+
+#[cfg(test)]
 pub(crate) fn run(
     paths: &PlakPaths,
     directory: &Path,
     out: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
-    let manifest =
-        publish(paths, directory, &sources(paths), COPY_BUDGET).map_err(Refusal::into_cli)?;
+    run_with_budget(paths, directory, COPY_BUDGET, out)
+}
+
+pub(crate) fn run_with_budget(
+    paths: &PlakPaths,
+    directory: &Path,
+    budget: Duration,
+    out: &mut dyn Write,
+) -> CliResult<ProcessOutcome> {
+    let manifest = publish(paths, directory, &sources(paths), budget).map_err(Refusal::into_cli)?;
     out.write_all(&manifest)
         .map_err(|error| CliFailure::new(format!("backup published but stdout failed: {error}")))?;
     Ok(ProcessOutcome::Success)
@@ -776,5 +813,40 @@ mod tests {
         }
         assert!(run(&paths, &target, &mut Vec::new()).is_err());
         assert_eq!(fs::read(target.join("manifest.json")).unwrap(), out);
+    }
+
+    #[test]
+    fn backup_copy_budget_defaults_to_600s_and_accepts_cli_or_env_override() {
+        assert_eq!(COPY_BUDGET, Duration::from_secs(600));
+        assert_eq!(
+            resolve_budget_with_env(None, None).unwrap(),
+            Duration::from_secs(600)
+        );
+        assert_eq!(
+            resolve_budget_with_env(None, Some("900")).unwrap(),
+            Duration::from_secs(900)
+        );
+        assert_eq!(
+            resolve_budget_with_env(Some(300), Some("900")).unwrap(),
+            Duration::from_secs(300)
+        );
+        assert_eq!(
+            resolve_budget_with_env(Some(0), None)
+                .unwrap_err()
+                .exit_code(),
+            2
+        );
+        assert_eq!(
+            resolve_budget_with_env(None, Some("0"))
+                .unwrap_err()
+                .exit_code(),
+            2
+        );
+        assert_eq!(
+            resolve_budget_with_env(None, Some("not-a-number"))
+                .unwrap_err()
+                .exit_code(),
+            2
+        );
     }
 }

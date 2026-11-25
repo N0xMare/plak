@@ -1,8 +1,9 @@
 use super::{
     Arc, ExecutionBackendError, ExecutionBackendErrorKind, FOREGROUND, Instant, JobObserver,
     JobOutputAdmission, JoinedProcessServiceState, JoinedProcessSessionId, JoinedProcessSessions,
-    JoinedProcessStatus, JoinedSession, NonZeroU64, Ordering, PROMOTED, Receiver, backend_error,
-    cancel_foreground, cleanup_unresolved_error, io_error, lock, resource_error, sync_channel,
+    JoinedProcessStatus, JoinedSession, NonZeroU64, Ordering, PROMOTED, PROMOTING, Receiver,
+    backend_error, cancel_foreground, cleanup_unresolved_error, conflict_error, io_error, lock,
+    resource_error, sync_channel,
 };
 
 impl JoinedProcessSessions {
@@ -84,9 +85,14 @@ impl JoinedProcessSessions {
     /// Captures terminal transitions already observed for this service's jobs.
     #[must_use]
     pub fn job_terminal_generation(&self) -> u64 {
-        let mut state = lock(&self.inner.state);
-        self.record_local_job_terminals(&mut state);
-        u64::try_from(state.terminal_jobs.len()).unwrap_or(u64::MAX)
+        let (observed, generation) = {
+            let mut state = lock(&self.inner.state);
+            let observed = Self::collect_local_job_terminals(&mut state);
+            let generation = u64::try_from(state.terminal_jobs.len()).unwrap_or(u64::MAX);
+            (observed, generation)
+        };
+        self.observe_job_terminals(&observed);
+        generation
     }
 
     /// Subscribes before polling to wake promptly on process terminal changes.
@@ -110,10 +116,10 @@ impl JoinedProcessSessions {
     #[must_use]
     pub fn terminal_jobs_since(&self, generation: u64) -> Vec<String> {
         let arm = self.runner_arm();
-        let numbers = {
+        let (observed, numbers) = {
             let mut state = lock(&self.inner.state);
-            self.record_local_job_terminals(&mut state);
-            state
+            let observed = Self::collect_local_job_terminals(&mut state);
+            let numbers = state
                 .terminal_jobs
                 .iter()
                 .skip(usize::try_from(generation).unwrap_or(usize::MAX))
@@ -127,8 +133,10 @@ impl JoinedProcessSessions {
                         })
                 })
                 .map(|id| Self::job_number(*id))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (observed, numbers)
         };
+        self.observe_job_terminals(&observed);
         numbers
             .into_iter()
             .filter(|number| arm.is_none_or(|arm| !arm.is_consumed(*number)))
@@ -140,15 +148,22 @@ impl JoinedProcessSessions {
         if self.reported_session_for_number(number).is_some() {
             return true;
         }
-        let mut state = lock(&self.inner.state);
-        self.record_local_job_terminals(&mut state);
-        state
-            .terminal_membership
-            .iter()
-            .any(|id| Self::job_number(*id) == number)
+        let (observed, seen) = {
+            let mut state = lock(&self.inner.state);
+            let observed = Self::collect_local_job_terminals(&mut state);
+            let seen = state
+                .terminal_membership
+                .iter()
+                .any(|id| Self::job_number(*id) == number);
+            (observed, seen)
+        };
+        self.observe_job_terminals(&observed);
+        seen
     }
 
-    fn record_local_job_terminals(&self, state: &mut JoinedProcessServiceState) {
+    fn collect_local_job_terminals(
+        state: &mut JoinedProcessServiceState,
+    ) -> Vec<(JoinedProcessSessionId, Arc<JoinedSession>)> {
         let newly_terminal: Vec<_> = state
             .active
             .iter()
@@ -158,17 +173,21 @@ impl JoinedProcessSessions {
                     && lock(&session.shared).status.is_terminal()
                     && !state.terminal_membership.contains(id)
             })
-            .map(|(id, _)| *id)
+            .map(|(id, session)| (*id, Arc::clone(session)))
             .collect();
-        for id in &newly_terminal {
-            if let Some(session) = state.active.get(id).or_else(|| state.finished.get(id)) {
-                let _ = self.observe_job(*id, session, false);
-            }
-        }
         state
             .terminal_membership
-            .extend(newly_terminal.iter().copied());
-        state.terminal_jobs.extend(newly_terminal);
+            .extend(newly_terminal.iter().map(|(id, _)| *id));
+        state
+            .terminal_jobs
+            .extend(newly_terminal.iter().map(|(id, _)| *id));
+        newly_terminal
+    }
+
+    fn observe_job_terminals(&self, observed: &[(JoinedProcessSessionId, Arc<JoinedSession>)]) {
+        for (id, session) in observed {
+            let _ = self.observe_job(*id, session, false);
+        }
     }
 
     /// Seeds the durable per-session number counter without ever moving it back.
@@ -354,17 +373,18 @@ impl JoinedProcessSessions {
         self.promote_reserved(id, fits)
     }
 
-    /// The result promotion returns without publishing: `Ok` when already
-    /// promoted, else a refusal while the owner releases, after foreground
-    /// cancellation won, at the unconsumed-row limit, or while the host's
-    /// notice ledger has no room.
-    pub(super) fn promotion_refusal(
-        &self,
+    /// State-only promotion refusal checks, run under `self.inner.state`.
+    /// Host observer callbacks run outside the mutex via [`Self::observer_has_room`].
+    pub(super) fn promotion_state_refusal(
         state: &JoinedProcessServiceState,
         session: &JoinedSession,
     ) -> Option<Result<(), ExecutionBackendError>> {
-        if session.promoted.load(Ordering::Acquire) == PROMOTED {
-            return Some(Ok(()));
+        match session.promoted.load(Ordering::Acquire) {
+            PROMOTED => return Some(Ok(())),
+            PROMOTING => {
+                return Some(Err(conflict_error("job promotion is already in progress")));
+            }
+            _ => {}
         }
         if !state.accepting_jobs {
             return Some(Err(backend_error(
@@ -382,20 +402,29 @@ impl JoinedProcessSessions {
             .active
             .values()
             .chain(state.finished.values())
-            .filter(|session| session.promoted.load(Ordering::Acquire) == PROMOTED)
+            .filter(|session| {
+                matches!(
+                    session.promoted.load(Ordering::Acquire),
+                    PROMOTED | PROMOTING
+                )
+            })
             .count();
         if rows >= 128 {
             return Some(Err(
                 resource_error("unconsumed job row limit was reached").with_proven_no_effect(false)
             ));
         }
+        None
+    }
+
+    pub(super) fn observer_has_room(&self) -> Result<(), ExecutionBackendError> {
         let observer = lock(&self.inner.job_observer).clone();
-        observer
-            .is_some_and(|observer| !(observer.has_room)())
-            .then(|| {
-                Err(resource_error("host job observation queue is full")
-                    .with_proven_no_effect(false))
-            })
+        if observer.is_some_and(|observer| !(observer.has_room)()) {
+            return Err(
+                resource_error("host job observation queue is full").with_proven_no_effect(false)
+            );
+        }
+        Ok(())
     }
 
     /// Promotes after [`Self::reserve_job_output`]: publication, the job's
@@ -421,13 +450,12 @@ impl JoinedProcessSessions {
         let (published, gate) = sync_channel::<()>(1);
         {
             let state = lock(&self.inner.state);
-            if let Some(refusal) = self.promotion_refusal(&state, &session) {
+            if let Some(refusal) = Self::promotion_state_refusal(&state, &session) {
                 return refusal;
             }
-            self.spawn_job_monitor(id, &session, gate)?;
             if session
                 .promoted
-                .compare_exchange(FOREGROUND, PROMOTED, Ordering::AcqRel, Ordering::Acquire)
+                .compare_exchange(FOREGROUND, PROMOTING, Ordering::AcqRel, Ordering::Acquire)
                 .is_err()
             {
                 return Err(backend_error(
@@ -435,11 +463,20 @@ impl JoinedProcessSessions {
                     "foreground cancellation won before job promotion",
                 ));
             }
-            if let Err(error) = self.observe_job(id, &session, true) {
-                session.promoted.store(FOREGROUND, Ordering::Release);
-                return Err(error.with_proven_no_effect(false));
-            }
         }
+        if let Err(error) = self.observer_has_room() {
+            session.promoted.store(FOREGROUND, Ordering::Release);
+            return Err(error);
+        }
+        if let Err(error) = self.spawn_job_monitor(id, &session, gate) {
+            session.promoted.store(FOREGROUND, Ordering::Release);
+            return Err(error);
+        }
+        if let Err(error) = self.observe_job(id, &session, true) {
+            session.promoted.store(FOREGROUND, Ordering::Release);
+            return Err(error.with_proven_no_effect(false));
+        }
+        session.promoted.store(PROMOTED, Ordering::Release);
         if fits {
             self.spool_promoted(id, &session);
         }

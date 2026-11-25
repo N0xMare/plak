@@ -44,7 +44,13 @@ use plakous_auth::oauth_workflow::parse_absolute_redirect_query;
 impl ManagerCore {
     /// The selected slot of a test manager, which is under local custody.
     fn local_store(&self) -> &PrivateCredentialStore {
-        self.store.as_ref().expect("a test manager holds its store")
+        self.store
+            .as_deref()
+            .expect("a test manager holds its store")
+    }
+
+    fn local_store_arc(&self) -> Arc<PrivateCredentialStore> {
+        Arc::clone(self.store.as_ref().expect("a test manager holds its store"))
     }
 }
 
@@ -2215,6 +2221,14 @@ async fn cancelling_claimed_refresh_after_request_observation_restores_ready() -
     let joined = tokio::time::timeout(Duration::from_secs(30), refresh).await?;
     assert!(joined.is_err_and(|error| error.is_cancelled()));
     drop(release_head);
+    // Cancel restore is offloaded via spawn_blocking so dropping never blocks a
+    // Tokio worker; wait briefly for the offloaded restore to land.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while required(manager.status()?, "cancel restore")?.status() != CredentialStatus::Ready
+        && Instant::now() < deadline
+    {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     assert_eq!(
         required(manager.status()?, "cancel restore")?.status(),
         CredentialStatus::Ready
@@ -2294,7 +2308,7 @@ async fn post_start_failure_restore_leaves_a_peer_reclaimed_unknown_alone() -> T
 
     let core = &*manager.core;
     let mut hooks = XaiRefreshHooks {
-        cancel_guard: XaiRefreshCancelGuard::new(core.local_store(), None),
+        cancel_guard: XaiRefreshCancelGuard::new(core.local_store_arc(), None),
         core,
         expected_account: None,
         expected_selection_epoch: None,
@@ -2313,6 +2327,63 @@ async fn post_start_failure_restore_leaves_a_peer_reclaimed_unknown_alone() -> T
     drop(hooks);
 
     assert_eq!(peer_store.load()?, Some(peers));
+    peer.abort_join().await?;
+    Ok(())
+}
+
+/// Dropping an armed `XaiRefreshCancelGuard` on a Tokio worker thread offloads
+/// the blocking credential-store restore to `spawn_blocking` so it never blocks
+/// the runtime thread, and still restores the claimed Unknown record to Ready.
+#[tokio::test(flavor = "current_thread")]
+async fn cancel_guard_drop_offloads_store_restore_off_tokio_worker() -> TestResult {
+    struct RestoreObserver {
+        tx: std::sync::Mutex<Option<oneshot::Sender<std::thread::ThreadId>>>,
+    }
+    impl CredentialRefreshObserver for RestoreObserver {
+        fn observe(&self, event: CredentialRefreshEvent) {
+            if event.phase == CredentialRefreshPhase::Restored
+                && let Some(tx) = self.tx.lock().ok().and_then(|mut slot| slot.take())
+            {
+                let _ = tx.send(std::thread::current().id());
+            }
+        }
+    }
+
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let temp = tempdir()?;
+    let peer = mock_peer().await?;
+    let manager = manager(&temp, &peer)?;
+    install_stored(
+        &manager,
+        "offload-drop-subject",
+        "offload-drop-access",
+        "offload-drop-refresh",
+        system_unix_seconds()? + 60,
+    )?;
+    let store = manager.core.local_store_arc();
+    let ready = required(store.load()?, "ready fence")?;
+    let claim = store.begin_refresh(&ready)?.start();
+    let claimed = claim.fence();
+    drop(claim);
+
+    let (restored_tx, restored_rx) = oneshot::channel();
+    let worker_thread = std::thread::current().id();
+    let observer: Arc<dyn CredentialRefreshObserver> = Arc::new(RestoreObserver {
+        tx: std::sync::Mutex::new(Some(restored_tx)),
+    });
+    let mut guard = XaiRefreshCancelGuard::new(Arc::clone(&store), Some(observer));
+    guard.claimed(claimed);
+    drop(guard);
+
+    let restore_thread = tokio::time::timeout(Duration::from_secs(5), restored_rx).await??;
+    assert_ne!(
+        restore_thread, worker_thread,
+        "cancel-guard restore must run on a blocking pool thread, not the Tokio worker"
+    );
+    assert_eq!(
+        required(store.load()?, "restored fence")?.status(),
+        CredentialStatus::Ready
+    );
     peer.abort_join().await?;
     Ok(())
 }
@@ -5279,7 +5350,14 @@ async fn cancelled_renewal_restores_the_claim_and_installs_nothing() -> TestResu
     let joined = tokio::time::timeout(Duration::from_secs(1), renewal).await?;
     assert!(joined.is_err_and(|error| error.is_cancelled()));
     drop(release_token);
-    let restored = required(manager.core.local_store().load()?, "restored fence")?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let restored = loop {
+        let fence = required(manager.core.local_store().load()?, "restored fence")?;
+        if fence.status() == CredentialStatus::Ready || Instant::now() >= deadline {
+            break fence;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    };
     assert_eq!(restored.status(), CredentialStatus::Ready);
     assert_eq!(
         manager.core.read_stored(&restored)?.access_token,

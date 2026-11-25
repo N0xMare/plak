@@ -886,6 +886,48 @@ fn actor_startup_timeout_is_reported_only_after_worker_exit() {
     waiter.join().expect("waiter exits");
 }
 
+#[test]
+fn startup_timeout_detaches_wedged_actor_without_hanging() {
+    let (_ready_sender, ready_receiver) = mpsc::sync_channel::<Result<(), SessionStoreError>>(1);
+    let (job_sender, _job_receiver) = mpsc::sync_channel::<()>(1);
+    let (release_tx, release_rx) = mpsc::sync_channel::<()>(1);
+    let worker_finished = Arc::new(AtomicBool::new(false));
+    let worker_finished_flag = Arc::clone(&worker_finished);
+    let worker = std::thread::spawn(move || {
+        // Simulate a wedged SQLite startup call that ignores channel closure.
+        let _ = release_rx.recv();
+        worker_finished_flag.store(true, Ordering::SeqCst);
+    });
+
+    let progress = StartupProgress(Mutex::new(StartupStage::Connection));
+    let started = Instant::now();
+    let result = super::open::wait_for_actor_or_join_with_grace(
+        ready_receiver,
+        job_sender,
+        worker,
+        Duration::from_millis(15),
+        Duration::from_millis(40),
+        &progress,
+    );
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        result.map(|_| ()),
+        Err(SessionStoreError::BackendUnavailable)
+    );
+    assert!(
+        !worker_finished.load(Ordering::SeqCst),
+        "waiter must return even while the wedged worker is still blocked"
+    );
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "startup timeout hung for {elapsed:?}"
+    );
+
+    // Unblock the synthetic worker so the test process exits cleanly.
+    let _ = release_tx.send(());
+}
+
 #[tokio::test]
 async fn actor_dispatch_reports_full_and_failed_workers_without_waiting() {
     let (full_sender, full_receiver) = super::actor_queue(1);

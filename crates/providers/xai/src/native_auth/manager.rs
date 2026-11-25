@@ -65,7 +65,7 @@ impl XaiNativeAuthManager {
                 source_scope: None,
                 gateway_v1_authority: false,
                 catalog_retries: true,
-                store: Some(store),
+                store: Some(Arc::new(store)),
                 custodied: None,
                 client,
                 acceptance,
@@ -897,7 +897,7 @@ impl XaiNativeAuthManager {
                 source_scope: None,
                 gateway_v1_authority: false,
                 catalog_retries: true,
-                store: Some(store),
+                store: Some(Arc::new(store)),
                 custodied: None,
                 client,
                 acceptance: XaiCompatibilityAcceptance {

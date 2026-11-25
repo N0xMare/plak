@@ -722,9 +722,15 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         ),
         Command::Doctor => run_doctor(&services, &mut stdout),
         Command::StatusJson => runtime_headroom::write_status(services.paths()?, &mut stdout, true),
-        Command::StoreBackup { directory } => {
-            store_backup::run(services.paths()?, &directory, &mut stdout)
-        }
+        Command::StoreBackup {
+            directory,
+            budget_secs,
+        } => store_backup::run_with_budget(
+            services.paths()?,
+            &directory,
+            store_backup::resolve_budget(budget_secs)?,
+            &mut stdout,
+        ),
         Command::TreeRelease { tree_id, force } => {
             if !force {
                 return Err(CliFailure::classified(

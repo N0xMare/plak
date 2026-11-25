@@ -725,12 +725,21 @@ impl TelemetryStore {
     }
 
     /// Delete whole sessions oldest-first until under caps, then VACUUM and
-    /// truncate the WAL. Stop byte pruning when a reader prevents reclamation.
+    /// truncate the WAL once. Stop byte pruning when a reader prevents reclamation.
     /// Sessions with unfinished turns are retained, including other writers.
     pub fn prune(
         &mut self,
         retention: TelemetryRetentionConfig,
         database: &Path,
+    ) -> Result<TelemetryPruneOutcome, rusqlite::Error> {
+        self.prune_with_vacuum_hook(retention, database, || {})
+    }
+
+    fn prune_with_vacuum_hook(
+        &mut self,
+        retention: TelemetryRetentionConfig,
+        database: &Path,
+        mut on_vacuum: impl FnMut(),
     ) -> Result<TelemetryPruneOutcome, rusqlite::Error> {
         configure_journal_size_limit(&self.connection, retention.max_bytes)?;
         let mut checkpoint = checkpoint_wal_truncate(&self.connection)?;
@@ -740,22 +749,27 @@ impl TelemetryStore {
             });
         }
         let expired = prune_expired_sessions(&self.connection, retention.max_age_days)?;
-        if expired > 0 {
-            self.connection.execute("VACUUM", [])?;
-            checkpoint = checkpoint.and(checkpoint_wal_truncate(&self.connection)?);
+        let mut deleted_any = expired > 0;
+        if projected_database_bytes(&self.connection, database)? > retention.max_bytes {
+            let candidates = sessions_by_oldest(&self.connection)?;
+            for (session_id, _) in candidates
+                .into_iter()
+                .take(usize::try_from(MAX_BYTE_PRUNE_PASSES).unwrap_or(usize::MAX))
+            {
+                if projected_database_bytes(&self.connection, database)? <= retention.max_bytes {
+                    break;
+                }
+                delete_session_rows(&self.connection, &session_id)?;
+                deleted_any = true;
+            }
         }
-        let mut passes = 0_u32;
-        while !checkpoint.is_busy()
-            && TelemetryStore::database_size_bytes(database) > retention.max_bytes
-            && passes < MAX_BYTE_PRUNE_PASSES
-        {
-            let Some((session_id, _)) = oldest_session(&self.connection)? else {
-                break;
-            };
-            delete_session_rows(&self.connection, &session_id)?;
+        let needs_vacuum = deleted_any
+            || (TelemetryStore::database_size_bytes(database) > retention.max_bytes
+                && freelist_pages(&self.connection)? > 0);
+        if needs_vacuum {
+            on_vacuum();
             self.connection.execute("VACUUM", [])?;
             checkpoint = checkpoint.and(checkpoint_wal_truncate(&self.connection)?);
-            passes = passes.saturating_add(1);
         }
         Ok(TelemetryPruneOutcome {
             wal_checkpoint: checkpoint,
@@ -1060,6 +1074,30 @@ fn sqlite_file_len(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
+fn freelist_pages(connection: &Connection) -> Result<u64, rusqlite::Error> {
+    let freelist: i64 = connection.query_row("PRAGMA freelist_count", [], |row| row.get(0))?;
+    Ok(u64::try_from(freelist).unwrap_or(0))
+}
+
+/// Estimates the post-`VACUUM` database footprint (live SQLite pages plus the
+/// `-shm` sidecar) in O(1) without rewriting the file on every delete pass.
+fn projected_database_bytes(
+    connection: &Connection,
+    database: &Path,
+) -> Result<u64, rusqlite::Error> {
+    let page_size: i64 = connection.query_row("PRAGMA page_size", [], |row| row.get(0))?;
+    let page_count: i64 = connection.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+    let freelist = freelist_pages(connection)?;
+    let live_pages = u64::try_from(page_count)
+        .unwrap_or(0)
+        .saturating_sub(freelist);
+    let page_bytes = u64::try_from(page_size).unwrap_or(0);
+    let shm_bytes = sqlite_file_len(&sqlite_sidecar(database, "-shm"));
+    Ok(live_pages
+        .saturating_mul(page_bytes)
+        .saturating_add(shm_bytes))
+}
+
 fn configure_journal_size_limit(
     connection: &Connection,
     max_bytes: u64,
@@ -1149,10 +1187,6 @@ fn sessions_by_oldest(connection: &Connection) -> Result<Vec<(String, i64)>, rus
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(sessions)
-}
-
-fn oldest_session(connection: &Connection) -> Result<Option<(String, i64)>, rusqlite::Error> {
-    Ok(sessions_by_oldest(connection)?.into_iter().next())
 }
 
 fn prune_expired_sessions(

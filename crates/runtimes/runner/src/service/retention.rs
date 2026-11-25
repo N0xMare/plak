@@ -132,8 +132,36 @@ fn session(
         .ok_or(Refusal::UnknownJob)
 }
 
+#[derive(serde::Serialize)]
+struct SequenceJob<'a> {
+    session: &'a wire::Id,
+    number: u32,
+    command: &'a str,
+    started_at_ms: u64,
+    attribution: &'a str,
+    status: &'a wire::Status,
+    terminal: bool,
+    output: &'a str,
+    owner_generation: u64,
+}
+
 fn sequence(jobs: &[wire::Job]) -> Result<u64, Refusal> {
-    let bytes = serde_json::to_vec(jobs).map_err(|_| Refusal::Malformed)?;
+    // Exclude volatile `elapsed_ms` so idle running jobs do not spin JobsWatch.
+    let stable: Vec<_> = jobs
+        .iter()
+        .map(|job| SequenceJob {
+            session: &job.session,
+            number: job.number,
+            command: &job.command,
+            started_at_ms: job.started_at_ms,
+            attribution: &job.attribution,
+            status: &job.status,
+            terminal: job.terminal,
+            output: &job.output,
+            owner_generation: job.owner_generation,
+        })
+        .collect();
+    let bytes = serde_json::to_vec(&stable).map_err(|_| Refusal::Malformed)?;
     let digest = Sha256::digest(bytes);
     let mut first = [0; 8];
     first.copy_from_slice(&digest[..8]);

@@ -952,3 +952,63 @@ async fn queued_events_drain_in_order_before_the_operation_error()
     assert!(matches!(stream.next().now_or_never(), Some(None)));
     Ok(())
 }
+
+#[test]
+fn platform_messages_request_forwards_beta_header_without_oauth_framing()
+-> Result<(), Box<dyn std::error::Error>> {
+    use super::*;
+    use plakous_http::{Client, Limits, Origin};
+
+    let client = Client::new_http1(Limits::default())?;
+    let origin = Origin::parse("https://api.anthropic.com")?;
+    let key = sensitive_header_value(b"sk-ant-test-key".to_vec())?;
+
+    let with_beta = messages_request(
+        &client,
+        origin.clone(),
+        key.clone(),
+        Some("interleaved-thinking-2025-05-14"),
+        None,
+        br#"{"model":"claude-fixture"}"#,
+    )?;
+    assert_eq!(with_beta.path_and_query().as_str(), ANTHROPIC_MESSAGES_PATH);
+    assert_eq!(
+        with_beta
+            .headers()
+            .get(&ANTHROPIC_BETA)
+            .and_then(|value| value.to_str().ok()),
+        Some("interleaved-thinking-2025-05-14")
+    );
+    assert_eq!(
+        with_beta
+            .headers()
+            .get(&ACCEPT)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream")
+    );
+    assert!(with_beta.headers().get(&X_API_KEY).is_some());
+    assert!(with_beta.headers().get(&AUTHORIZATION).is_none());
+
+    let without_beta = messages_request(
+        &client,
+        origin,
+        key,
+        None,
+        None,
+        br#"{"model":"claude-fixture"}"#,
+    )?;
+    assert_eq!(
+        without_beta.path_and_query().as_str(),
+        ANTHROPIC_MESSAGES_PATH
+    );
+    assert!(without_beta.headers().get(&ANTHROPIC_BETA).is_none());
+    assert_eq!(
+        without_beta
+            .headers()
+            .get(&ACCEPT)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream")
+    );
+    assert!(without_beta.headers().get(&X_API_KEY).is_some());
+    Ok(())
+}

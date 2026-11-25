@@ -827,6 +827,9 @@ enum Action {
     RespondBeforeBody,
     /// Answers with a chunked body that never sends its terminal frame.
     EndPending,
+    /// Answers with a chunked body whose terminal `0\r\n\r\n` arrives shortly
+    /// after the payload chunk, then keeps the connection open for reuse.
+    DelayedEnd,
 }
 
 /// A raw HTTP/1.1 peer serving one connection, acting on its requests in turn.
@@ -860,14 +863,17 @@ async fn raw_peer(actions: Vec<Action>) -> TestResult<(Client, Origin, Arc<Atomi
                         tokio::time::sleep(Duration::from_secs(5)).await;
                         break;
                     }
-                    Action::Respond | Action::CloseAfterRequest | Action::EndPending => {}
+                    Action::Respond
+                    | Action::CloseAfterRequest
+                    | Action::EndPending
+                    | Action::DelayedEnd => {}
                 }
                 if read_body(&mut stream, content_length).await.is_err() {
                     break;
                 }
                 let response: &[u8] = match action {
                     Action::CloseAfterRequest => break,
-                    Action::EndPending => {
+                    Action::EndPending | Action::DelayedEnd => {
                         b"HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n2\r\nok\r\n"
                     }
                     Action::Respond | Action::CloseAfterHead | Action::RespondBeforeBody => {
@@ -876,6 +882,17 @@ async fn raw_peer(actions: Vec<Action>) -> TestResult<(Client, Origin, Arc<Atomi
                 };
                 if stream.write_all(response).await.is_err() {
                     break;
+                }
+                if matches!(action, Action::DelayedEnd) {
+                    if stream.flush().await.is_err() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                    if stream.write_all(b"0\r\n\r\n").await.is_err()
+                        || stream.flush().await.is_err()
+                    {
+                        break;
+                    }
                 }
                 if matches!(action, Action::EndPending) {
                     let mut byte = [0_u8; 1];
@@ -1401,20 +1418,51 @@ async fn an_early_response_to_an_unfinished_upload_is_not_kept() -> TestResult {
     Ok(())
 }
 
-/// Closing at a protocol terminal never waits for a body end still in flight.
+/// Closing at a protocol terminal waits at most the short bounded drain budget
+/// when the peer never sends the body's terminating chunk, then closes it.
 #[tokio::test]
 async fn a_protocol_terminal_close_before_the_body_end_closes_at_once() -> TestResult {
     let (client, origin, _connections) = raw_peer(vec![Action::EndPending]).await?;
     let request = request(&origin, "/turn", Bytes::from_static(b"{}"), client.limits())?;
     let mut body = client.execute(request, control()).await?.into_body();
     assert!(matches!(body.next_chunk().await, Some(Ok(chunk)) if chunk.as_ref() == b"ok"));
-    // The peer cannot finish the body. Paused time catches any timed wait in
-    // close without charging scheduler latency for the aborted task's join.
+    // The peer never finishes the body. Paused time proves close_after_protocol_terminal
+    // bounds its EOF drain tightly instead of stalling on a hung peer.
     tokio::time::pause();
     let started = tokio::time::Instant::now();
     body.close_after_protocol_terminal().await?;
-    assert_eq!(started.elapsed(), Duration::ZERO);
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= super::super::response::PROTOCOL_TERMINAL_DRAIN_BOUND
+            && elapsed
+                <= super::super::response::PROTOCOL_TERMINAL_DRAIN_BOUND + Duration::from_millis(5),
+        "expected bounded drain near {:?}, got {elapsed:?}",
+        super::super::response::PROTOCOL_TERMINAL_DRAIN_BOUND
+    );
     tokio::time::resume();
     assert_eq!(pool(&client)?.idle_count(), 0);
+    Ok(())
+}
+
+/// When the chunked `0\r\n\r\n` arrives shortly after the protocol terminal,
+/// `close_after_protocol_terminal` drains it within the short bound and returns
+/// the TLS connection to the pool for reuse.
+#[tokio::test]
+async fn a_protocol_terminal_close_drains_delayed_eof_and_reuses_connection() -> TestResult {
+    let (client, origin, connections) = raw_peer(vec![Action::DelayedEnd, Action::Respond]).await?;
+    let first = request(&origin, "/turn", Bytes::from_static(b"{}"), client.limits())?;
+    let response = client.execute(first, control()).await?;
+    assert_eq!(response.connection_use(), Some(ConnectionUse::Fresh));
+    let mut body = response.into_body();
+    assert!(matches!(body.next_chunk().await, Some(Ok(chunk)) if chunk.as_ref() == b"ok"));
+    body.close_after_protocol_terminal().await?;
+    assert_eq!(pool(&client)?.idle_count(), 1);
+    let second = request(&origin, "/turn", Bytes::from_static(b"{}"), client.limits())?;
+    let reused = client.execute(second, control()).await?;
+    assert_eq!(reused.connection_use(), Some(ConnectionUse::Reused));
+    let mut reused_body = reused.into_body();
+    assert!(matches!(reused_body.next_chunk().await, Some(Ok(chunk)) if chunk.as_ref() == b"ok"));
+    assert!(reused_body.next_chunk().await.is_none());
+    assert_eq!(connections.load(Ordering::SeqCst), 1);
     Ok(())
 }

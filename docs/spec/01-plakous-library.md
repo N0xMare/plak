@@ -1653,16 +1653,18 @@ clock alone irreversibly ends authority. A refusal or a failed attempt after
 expiry ends authority, except while capacity refusal parks the owner's runtime
 write (§5.2). This does not extend an expired lease or bypass fencing;
 renewal and checkpoint publication still require live authority. Each durable
-checkpoint publication also renews under the same lease gate immediately before
-constructing its commit request, after candidate encoding. The commit and any
-acknowledgement recovery bind that exact renewed lease, or a same-owner
+checkpoint publication checks the held lease under the same lease gate immediately
+before constructing its commit request, after candidate encoding: when the lease is
+within its first third on the same authority clock and storage is available, publication
+reuses the freshly acknowledged lease; otherwise it renews under the gate first. The
+commit and any acknowledgement recovery bind that exact lease, or a same-owner
 same-fence revival of it established while capacity-parked (§5.2). A failed
-renewal cannot fall back to the earlier lease or dispatch the checkpoint. This adds one renewal
-transaction per publication: periodic renewal alone cannot protect a slow commit
-while publication excludes the heartbeat. It does not promise a full lease period
-after acknowledgement, extend the configured lease duration, or make an expired
-lease valid when storage latency exceeds the remaining authority. The renewal is
-not a durability point; the commit that follows it is.
+renewal cannot fall back to the earlier lease or dispatch the checkpoint. Renewing
+once the lease ages past one-third avoids redundant per-commit renewal transactions
+while still protecting slow commits when publication excludes the heartbeat. It does
+not promise a full lease period after acknowledgement, extend the configured lease
+duration, or make an expired lease valid when storage latency exceeds the remaining
+authority. Any renewal is not a durability point; the commit that follows it is.
 
 Dispatch admission reads `SessionStore::lease_now` synchronously from the same
 clock used by that store's acquire, renew and mutations. This required port

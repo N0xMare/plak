@@ -971,7 +971,12 @@ impl TelemetryAction {
 #[derive(Debug, Subcommand)]
 enum StoreAction {
     /// Copy one consistent SQLite snapshot into a new private directory.
-    Backup { directory: std::path::PathBuf },
+    Backup {
+        directory: std::path::PathBuf,
+        /// Maximum seconds to spend copying the SQLite snapshots (default: 600).
+        #[arg(long, value_name = "SECONDS")]
+        budget_secs: Option<u64>,
+    },
 }
 
 #[derive(Debug, Subcommand)]

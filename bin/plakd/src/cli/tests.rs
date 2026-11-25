@@ -936,9 +936,16 @@ fn product_command_argv_matrix() {
         (&["doctor"], |c| matches!(c, Command::Doctor)),
         (&["status", "--json"], |c| matches!(c, Command::StatusJson)),
         (&["store", "backup", "./backup"], |c| {
-            matches!(c, Command::StoreBackup { directory }
+            matches!(c, Command::StoreBackup { directory, budget_secs: None }
             if directory == std::path::Path::new("./backup"))
         }),
+        (
+            &["store", "backup", "./backup", "--budget-secs", "900"],
+            |c| {
+                matches!(c, Command::StoreBackup { directory, budget_secs: Some(900) }
+            if directory == std::path::Path::new("./backup"))
+            },
+        ),
         (&["store", "backup", "--help"], |c| {
             matches!(c, Command::CommandHelp { command }
             if command == "store")

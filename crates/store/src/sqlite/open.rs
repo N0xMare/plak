@@ -11,6 +11,10 @@ pub(super) const BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub(super) const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Bounded grace period to join a failed or timed-out startup actor thread
+/// before detaching it so a wedged SQLite thread cannot hang `open` forever.
+pub(super) const STARTUP_JOIN_TIMEOUT: Duration = Duration::from_millis(500);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum StartupStage {
     Header,
@@ -257,6 +261,17 @@ pub(super) fn wait_for_actor_or_join<S>(
     timeout: Duration,
     progress: &StartupProgress,
 ) -> Result<JoinHandle<()>, SessionStoreError> {
+    wait_for_actor_or_join_with_grace(ready, sender, join, timeout, STARTUP_JOIN_TIMEOUT, progress)
+}
+
+pub(super) fn wait_for_actor_or_join_with_grace<S>(
+    ready: mpsc::Receiver<Result<(), SessionStoreError>>,
+    sender: S,
+    join: JoinHandle<()>,
+    timeout: Duration,
+    join_grace: Duration,
+    progress: &StartupProgress,
+) -> Result<JoinHandle<()>, SessionStoreError> {
     match wait_for_actor(&ready, timeout, progress) {
         Ok(()) => Ok(join),
         Err(failure) => {
@@ -265,7 +280,25 @@ pub(super) fn wait_for_actor_or_join<S>(
             let error = failure.report();
             drop(ready);
             drop(sender);
-            let _ = join.join();
+            let deadline = Instant::now() + join_grace;
+            loop {
+                if join.is_finished() {
+                    let _ = join.join();
+                    break;
+                }
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    // Static categories only: never format a database path, SQL, or backend source.
+                    tracing::warn!(
+                        target: "plakous_store::sqlite_startup",
+                        category = "startup_join_timeout",
+                        "detaching wedged SQLite startup actor thread after join grace elapsed"
+                    );
+                    drop(join);
+                    break;
+                }
+                thread::sleep(remaining.min(Duration::from_millis(5)));
+            }
             Err(error)
         }
     }

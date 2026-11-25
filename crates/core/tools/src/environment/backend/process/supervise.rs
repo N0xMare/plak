@@ -2,6 +2,7 @@
 
 use std::os::unix::process::CommandExt;
 
+use super::output_reader::ReaderStop;
 use super::start::JoinedProcessResources;
 
 use super::{
@@ -193,10 +194,22 @@ pub(super) fn supervise_joined_process(
         workers_joined,
         output_io_failed.load(Ordering::Acquire),
     );
-    let mut shared = lock(shared);
-    shared.status = final_status;
-    shared.elapsed = Some(started.elapsed());
-    shared.terminal_changed();
+    let pending_spool = {
+        let mut shared = lock(shared);
+        shared.status = final_status;
+        shared.elapsed = Some(started.elapsed());
+        shared.take_pending_spool_snapshot(&[], true)
+    };
+    if let Some(spool) = pending_spool {
+        spool.sessions.prepare_and_spool_snapshot(
+            spool.id,
+            shared,
+            spool.evicted,
+            &spool.records,
+            spool.next_sequence,
+        );
+    }
+    lock(shared).notify_terminal_changed();
 }
 
 pub(super) const fn joined_process_final_status(
@@ -318,7 +331,7 @@ pub(super) fn supervise_host_process(
     let output = Arc::new(Mutex::new(HostProcessOutput::default()));
     let output_exceeded = Arc::new(AtomicBool::new(false));
     let output_io_failed = Arc::new(AtomicBool::new(false));
-    let io_stop = Arc::new(AtomicBool::new(false));
+    let io_stop = Arc::new(ReaderStop::new());
     let stdout_thread = spawn_output_reader(
         stdout,
         HostProcessStream::Stdout,
@@ -351,7 +364,7 @@ pub(super) fn supervise_host_process(
     let stderr_thread = match stderr_thread {
         Ok(thread) => thread,
         Err(error) => {
-            io_stop.store(true, Ordering::Release);
+            io_stop.stop();
             let cleanup =
                 terminate_owned_process_group(&mut child, raw_pid, limits.cleanup_duration());
             if cleanup.is_err() {
@@ -376,7 +389,7 @@ pub(super) fn supervise_host_process(
     let stdin_thread = match stdin_thread {
         Ok(thread) => thread,
         Err(error) => {
-            io_stop.store(true, Ordering::Release);
+            io_stop.stop();
             let cleanup =
                 terminate_owned_process_group(&mut child, raw_pid, limits.cleanup_duration());
             if cleanup.is_err() {
@@ -427,7 +440,7 @@ pub(super) fn supervise_host_process(
         // shares, rather than extends, the process cleanup deadline.
         wait_for_output_readers_until(&stdout_thread, &stderr_thread, cleanup_deadline);
     }
-    io_stop.store(true, Ordering::Release);
+    io_stop.stop();
     let stdin_joined = stdin_thread.join();
     let stdout_joined = stdout_thread.join();
     let stderr_joined = stderr_thread.join();

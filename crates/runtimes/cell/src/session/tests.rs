@@ -635,3 +635,102 @@ async fn a_lost_generation_still_certifies_its_reaped_worker() {
         "a definite failed cell does not erase its worker's reaped receipt"
     );
 }
+
+/// Engine-parked cells (`QuickJS`) must forward concurrent nested calls
+/// (`Promise.all`) and yields without blocking the pump loop on the first
+/// nested responder.
+#[tokio::test]
+async fn engine_parked_forwards_concurrent_nested_calls_and_yield_without_blocking() {
+    let directory = tempfile::tempdir().expect("directory");
+    let program = scripted_worker(
+        directory.path(),
+        &[
+            Step::Read(vec![configure(), start(1)]),
+            Step::Write(vec![
+                nested_call(1, 1),
+                nested_call(1, 2),
+                WorkerFrame::Yielded { cell: 1 },
+            ]),
+            Step::Read(vec![nested_result(2)]),
+            Step::Write(vec![WorkerFrame::Delivery {
+                cell: 1,
+                call: 2,
+                verdict: DeliveryVerdict::Accepted,
+            }]),
+            Step::Read(vec![nested_result(1)]),
+            Step::Write(vec![
+                WorkerFrame::Delivery {
+                    cell: 1,
+                    call: 1,
+                    verdict: DeliveryVerdict::Accepted,
+                },
+                done(1),
+            ]),
+        ],
+    );
+    let (client, session, mut events) = session(&program).await;
+    let started = execute(&session).await;
+
+    let first = tokio::time::timeout(Duration::from_secs(5), events.receive())
+        .await
+        .expect("first nested call")
+        .expect("first event");
+    let second = tokio::time::timeout(Duration::from_secs(5), events.receive())
+        .await
+        .expect("second concurrent nested call arrived while first was pending")
+        .expect("second event");
+    let (
+        CellSessionEvent::NestedCall {
+            call: first_call,
+            responder: first_responder,
+            ..
+        },
+        CellSessionEvent::NestedCall {
+            call: second_call,
+            responder: second_responder,
+            ..
+        },
+    ) = (first, second)
+    else {
+        panic!("expected two concurrent nested calls");
+    };
+    assert_eq!((first_call, second_call), (1, 2));
+
+    // Yield must also be delivered while both nested calls remain pending.
+    let yielded = tokio::time::timeout(Duration::from_secs(5), started.initial)
+        .await
+        .expect("yield arrived while nested calls were in flight");
+    assert_eq!(
+        yielded,
+        Ok(CellResponse::Yielded {
+            cell: 1,
+            items: Vec::new(),
+        })
+    );
+
+    // Resolve out of order (call 2 before call 1) to prove true concurrency.
+    assert_eq!(
+        second_responder.resolve(serde_json::json!(7)).await,
+        NestedDeliveryOutcome::Accepted
+    );
+    assert_eq!(
+        first_responder.resolve(serde_json::json!(7)).await,
+        NestedDeliveryOutcome::Accepted
+    );
+    let _ = tokio::time::timeout(Duration::from_secs(5), client.wait_loss())
+        .await
+        .expect("worker closed after done");
+
+    let finished = tokio::time::timeout(Duration::from_secs(5), session.wait("1", WINDOW))
+        .await
+        .expect("terminal after concurrent calls resolved");
+    assert_eq!(
+        finished,
+        WaitOutcome::Live(CellResponse::Result {
+            cell: 1,
+            items: Vec::new(),
+            error: None,
+        })
+    );
+    let _ = session.shutdown().await;
+}

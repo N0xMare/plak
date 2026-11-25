@@ -198,3 +198,91 @@ impl Drop for RestoreSearch {
         let _ = fs::set_permissions(&self.path, fs::Permissions::from_mode(0o700));
     }
 }
+
+/// Walking and scanning a repository with many files and nested directories
+/// keeps open descriptors bounded and filters regular-file globs before open.
+#[test]
+fn repository_query_filters_globs_before_open_and_bounds_open_fds() -> TestResult {
+    use super::super::{OperationContext, RepositoryQuery, RepositoryQueryLimits};
+    use plakous_model::CancellationToken;
+
+    let root = tempfile::tempdir()?;
+    for dir_idx in 0..10 {
+        let dir = root.path().join(format!("dir_{dir_idx:02}"));
+        fs::create_dir(&dir)?;
+        for file_idx in 0..15 {
+            fs::write(
+                dir.join(format!("file_{file_idx:02}.rs")),
+                format!("needle_{dir_idx}_{file_idx}\n"),
+            )?;
+            fs::write(
+                dir.join(format!("ignored_{file_idx:02}.txt")),
+                "needle_non_matching_ext\n",
+            )?;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    let unreadable = if rustix::process::geteuid().is_root() {
+        None
+    } else {
+        let path = root.path().join("dir_00").join("unreadable.txt");
+        fs::write(&path, "needle_unreadable\n")?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000))?;
+        Some(RestoreSearch { path })
+    };
+
+    let environment = ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000995".parse()?),
+        root.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )?;
+    let workspace = ExecutionWorkspace::from_environment(&environment);
+    let control = OperationContext::new(CancellationToken::new());
+    let limits = RepositoryQueryLimits {
+        max_files: 500,
+        max_matches: 500,
+        max_tree_entries: 1000,
+        max_file_bytes: 64 * 1024,
+        max_total_bytes: 1024 * 1024,
+        max_match_bytes: 256,
+        max_result_bytes: 1024 * 1024,
+    };
+
+    #[cfg(target_os = "linux")]
+    let fds_before = fs::read_dir("/proc/self/fd")?.count();
+
+    let scan = super::query_repository_sync(
+        &workspace,
+        &RepositoryQuery::new(".", "needle", crate::RepositoryMatchCase::Sensitive, limits)?
+            .with_path_glob("*.rs")?,
+        &control,
+    )?;
+    assert_eq!(scan.files_considered, 150);
+    assert_eq!(scan.files_scanned, 150);
+    assert_eq!(scan.matches.len(), 150);
+    assert_eq!(
+        scan.entries_skipped, 0,
+        "non-matching unreadable .txt file must be filtered before open"
+    );
+
+    let listed = super::query_repository_sync(
+        &workspace,
+        &RepositoryQuery::glob(".", "*.rs", limits)?,
+        &control,
+    )?;
+    assert_eq!(listed.files_considered, 150);
+    assert_eq!(listed.matches.len(), 150);
+    assert_eq!(listed.entries_skipped, 0);
+
+    #[cfg(target_os = "linux")]
+    {
+        let fds_after = fs::read_dir("/proc/self/fd")?.count();
+        assert!(
+            fds_after.saturating_sub(fds_before) <= 8,
+            "query leaked open file descriptors: before={fds_before} after={fds_after}"
+        );
+        drop(unreadable);
+    }
+    Ok(())
+}

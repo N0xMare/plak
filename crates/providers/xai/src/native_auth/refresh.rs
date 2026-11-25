@@ -1,5 +1,7 @@
 //! Claimed refresh and revoke hooks and their cancellation and restore helpers.
 
+use std::sync::Arc;
+
 use plakous_auth::oauth_orchestrator::select_refresh_fence;
 
 use super::{
@@ -29,7 +31,7 @@ pub(super) type RefreshForce = plakous_auth::oauth_orchestrator::RefreshForce<Cr
 pub(super) struct XaiRefreshHooks<'a> {
     /// Declared first so a dropped refresh restores its claim before the
     /// in-process flight is released.
-    pub(super) cancel_guard: XaiRefreshCancelGuard<'a>,
+    pub(super) cancel_guard: XaiRefreshCancelGuard,
     pub(super) core: &'a ManagerCore,
     pub(super) expected_account: Option<&'a AccountBinding>,
     pub(super) expected_selection_epoch: Option<&'a str>,
@@ -549,21 +551,22 @@ async fn restore_xai_unknown_to_ready(
 /// Restores this refresh's own claimed Unknown record when the xAI refresh
 /// future is dropped without finishing (inference cancellation, before or
 /// after the POST). It does nothing until `begin_refresh` has written the
-/// claim, restores only that exact fence, never a peer's, and never blocks:
-/// on store contention it leaves Unknown, which the next xAI refresh
-/// reclaims. Every completed ladder exit calls [`Self::finished`] first so a
-/// terminal Unknown stays put.
-pub(super) struct XaiRefreshCancelGuard<'a> {
-    pub(super) store: &'a PrivateCredentialStore,
-    pub(super) observer: Option<&'a dyn CredentialRefreshObserver>,
+/// claim, restores only that exact fence, never a peer's, and never blocks
+/// an async worker thread: inside a Tokio runtime the blocking store restore
+/// is offloaded via `spawn_blocking`, and on store contention it leaves
+/// Unknown, which the next xAI refresh reclaims. Every completed ladder exit
+/// calls [`Self::finished`] first so a terminal Unknown stays put.
+pub(super) struct XaiRefreshCancelGuard {
+    pub(super) store: Arc<PrivateCredentialStore>,
+    pub(super) observer: Option<Arc<dyn CredentialRefreshObserver>>,
     pub(super) started: Instant,
     pub(super) claimed: Option<CredentialFence>,
 }
 
-impl<'a> XaiRefreshCancelGuard<'a> {
+impl XaiRefreshCancelGuard {
     pub(super) fn new(
-        store: &'a PrivateCredentialStore,
-        observer: Option<&'a dyn CredentialRefreshObserver>,
+        store: Arc<PrivateCredentialStore>,
+        observer: Option<Arc<dyn CredentialRefreshObserver>>,
     ) -> Self {
         Self {
             store,
@@ -582,24 +585,33 @@ impl<'a> XaiRefreshCancelGuard<'a> {
     }
 }
 
-impl Drop for XaiRefreshCancelGuard<'_> {
+impl Drop for XaiRefreshCancelGuard {
     fn drop(&mut self) {
         let Some(claimed) = self.claimed.take() else {
             return;
         };
-        let Ok(Some(_)) = self.store.try_restore_unknown_to_ready(&claimed) else {
-            return;
+        let store = Arc::clone(&self.store);
+        let observer = self.observer.clone();
+        let started = self.started;
+        let restore = move || {
+            let Ok(Some(_)) = store.try_restore_unknown_to_ready(&claimed) else {
+                return;
+            };
+            if let Some(observer) = observer {
+                observer.observe(CredentialRefreshEvent {
+                    phase: CredentialRefreshPhase::Restored,
+                    failure_class: Some(CredentialRefreshFailureClass::Cancelled),
+                    transport_phase: None,
+                    http_status: None,
+                    elapsed: started.elapsed(),
+                    generation: claimed.generation().get(),
+                    detail: CredentialRefreshDetail::default(),
+                });
+            }
         };
-        if let Some(observer) = self.observer {
-            observer.observe(CredentialRefreshEvent {
-                phase: CredentialRefreshPhase::Restored,
-                failure_class: Some(CredentialRefreshFailureClass::Cancelled),
-                transport_phase: None,
-                http_status: None,
-                elapsed: self.started.elapsed(),
-                generation: claimed.generation().get(),
-                detail: CredentialRefreshDetail::default(),
-            });
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => drop(handle.spawn_blocking(restore)),
+            Err(_) => restore(),
         }
     }
 }

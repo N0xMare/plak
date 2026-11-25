@@ -194,3 +194,8 @@ fn reresolution_source_is_omitted_when_its_text_repeats_the_message() {
     .with_reresolution_error(Some(distinct));
     assert!(extra.source().is_some());
 }
+
+#[test]
+fn agent_error_size_is_bounded() {
+    assert!(size_of::<AgentError>() <= 16);
+}

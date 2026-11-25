@@ -53,13 +53,20 @@ pub enum AgentErrorKind {
 #[derive(Clone, Eq, PartialEq)]
 pub struct AgentError {
     kind: AgentErrorKind,
-    message: SafeDiagnostic,
-    model_error: Option<Box<ModelError>>,
     tool_kind: Option<ToolRuntimeErrorKind>,
-    store_error: Option<SessionStoreError>,
-    binding_change: Option<Box<crate::BindingChange>>,
     account_changed: bool,
     binding_mismatch: bool,
+    inner: Box<AgentErrorInner>,
+}
+
+const _: () = assert!(size_of::<AgentError>() <= 16);
+
+#[derive(Clone, Eq, PartialEq)]
+struct AgentErrorInner {
+    message: SafeDiagnostic,
+    model_error: Option<Box<ModelError>>,
+    store_error: Option<SessionStoreError>,
+    binding_change: Option<Box<crate::BindingChange>>,
     reresolution_error: Option<Box<crate::runtime::ModelReresolutionError>>,
 }
 
@@ -81,19 +88,19 @@ impl AgentError {
         &mut self,
         error: Option<crate::runtime::ModelReresolutionError>,
     ) {
-        if self.reresolution_error.is_none() {
-            self.reresolution_error = error.map(Box::new);
+        if self.inner.reresolution_error.is_none() {
+            self.inner.reresolution_error = error.map(Box::new);
         }
     }
 
     /// The typed source of a live host re-resolution refusal, when available.
     #[must_use]
     pub fn reresolution_error(&self) -> Option<&crate::runtime::ModelReresolutionError> {
-        self.reresolution_error.as_deref()
+        self.inner.reresolution_error.as_deref()
     }
 
     pub(crate) fn with_runtime_diagnostic(mut self, diagnostic: &str) -> Self {
-        self.message = SafeDiagnostic::new(format!("{}; {diagnostic}", self.message()));
+        self.inner.message = SafeDiagnostic::new(format!("{}; {diagnostic}", self.message()));
         self
     }
 
@@ -102,14 +109,16 @@ impl AgentError {
     pub fn new(kind: AgentErrorKind, message: impl AsRef<str>) -> Self {
         Self {
             kind,
-            message: SafeDiagnostic::new(message),
-            model_error: None,
             tool_kind: None,
-            store_error: None,
-            binding_change: None,
             account_changed: false,
             binding_mismatch: false,
-            reresolution_error: None,
+            inner: Box::new(AgentErrorInner {
+                message: SafeDiagnostic::new(message),
+                model_error: None,
+                store_error: None,
+                binding_change: None,
+                reresolution_error: None,
+            }),
         }
     }
 
@@ -117,11 +126,11 @@ impl AgentError {
     /// when an exact reopen refused for that reason.
     #[must_use]
     pub fn binding_change(&self) -> Option<&crate::BindingChange> {
-        self.binding_change.as_deref()
+        self.inner.binding_change.as_deref()
     }
 
     pub(crate) fn with_binding_change(mut self, change: crate::BindingChange) -> Self {
-        self.binding_change = Some(Box::new(change));
+        self.inner.binding_change = Some(Box::new(change));
         self
     }
 
@@ -157,7 +166,7 @@ impl AgentError {
     /// Returns the redaction-safe diagnostic.
     #[must_use]
     pub fn message(&self) -> &str {
-        self.message.as_str()
+        self.inner.message.as_str()
     }
 
     /// Returns the originating model category when applicable.
@@ -175,7 +184,7 @@ impl AgentError {
     /// Returns the complete sanitized originating model error when applicable.
     #[must_use]
     pub fn model_error(&self) -> Option<&ModelError> {
-        self.model_error.as_deref()
+        self.inner.model_error.as_deref()
     }
 
     /// Records a prepared wire output maximum on an output-limit failure that
@@ -184,7 +193,7 @@ impl AgentError {
         let Some(tokens) = tokens else {
             return;
         };
-        if let Some(error) = self.model_error.as_mut() {
+        if let Some(error) = self.inner.model_error.as_mut() {
             error.fill_missing_wire_output_limit(tokens);
         }
     }
@@ -206,7 +215,7 @@ impl AgentError {
     /// refused the originating store operation.
     #[must_use]
     pub fn is_storage_full(&self) -> bool {
-        self.store_error == Some(SessionStoreError::StorageFull)
+        self.inner.store_error == Some(SessionStoreError::StorageFull)
     }
 
     /// Returns whether the store refused the originating commit because its
@@ -214,7 +223,7 @@ impl AgentError {
     /// on, the branch is read-only and its owner is fenced.
     #[must_use]
     pub fn is_not_line_head(&self) -> bool {
-        self.store_error == Some(SessionStoreError::NotLineHead)
+        self.inner.store_error == Some(SessionStoreError::NotLineHead)
     }
 
     /// Whether this error records loss of the active durable lease or fence.
@@ -223,16 +232,16 @@ impl AgentError {
     #[must_use]
     pub fn is_durable_lease_loss(&self) -> bool {
         self.kind == AgentErrorKind::OutcomeUnknown
-            && self.model_error.is_none()
+            && self.inner.model_error.is_none()
             && self.tool_kind.is_none()
             && matches!(
-                self.store_error,
+                self.inner.store_error,
                 Some(SessionStoreError::LeaseExpired | SessionStoreError::FenceSuperseded)
             )
     }
 
-    pub(crate) const fn store_error(&self) -> Option<SessionStoreError> {
-        self.store_error
+    pub(crate) fn store_error(&self) -> Option<SessionStoreError> {
+        self.inner.store_error
     }
 
     pub(crate) fn from_model(error: ModelError) -> Self {
@@ -252,14 +261,16 @@ impl AgentError {
         };
         Self {
             kind,
-            message: error.diagnostic().clone(),
-            model_error: Some(Box::new(error)),
             tool_kind: None,
-            store_error: None,
-            binding_change: None,
             account_changed: false,
             binding_mismatch: false,
-            reresolution_error: None,
+            inner: Box::new(AgentErrorInner {
+                message: error.diagnostic().clone(),
+                model_error: Some(Box::new(error)),
+                store_error: None,
+                binding_change: None,
+                reresolution_error: None,
+            }),
         }
     }
 
@@ -272,28 +283,32 @@ impl AgentError {
             };
         Self {
             kind,
-            message: error.diagnostic().clone(),
-            model_error: Some(Box::new(error)),
             tool_kind: None,
-            store_error: None,
-            binding_change: None,
             account_changed: false,
             binding_mismatch: false,
-            reresolution_error: None,
+            inner: Box::new(AgentErrorInner {
+                message: error.diagnostic().clone(),
+                model_error: Some(Box::new(error)),
+                store_error: None,
+                binding_change: None,
+                reresolution_error: None,
+            }),
         }
     }
 
     pub(crate) fn from_outcome_unknown_model(error: ModelError) -> Self {
         Self {
             kind: AgentErrorKind::OutcomeUnknown,
-            message: error.diagnostic().clone(),
-            model_error: Some(Box::new(error)),
             tool_kind: None,
-            store_error: None,
-            binding_change: None,
             account_changed: false,
             binding_mismatch: false,
-            reresolution_error: None,
+            inner: Box::new(AgentErrorInner {
+                message: error.diagnostic().clone(),
+                model_error: Some(Box::new(error)),
+                store_error: None,
+                binding_change: None,
+                reresolution_error: None,
+            }),
         }
     }
 
@@ -305,14 +320,16 @@ impl AgentError {
         };
         Self {
             kind,
-            message: error.message().clone(),
-            model_error: None,
             tool_kind: Some(error.kind()),
-            store_error: None,
-            binding_change: None,
             account_changed: false,
             binding_mismatch: false,
-            reresolution_error: None,
+            inner: Box::new(AgentErrorInner {
+                message: error.message().clone(),
+                model_error: None,
+                store_error: None,
+                binding_change: None,
+                reresolution_error: None,
+            }),
         }
     }
 
@@ -323,30 +340,34 @@ impl AgentError {
     pub(crate) fn from_store(error: SessionStoreError) -> Self {
         Self {
             kind: AgentErrorKind::Session,
-            message: SafeDiagnostic::new(error.to_string()),
-            model_error: None,
             tool_kind: None,
-            store_error: Some(error),
-            binding_change: None,
             account_changed: false,
             binding_mismatch: false,
-            reresolution_error: None,
+            inner: Box::new(AgentErrorInner {
+                message: SafeDiagnostic::new(error.to_string()),
+                model_error: None,
+                store_error: Some(error),
+                binding_change: None,
+                reresolution_error: None,
+            }),
         }
     }
 
     pub(crate) fn from_ambiguous_store(error: SessionStoreError) -> Self {
         Self {
             kind: AgentErrorKind::OutcomeUnknown,
-            message: SafeDiagnostic::new(
-                "checkpoint commit acknowledgement requires exact recovery",
-            ),
-            model_error: None,
             tool_kind: None,
-            store_error: Some(error),
-            binding_change: None,
             account_changed: false,
             binding_mismatch: false,
-            reresolution_error: None,
+            inner: Box::new(AgentErrorInner {
+                message: SafeDiagnostic::new(
+                    "checkpoint commit acknowledgement requires exact recovery",
+                ),
+                model_error: None,
+                store_error: Some(error),
+                binding_change: None,
+                reresolution_error: None,
+            }),
         }
     }
 
@@ -359,14 +380,16 @@ impl AgentError {
     ) -> Self {
         Self {
             kind,
-            message: SafeDiagnostic::new(message),
-            model_error: model_error.map(Box::new),
             tool_kind,
-            store_error,
-            binding_change: None,
             account_changed: false,
             binding_mismatch: false,
-            reresolution_error: None,
+            inner: Box::new(AgentErrorInner {
+                message: SafeDiagnostic::new(message),
+                model_error: model_error.map(Box::new),
+                store_error,
+                binding_change: None,
+                reresolution_error: None,
+            }),
         }
     }
 }
@@ -376,38 +399,41 @@ impl fmt::Debug for AgentError {
         formatter
             .debug_struct("AgentError")
             .field("kind", &self.kind)
-            .field("message", &self.message)
+            .field("message", &self.inner.message)
             .field("model_kind", &self.model_kind())
-            .field("model_error", &self.model_error)
+            .field("model_error", &self.inner.model_error)
             .field("tool_kind", &self.tool_kind)
-            .field("store_error", &self.store_error)
-            .field("binding_change", &self.binding_change)
+            .field("store_error", &self.inner.store_error)
+            .field("binding_change", &self.inner.binding_change)
             .field("account_changed", &self.account_changed)
             .field("binding_mismatch", &self.binding_mismatch)
-            .field("reresolution_error", &self.reresolution_error)
+            .field("reresolution_error", &self.inner.reresolution_error)
             .finish()
     }
 }
 
 impl fmt::Display for AgentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.message.fmt(formatter)
+        self.inner.message.fmt(formatter)
     }
 }
 
 impl std::error::Error for AgentError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.model_error
+        self.inner
+            .model_error
             .as_deref()
             .map(|error| error as &(dyn std::error::Error + 'static))
             .or_else(|| {
-                self.store_error
+                self.inner
+                    .store_error
                     .as_ref()
                     .filter(|error| self.message() != error.to_string())
                     .map(|error| error as &dyn std::error::Error)
             })
             .or_else(|| {
-                self.reresolution_error
+                self.inner
+                    .reresolution_error
                     .as_deref()
                     .filter(|error| self.message() != error.to_string())
                     .map(|error| error as &dyn std::error::Error)

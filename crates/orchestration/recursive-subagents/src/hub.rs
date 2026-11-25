@@ -900,30 +900,31 @@ impl TopologyHub {
                 ),
                 store: Arc::clone(&store),
             };
-            let tree = if is_root && attach == TopologyHubAttach::AttachRoot {
-                load_or_bootstrap(Arc::clone(&store)).await?
-            } else {
-                // A child, or a root that is not attaching, brings up only the
-                // tree that is already durable; it never bootstraps one.
-                let persisted = store.load(tree_id)?.ok_or_else(|| {
-                    TreeRuntimeError::new(
-                        "topology tree is not in the store; only a root attach bootstraps a tree",
-                    )
-                })?;
-                let tree = ProductAgentTree::reopen(persisted);
-                if !tree.epoch_digests_match() {
-                    return Err(TreeRuntimeError::new(
-                        "orchestration snapshot digest does not match persisted roster; RecoveryRequired",
-                    ));
-                }
-                tree
-            };
-            let vcs = tree.vcs_port();
-            let runtime = self
-                .insert_root(tree_id, tree, store, vcs, observer)
-                .await?;
-            drop(custody);
-            runtime
+            let attached = async {
+                let tree = if is_root && attach == TopologyHubAttach::AttachRoot {
+                    load_or_bootstrap(Arc::clone(&store)).await?
+                } else {
+                    // A child, or a root that is not attaching, brings up only the
+                    // tree that is already durable; it never bootstraps one.
+                    let persisted = store.load(tree_id)?.ok_or_else(|| {
+                        TreeRuntimeError::new(
+                            "topology tree is not in the store; only a root attach bootstraps a tree",
+                        )
+                    })?;
+                    let tree = ProductAgentTree::reopen(persisted);
+                    if !tree.epoch_digests_match() {
+                        return Err(TreeRuntimeError::new(
+                            "orchestration snapshot digest does not match persisted roster; RecoveryRequired",
+                        ));
+                    }
+                    tree
+                };
+                let vcs = tree.vcs_port();
+                self.insert_root(tree_id, tree, store, vcs, observer).await
+            }
+            .await;
+            custody.release().await;
+            attached?
         };
         if attach == TopologyHubAttach::AttachRoot {
             self.acquire_root_lease(tree_id)?;
@@ -1036,17 +1037,43 @@ struct AttachCustody {
     hold: Option<crate::tree::CustodyHold>,
 }
 
+impl AttachCustody {
+    async fn release(mut self) {
+        let Some(hold) = self.hold.take() else {
+            return;
+        };
+        let store = Arc::clone(&self.store);
+        let release = move || {
+            if let Err(error) = crate::tree::release_custody_hold(store.custody_port(), hold) {
+                tracing::error!(
+                    target: "plak.topology",
+                    error = %error,
+                    "agent tree custody was not released after a failed attach; this process keeps it until it exits"
+                );
+            }
+        };
+        let _ = tokio::task::spawn_blocking(release).await;
+    }
+}
+
 impl Drop for AttachCustody {
     fn drop(&mut self) {
         let Some(hold) = self.hold.take() else {
             return;
         };
-        if let Err(error) = crate::tree::release_custody_hold(self.store.custody_port(), hold) {
-            tracing::error!(
-                target: "plak.topology",
-                error = %error,
-                "agent tree custody was not released after a failed attach; this process keeps it until it exits"
-            );
+        let store = Arc::clone(&self.store);
+        let release = move || {
+            if let Err(error) = crate::tree::release_custody_hold(store.custody_port(), hold) {
+                tracing::error!(
+                    target: "plak.topology",
+                    error = %error,
+                    "agent tree custody was not released after a failed attach; this process keeps it until it exits"
+                );
+            }
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => drop(handle.spawn_blocking(release)),
+            Err(_) => release(),
         }
     }
 }

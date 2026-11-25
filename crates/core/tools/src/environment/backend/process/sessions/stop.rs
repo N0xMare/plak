@@ -54,12 +54,15 @@ impl JoinedProcessSessions {
                     });
                     identity_matches
                         && !lock(&session.shared).status.is_terminal()
-                        && session.promoted.compare_exchange(
-                            super::FOREGROUND,
-                            super::CANCELLING,
-                            Ordering::AcqRel,
-                            Ordering::Acquire,
-                        ) != Err(PROMOTED)
+                        && matches!(
+                            session.promoted.compare_exchange(
+                                super::FOREGROUND,
+                                super::CANCELLING,
+                                Ordering::AcqRel,
+                                Ordering::Acquire,
+                            ),
+                            Ok(_) | Err(super::CANCELLING)
+                        )
                 })
                 .map(|(id, session)| (*id, Arc::clone(session)))
                 .collect::<Vec<_>>()

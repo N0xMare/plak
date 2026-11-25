@@ -427,7 +427,7 @@ fn policy_for(
     policy = policy
         .with_prompt_cache(true)
         .with_top_level_prompt_cache(false)
-        .with_prompt_cache_ttl(Some("1h"));
+        .with_prompt_cache_ttl(target.dialect().is_claude_oauth().then_some("1h"));
     if target.dialect().is_claude_oauth() {
         // Claude Code sends the clear-thinking edit only while thinking is
         // not disabled (`thinking.type !== "disabled"`).

@@ -1245,6 +1245,74 @@ fn telemetry_byte_cap_is_met_without_over_deleting() -> TestResult {
 }
 
 #[test]
+fn telemetry_prune_batches_multi_session_deletes_and_vacuums_once() -> TestResult {
+    let (_guard, paths) = PlakPaths::isolated_test_home();
+    paths.ensure_layout().map_err(|error| error.to_string())?;
+    let mut store = TelemetryStore::open(&paths)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| error.to_string())?;
+    let database = paths.telemetry_database();
+
+    // Seed the newest session first so we can bound the byte cap above one
+    // retained session plus the SQLite schema/SHM baseline.
+    let newest_session = SessionId::try_from(Uuid::from_u128(105))?;
+    fill_session(
+        &mut store,
+        newest_session,
+        Timestamp::new(now.as_secs(), 0)?,
+        500,
+    )?;
+    assert_eq!(store.checkpoint_wal()?, WalCheckpointOutcome::Completed);
+    let size_one = TelemetryStore::database_size_bytes(&database);
+
+    // Add 1 expired session and 4 older recent sessions so both age and byte
+    // pruning delete multiple sessions before a single trailing VACUUM.
+    let expired_session = SessionId::try_from(Uuid::from_u128(100))?;
+    fill_session(&mut store, expired_session, Timestamp::new(1, 0)?, 300)?;
+    for idx in 1..=4_u128 {
+        let session = SessionId::try_from(Uuid::from_u128(100 + idx))?;
+        let at = Timestamp::new(
+            now.as_secs()
+                .saturating_sub(u64::try_from(6 - idx).unwrap_or(0) * 600),
+            0,
+        )?;
+        fill_session(&mut store, session, at, 500)?;
+    }
+    assert_eq!(store.checkpoint_wal()?, WalCheckpointOutcome::Completed);
+    let full_size = TelemetryStore::database_size_bytes(&database);
+    let cap = size_one + (full_size.saturating_sub(size_one)) / 2;
+    let mut vacuums = 0_usize;
+    let outcome = store.prune_with_vacuum_hook(
+        TelemetryRetentionConfig {
+            max_bytes: cap,
+            max_age_days: 90,
+        },
+        &database,
+        || vacuums += 1,
+    )?;
+    assert_eq!(outcome.wal_checkpoint, WalCheckpointOutcome::Completed);
+    assert_eq!(
+        vacuums, 1,
+        "prune must run VACUUM at most once after batch-deleting sessions"
+    );
+    assert!(
+        TelemetryStore::database_size_bytes(&database) <= cap,
+        "database size {} must be under cap {cap}",
+        TelemetryStore::database_size_bytes(&database)
+    );
+    assert!(
+        store.count_rows("product_events") >= 500,
+        "newest session should be retained"
+    );
+    assert!(
+        store.count_rows("product_events") < 5 * 500,
+        "multiple oldest sessions should have been deleted"
+    );
+    Ok(())
+}
+
+#[test]
 fn telemetry_wal_checkpoint_reports_busy_readers() -> TestResult {
     let (_guard, paths) = PlakPaths::isolated_test_home();
     paths.ensure_layout().map_err(|error| error.to_string())?;

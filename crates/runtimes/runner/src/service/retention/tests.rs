@@ -199,3 +199,112 @@ async fn consumed_unjoined_terminal_keeps_native_ack_and_retention_answers() {
     assert_eq!(read(&sessions, &job, 0, 1024, 0).await.unwrap(), output);
     assert_eq!(sessions.join(process).unwrap(), status);
 }
+
+#[test]
+fn sequence_ignores_volatile_elapsed_ms_and_tracks_state_changes() {
+    let mut first = wire::Job {
+        session: id("00000000000000000000000000000001").unwrap(),
+        number: 1,
+        command: "sleep 60".into(),
+        started_at_ms: 1_700_000_000_000,
+        attribution: "agent".into(),
+        elapsed_ms: 10,
+        status: wire::Status::Running {},
+        terminal: false,
+        output: String::new(),
+        owner_generation: 1,
+    };
+    let mut later = first.clone();
+    later.elapsed_ms = 5_000;
+    assert_eq!(
+        sequence(std::slice::from_ref(&first)).unwrap(),
+        sequence(&[later]).unwrap()
+    );
+
+    first.output = "hello\n".into();
+    assert_ne!(
+        sequence(&[first.clone()]).unwrap(),
+        sequence(&[wire::Job {
+            output: String::new(),
+            ..first.clone()
+        }])
+        .unwrap()
+    );
+
+    let exited = wire::Job {
+        status: wire::Status::Exited { code: Some(0) },
+        terminal: true,
+        ..first.clone()
+    };
+    assert_ne!(sequence(&[first]).unwrap(), sequence(&[exited]).unwrap());
+}
+
+#[tokio::test]
+async fn jobs_watch_waits_while_running_job_only_advances_elapsed_ms() {
+    let root = tempfile::tempdir().unwrap();
+    let environment = ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000002".parse().unwrap()),
+        root.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )
+    .unwrap();
+    let sessions = environment.joined_process_sessions().unwrap();
+    let control = OperationContext::new(CancellationToken::new());
+    let process = sessions
+        .start(
+            JoinedProcessStartRequest::new(
+                JoinedProcessCommand::literal("/bin/sleep", vec!["5".to_owned()]).unwrap(),
+                ".",
+                Vec::new(),
+                true,
+                JoinedProcessTerminalMode::Pipes,
+            )
+            .unwrap(),
+            control,
+        )
+        .unwrap();
+    sessions.promote_without_monitor_for_test(process).unwrap();
+
+    let Answer::Jobs {
+        sequence: initial_seq,
+        jobs: initial_jobs,
+        ..
+    } = snapshot(&sessions, 0).unwrap()
+    else {
+        panic!("expected initial jobs snapshot");
+    };
+    assert_eq!(initial_jobs.len(), 1);
+
+    let started = Instant::now();
+    let watch_owner = owner(&first()).unwrap();
+    let Answer::Jobs {
+        sequence: watched_seq,
+        jobs: watched_jobs,
+        ..
+    } = observe(
+        &sessions,
+        &wire::Request::JobsWatch {
+            owner: watch_owner,
+            sequence: initial_seq,
+            wait_ms: 120,
+        },
+    )
+    .await
+    .unwrap()
+    else {
+        panic!("expected jobs watch answer");
+    };
+    let waited = started.elapsed();
+    assert_eq!(watched_seq, initial_seq);
+    assert!(
+        waited >= Duration::from_millis(100),
+        "JobsWatch returned early after {waited:?} despite no job state change"
+    );
+    assert!(
+        watched_jobs[0].elapsed_ms >= initial_jobs[0].elapsed_ms,
+        "elapsed_ms should still be reported fresh"
+    );
+
+    let _ = sessions.terminate(process);
+}

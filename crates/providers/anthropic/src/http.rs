@@ -737,7 +737,10 @@ impl MessagesHttpHooks<plakous_messages::MessagesWire> for AnthropicHttpHooks {
                 ))
             })?)
         } else {
-            None
+            self.prepared
+                .dialect()
+                .beta_header()
+                .filter(|header| !header.is_empty())
         };
         let oauth_identity = if oauth {
             let session_id = self.prepared.oauth_session_id().ok_or_else(|| {
@@ -1127,9 +1130,9 @@ fn insert_oauth_header(
 }
 
 /// The exact Messages request of one physical exchange, turn or side
-/// request: `beta` and `oauth` (request id, logical session) are present
-/// exactly on the Claude OAuth route, which wears the reference client's
-/// headers; the API-key route sends `x-api-key`.
+/// request: `oauth` (request id, logical session) selects the Claude OAuth
+/// route costume; the API-key route sends `x-api-key` and forwards `beta`
+/// whenever the dialect declares one.
 pub(crate) fn messages_request(
     client: &Client,
     dial_origin: Origin,
@@ -1139,6 +1142,7 @@ pub(crate) fn messages_request(
     body: &[u8],
 ) -> Result<HttpRequest, AnthropicError> {
     let mut headers = HeaderMap::new();
+    let is_oauth = oauth.is_some();
     let path = if let (Some(beta), Some((request_id, session_id))) = (beta, oauth) {
         headers.insert(AUTHORIZATION, credential);
         headers.insert(
@@ -1201,9 +1205,15 @@ pub(crate) fn messages_request(
         crate::oauth::CLAUDE_OAUTH_MESSAGES_PATH
     } else {
         headers.insert(X_API_KEY, credential);
+        if let Some(beta) = beta.filter(|value| !value.is_empty()) {
+            headers.insert(
+                ANTHROPIC_BETA,
+                HeaderValue::from_str(beta)
+                    .map_err(|_| invalid_configuration("Anthropic beta header was invalid"))?,
+            );
+        }
         ANTHROPIC_MESSAGES_PATH
     };
-    let oauth = beta.is_some();
     headers.insert(
         ANTHROPIC_VERSION,
         HeaderValue::from_static(ANTHROPIC_API_VERSION),
@@ -1211,7 +1221,7 @@ pub(crate) fn messages_request(
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert(
         ACCEPT,
-        HeaderValue::from_static(if oauth {
+        HeaderValue::from_static(if is_oauth {
             "application/json"
         } else {
             "text/event-stream"

@@ -194,6 +194,7 @@ pub(crate) enum Command {
     Doctor,
     StoreBackup {
         directory: PathBuf,
+        budget_secs: Option<u64>,
     },
     Gateway(GatewayCommand),
     StatusAll,

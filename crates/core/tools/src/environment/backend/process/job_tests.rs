@@ -537,3 +537,51 @@ fn explicit_stop_snapshot_keeps_attribution() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn observer_callbacks_may_reenter_sessions_without_deadlocking() -> TestResult {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let directory = tempfile::tempdir()?;
+    let sessions = sessions(directory.path())?;
+    let observed = Arc::new(AtomicUsize::new(0));
+    let room_checks = Arc::new(AtomicUsize::new(0));
+    let obs_sessions = sessions.clone();
+    let obs_count = Arc::clone(&observed);
+    let room_sessions = sessions.clone();
+    let room_count = Arc::clone(&room_checks);
+    sessions.observe_jobs(
+        move |_view| {
+            // Re-entering `jobs()` and `has_jobs()` would deadlock if
+            // `JoinedProcessSessions` held its state mutex across callbacks.
+            let _ = obs_sessions.jobs();
+            let _ = obs_sessions.has_jobs();
+            obs_count.fetch_add(1, Ordering::AcqRel);
+            true
+        },
+        move || {
+            let _ = room_sessions.jobs();
+            let _ = room_sessions.has_jobs();
+            room_count.fetch_add(1, Ordering::AcqRel);
+            true
+        },
+    );
+    let id = sessions.start(
+        request("printf done", false)?,
+        OperationContext::new(CancellationToken::new()),
+    )?;
+    sessions.promote(id)?;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while sessions.running_job_count() > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let _ = sessions.job_terminal_generation();
+    let _ = sessions.terminal_jobs_since(0);
+    sessions.join_all()?;
+    assert!(room_checks.load(Ordering::Acquire) >= 1);
+    assert!(
+        observed.load(Ordering::Acquire) >= 2,
+        "expected both promotion and terminal observations"
+    );
+    Ok(())
+}

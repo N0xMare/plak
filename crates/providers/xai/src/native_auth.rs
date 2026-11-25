@@ -403,7 +403,7 @@ struct ManagerCore {
     catalog_retries: bool,
     /// The selected slot under local custody; `None` when a custodian holds
     /// the login.
-    store: Option<PrivateCredentialStore>,
+    store: Option<Arc<PrivateCredentialStore>>,
     custodied: Option<custodied::CustodiedLogin>,
     client: Client,
     catalog_observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,

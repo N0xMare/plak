@@ -347,7 +347,14 @@ impl std::fmt::Debug for CustodiedLogin {
 impl ManagerCore {
     /// The selected slot, under local custody.
     pub(super) fn store(&self) -> Result<&PrivateCredentialStore, XaiNativeAuthError> {
-        self.store.as_ref().ok_or(XaiNativeAuthError::Custodied)
+        self.store.as_deref().ok_or(XaiNativeAuthError::Custodied)
+    }
+
+    pub(super) fn store_arc(&self) -> Result<Arc<PrivateCredentialStore>, XaiNativeAuthError> {
+        self.store
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or(XaiNativeAuthError::Custodied)
     }
 
     /// The route credential-authority id: computed over the local slot, or

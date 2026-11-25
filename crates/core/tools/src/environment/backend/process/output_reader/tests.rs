@@ -178,9 +178,9 @@ fn an_idle_reader_does_not_wake() -> TestResult {
     let (pipe, writer) = std::io::pipe()?;
     let reader = Reader::spawn(pipe, 4096)?;
     std::thread::sleep(Duration::from_millis(100));
-    let before = reader_switches()?;
+    let before = reader_switches("plak-joined-out")?;
     std::thread::sleep(Duration::from_millis(500));
-    let woken = reader_switches()? - before;
+    let woken = reader_switches("plak-joined-out")? - before;
     reader.stop.stop();
     reader.join()?;
     drop(writer);
@@ -189,9 +189,90 @@ fn an_idle_reader_does_not_wake() -> TestResult {
     Ok(())
 }
 
+/// An idle one-shot process output reader sleeps in `poll` instead of waking every 2 ms.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_idle_bounded_output_reader_does_not_wake() -> TestResult {
+    let (pipe, writer) = std::io::pipe()?;
+    let output = Arc::new(Mutex::new(HostProcessOutput::default()));
+    let exceeded = Arc::new(AtomicBool::new(false));
+    let failed = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(ReaderStop::new());
+    let limits = ExecutionEnvironmentLimits::new(
+        4096,
+        4096,
+        4096,
+        4096,
+        Duration::from_secs(4),
+        Duration::from_secs(4),
+    )?;
+    let thread = spawn_output_reader(
+        pipe,
+        HostProcessStream::Stdout,
+        Arc::clone(&output),
+        Arc::clone(&exceeded),
+        Arc::clone(&failed),
+        Arc::clone(&stop),
+        limits,
+    )?;
+    std::thread::sleep(Duration::from_millis(100));
+    let before = reader_switches("plak-process-st")?;
+    std::thread::sleep(Duration::from_millis(500));
+    let woken = reader_switches("plak-process-st")? - before;
+    stop.stop();
+    assert!(
+        super::super::join_thread_until(thread, Instant::now() + LIVENESS),
+        "bounded output reader did not return"
+    );
+    assert!(!failed.load(Ordering::Acquire));
+    drop(writer);
+    assert!(
+        woken <= 5,
+        "an idle bounded output reader woke {woken} times in 500 ms"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_stop_wakes_a_bounded_output_reader_blocked_on_an_idle_pipe() -> TestResult {
+    let (pipe, mut writer) = std::io::pipe()?;
+    let output = Arc::new(Mutex::new(HostProcessOutput::default()));
+    let exceeded = Arc::new(AtomicBool::new(false));
+    let failed = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(ReaderStop::new());
+    let limits = ExecutionEnvironmentLimits::new(
+        4096,
+        4096,
+        4096,
+        4096,
+        Duration::from_secs(4),
+        Duration::from_secs(4),
+    )?;
+    let thread = spawn_output_reader(
+        pipe,
+        HostProcessStream::Stdout,
+        Arc::clone(&output),
+        Arc::clone(&exceeded),
+        Arc::clone(&failed),
+        Arc::clone(&stop),
+        limits,
+    )?;
+    writer.write_all(b"before")?;
+    std::thread::sleep(Duration::from_millis(50));
+    stop.stop();
+    assert!(
+        super::super::join_thread_until(thread, Instant::now() + LIVENESS),
+        "bounded output reader did not return"
+    );
+    assert!(!failed.load(Ordering::Acquire));
+    assert_eq!(lock(&output).stdout, b"before");
+    drop(writer);
+    Ok(())
+}
+
 /// Voluntary context switches of this process's output reader threads.
 #[cfg(target_os = "linux")]
-fn reader_switches() -> Result<u64, Box<dyn std::error::Error>> {
+fn reader_switches(thread_name: &str) -> Result<u64, Box<dyn std::error::Error>> {
     let mut switches = 0;
     for task in fs::read_dir("/proc/self/task")? {
         let task = task?.path();
@@ -203,7 +284,7 @@ fn reader_switches() -> Result<u64, Box<dyn std::error::Error>> {
         ) else {
             continue;
         };
-        if comm.trim_end() != "plak-joined-out" {
+        if comm.trim_end() != thread_name {
             continue;
         }
         switches += status

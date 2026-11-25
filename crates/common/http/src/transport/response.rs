@@ -1,16 +1,21 @@
 use std::fmt;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use http::{HeaderMap, Response as WireResponse, Version};
-use http_body::Body;
 use http_body_util::BodyExt as _;
 use hyper::body::Incoming;
+
+/// Maximum time [`ResponseBody::close_after_protocol_terminal`] waits to drain
+/// the trailing framing/EOF so cleanly finishing responses can reuse pooled
+/// TLS connections without stalling on hung peers.
+pub(super) const PROTOCOL_TERMINAL_DRAIN_BOUND: Duration = Duration::from_millis(75);
+/// Maximum trailing bytes drained after a protocol terminal before closing the
+/// connection instead of returning it to the pool.
+const PROTOCOL_TERMINAL_DRAIN_MAX_BYTES: usize = 16 * 1024;
 
 use crate::ExchangeTerminal;
 use crate::observation::Observation;
@@ -208,9 +213,9 @@ impl ResponseBody {
     /// Closes after the consumer has validated its protocol terminal.
     /// This only enriches observation; it grants no retry or task-success authority.
     ///
-    /// A pooled client never waits here: only an end of body already
-    /// received, with no further data, lets the connection carry another
-    /// request. Otherwise the connection is closed.
+    /// A pooled client performs a short, bounded drain for the trailing framing
+    /// and EOF so cleanly terminating responses return their connection to the
+    /// pool without stalling on a peer that keeps the stream open.
     ///
     /// # Errors
     /// Returns a cleanup or required-observation failure, just like [`Self::close`].
@@ -220,13 +225,17 @@ impl ResponseBody {
     }
 
     async fn close_with_terminal(mut self, terminal: ExchangeTerminal) -> Result<(), Failure> {
+        let drain_deadline = body_pull_deadline(&self.control, self.limits.response_body_timeout)
+            .min(tokio::time::Instant::now() + PROTOCOL_TERMINAL_DRAIN_BOUND);
         let keep = !self.terminal
             && terminal == ExchangeTerminal::ProtocolComplete
             && self.may_keep_connection()
-            && self.body_ended_now();
+            && self.drain_to_protocol_eof(drain_deadline).await;
         self.terminal = true;
         let result = if keep {
-            self.release_connection(false).await
+            let wait_until =
+                (tokio::time::Instant::now() < drain_deadline).then_some(drain_deadline);
+            self.release_connection(wait_until).await
         } else {
             self.connection.abort_and_join().await
         }
@@ -268,37 +277,62 @@ impl ResponseBody {
             && !self.control.cancellation().is_cancelled()
     }
 
-    /// Whether the end of the body is already buffered, past nothing but
-    /// empty data or valid trailers. Never waits.
-    fn body_ended_now(&mut self) -> bool {
-        if self.pending.is_some() {
-            return false;
+    /// Drains up to [`PROTOCOL_TERMINAL_DRAIN_MAX_BYTES`] until the wire body
+    /// reaches a clean EOF, or gives up at `deadline` / cancellation.
+    async fn drain_to_protocol_eof(&mut self, deadline: tokio::time::Instant) -> bool {
+        let mut drained = 0_usize;
+        if let Some(pending) = self.pending.take() {
+            if pending.len() > PROTOCOL_TERMINAL_DRAIN_MAX_BYTES {
+                return false;
+            }
+            drained = pending.len();
         }
         let incoming = match &mut self.incoming {
             BodySource::Wire(incoming) => incoming,
             BodySource::Hooked(_) | BodySource::Closed => return false,
         };
-        let mut context = Context::from_waker(Waker::noop());
+        let cancellation = self.control.cancellation().clone();
         loop {
-            match Pin::new(&mut *incoming).poll_frame(&mut context) {
-                Poll::Ready(None) => return true,
-                Poll::Ready(Some(Ok(frame))) => match frame.into_data() {
-                    Ok(data) if data.is_empty() => {}
-                    Ok(_) => return false,
+            let frame = tokio::select! {
+                biased;
+                () = cancellation.cancelled() => return false,
+                frame = incoming.frame() => frame,
+                () = tokio::time::sleep_until(deadline) => return false,
+            };
+            match frame {
+                None => return true,
+                Some(Ok(frame)) => match frame.into_data() {
+                    Ok(data) => {
+                        let Some(next_drained) = drained.checked_add(data.len()) else {
+                            return false;
+                        };
+                        let Some(total) = self.bytes_seen.checked_add(data.len()) else {
+                            return false;
+                        };
+                        if next_drained > PROTOCOL_TERMINAL_DRAIN_MAX_BYTES
+                            || total > self.limits.max_response_body_bytes
+                        {
+                            return false;
+                        }
+                        drained = next_drained;
+                        self.bytes_seen = total;
+                    }
                     Err(frame) => match frame.into_trailers() {
                         Ok(trailers)
                             if validate_response_headers(&trailers, &self.limits).is_ok() => {}
                         _ => return false,
                     },
                 },
-                Poll::Ready(Some(Err(_))) | Poll::Pending => return false,
+                Some(Err(_)) => return false,
             }
         }
     }
 
     async fn finish_clean_eof(&mut self) -> Option<Result<PublicBytes, Failure>> {
         let result = if self.may_keep_connection() {
-            self.release_connection(true).await
+            let deadline = body_pull_deadline(&self.control, self.limits.response_body_timeout)
+                .min(tokio::time::Instant::now() + RELEASE_READY_BOUND);
+            self.release_connection(Some(deadline)).await
         } else {
             self.connection.abort_and_join().await
         };
@@ -311,21 +345,22 @@ impl ResponseBody {
 
     /// Takes the connection back from its supervisor once the body ended
     /// cleanly, keeping it only when it can carry another request. With
-    /// `wait`, readiness may take up to `RELEASE_READY_BOUND`, cut short by
-    /// cancellation or the body deadline; without it only readiness already
-    /// at hand counts.
-    async fn release_connection(&mut self, wait: bool) -> Result<(), Failure> {
+    /// `wait_until`, readiness may wait until that deadline (cut short by
+    /// cancellation); without it only readiness already at hand counts.
+    async fn release_connection(
+        &mut self,
+        wait_until: Option<tokio::time::Instant>,
+    ) -> Result<(), Failure> {
         if !self.connection.release().await? || self.connection.panicked() {
             return self.connection.abort_and_join().await;
         }
-        let ready = if wait {
-            let deadline = body_pull_deadline(&self.control, self.limits.response_body_timeout)
-                .min(tokio::time::Instant::now() + RELEASE_READY_BOUND);
+        let ready = if let Some(deadline) = wait_until {
             let cancellation = self.control.cancellation().clone();
             tokio::select! {
+                biased;
                 () = cancellation.cancelled() => false,
-                () = tokio::time::sleep_until(deadline) => false,
                 ready = self.connection.ready() => ready,
+                () = tokio::time::sleep_until(deadline) => false,
             }
         } else {
             self.connection.ready_now()

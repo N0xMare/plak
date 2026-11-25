@@ -181,11 +181,12 @@ where
                     stream,
                     bytes: Arc::from(&chunk[..read]),
                 });
-                if let Some(spool) = &mut state.spool {
+                let pending_spool = if let Some(spool) = &mut state.spool {
                     spool.append(&chunk[..read]);
+                    None
                 } else {
-                    state.maybe_spool(&chunk[..read], false);
-                }
+                    state.take_pending_spool_snapshot(&chunk[..read], false)
+                };
                 // A session keeps a bounded window of its newest output rather
                 // than dying at a byte count: a long build's failure is at the
                 // end. Evicted bytes stay counted in the cursor space, so a
@@ -209,6 +210,16 @@ where
                     } else {
                         state.output.retained_bytes -= front_bytes;
                     }
+                }
+                drop(state);
+                if let Some(spool) = pending_spool {
+                    spool.sessions.prepare_and_spool_snapshot(
+                        spool.id,
+                        &shared,
+                        spool.evicted,
+                        &spool.records,
+                        spool.next_sequence,
+                    );
                 }
             }
         })
@@ -273,7 +284,7 @@ pub(super) fn spawn_output_reader<R>(
     output: Arc<Mutex<HostProcessOutput>>,
     exceeded: Arc<AtomicBool>,
     io_failed: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
+    stop: Arc<ReaderStop>,
     limits: ExecutionEnvironmentLimits,
 ) -> Result<std::thread::JoinHandle<()>, ExecutionBackendError>
 where
@@ -293,28 +304,29 @@ where
         .map_err(|_| io_error("host process output worker could not start"))
 }
 
-fn read_bounded_process_output<R: Read>(
+fn read_bounded_process_output<R: AsFd + Read>(
     mut reader: R,
     stream: HostProcessStream,
     output: &Mutex<HostProcessOutput>,
     exceeded: &AtomicBool,
     io_failed: &AtomicBool,
-    stop: &AtomicBool,
+    stop: &ReaderStop,
     limits: ExecutionEnvironmentLimits,
 ) {
     let mut chunk = [0_u8; 16 * 1024];
+    let mut pollable = true;
     loop {
-        if stop.load(Ordering::Acquire) {
+        if stop.is_stopped() {
             return;
         }
         let read = match reader.read(&mut chunk) {
             Ok(0) => return,
             Ok(read) => read,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                if stop.load(Ordering::Acquire) {
+                if stop.is_stopped() {
                     return;
                 }
-                std::thread::sleep(Duration::from_millis(2));
+                stop.wait_for_output(&reader, &mut pollable);
                 continue;
             }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -326,7 +338,7 @@ fn read_bounded_process_output<R: Read>(
         // A nonblocking pipe can remain perpetually readable when a detached
         // descendant writes continuously. Observe a stop that raced the
         // successful read before accounting or retaining that chunk.
-        if stop.load(Ordering::Acquire) {
+        if stop.is_stopped() {
             return;
         }
         let mut collected = lock(output);
@@ -366,11 +378,11 @@ pub(super) fn set_nonblocking<Fd: AsFd>(fd: &Fd) -> Result<(), ExecutionBackendE
 pub(super) fn write_process_input(
     mut stdin: std::process::ChildStdin,
     bytes: &[u8],
-    stop: &AtomicBool,
+    stop: &ReaderStop,
 ) {
     let mut written = 0_usize;
     let mut blocked_since = Instant::now();
-    while written < bytes.len() && !stop.load(Ordering::Acquire) {
+    while written < bytes.len() && !stop.is_stopped() {
         match stdin.write(&bytes[written..]) {
             Ok(0) => return,
             Ok(count) => {

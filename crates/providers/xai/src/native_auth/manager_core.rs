@@ -408,9 +408,10 @@ impl ManagerCore {
                 .await;
         }
         let store = self.store()?;
+        let store_arc = self.store_arc()?;
         let flight = self.refresh_flight.lock().await;
         let mut hooks = XaiRefreshHooks {
-            cancel_guard: XaiRefreshCancelGuard::new(store, self.refresh_observer.as_deref()),
+            cancel_guard: XaiRefreshCancelGuard::new(store_arc, self.refresh_observer.clone()),
             core: self,
             expected_account,
             expected_selection_epoch,

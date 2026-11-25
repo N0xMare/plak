@@ -129,13 +129,24 @@ impl PendingJobOutput {
     }
 }
 
+#[cfg_attr(
+    not(unix),
+    expect(dead_code, reason = "read only by the unix host backend")
+)]
+pub(super) struct PendingSpoolSnapshot {
+    pub(super) sessions: JoinedProcessSessions,
+    pub(super) id: JoinedProcessSessionId,
+    pub(super) evicted: u64,
+    pub(super) records: Vec<Arc<[u8]>>,
+    pub(super) next_sequence: u64,
+}
+
 impl JoinedSessionShared {
     #[cfg_attr(
         not(unix),
         expect(dead_code, reason = "read only by the unix host backend")
     )]
-    pub(super) fn terminal_changed(&mut self) {
-        self.maybe_spool(&[], true);
+    pub(super) fn notify_terminal_changed(&mut self) {
         self.changes
             .send_modify(|revision| *revision = revision.wrapping_add(1));
         self.terminal.notify_all();
@@ -148,21 +159,40 @@ impl JoinedSessionShared {
         not(unix),
         expect(dead_code, reason = "read only by the unix host backend")
     )]
-    pub(super) fn maybe_spool(&mut self, bytes: &[u8], terminal: bool) {
+    pub(super) fn take_pending_spool_snapshot(
+        &mut self,
+        bytes: &[u8],
+        terminal: bool,
+    ) -> Option<PendingSpoolSnapshot> {
         let needed = self.pending_spool.as_mut().is_some_and(|pending| {
             pending.observe(bytes, terminal) || self.output.next_cursor > pending.threshold
         });
-        if needed
-            && let Some(pending) = self.pending_spool.take()
-            && let Some(inner) = pending.service.upgrade()
-        {
-            // Capture the whole prefix before eviction, including raw bytes
-            // whose lossy UTF-8 presentation exceeds the page's byte bound.
-            let sessions = JoinedProcessSessions { inner };
-            if sessions.prepare_job_output() {
-                sessions.spool_output(pending.id, self);
-            }
+        if !needed {
+            return None;
         }
+        let pending = self.pending_spool.take()?;
+        let inner = pending.service.upgrade()?;
+        // Snapshot the prefix before eviction so disk walks and spool writes
+        // run outside the session mutex without losing raw bytes whose lossy
+        // UTF-8 presentation exceeds the page's byte bound.
+        let evicted = self
+            .output
+            .records
+            .front()
+            .map_or(self.output.next_cursor, |record| record.cursor);
+        let records = self
+            .output
+            .records
+            .iter()
+            .map(|record| Arc::clone(&record.bytes))
+            .collect();
+        Some(PendingSpoolSnapshot {
+            sessions: JoinedProcessSessions { inner },
+            id: pending.id,
+            evicted,
+            records,
+            next_sequence: self.output.next_sequence,
+        })
     }
 }
 
@@ -172,6 +202,8 @@ pub(super) const FOREGROUND: u8 = 0;
 const PROMOTED: u8 = 1;
 
 const CANCELLING: u8 = 2;
+
+const PROMOTING: u8 = 3;
 
 pub(super) fn cancel_foreground(ownership: &AtomicU8, control: &OperationContext) -> bool {
     if control.cancellation().is_cancelled() {
@@ -782,36 +814,43 @@ impl JoinedProcessSessions {
     }
 
     pub(super) fn retire(&self, id: JoinedProcessSessionId, status: JoinedProcessStatus) {
-        let mut state = lock(&self.inner.state);
-        if state.finished.contains_key(&id)
-            || state.tombstones.iter().any(|(retired, _)| *retired == id)
-        {
-            return;
-        }
-        if state.active.get(&id).is_some_and(|session| {
-            session.promoted.load(Ordering::Acquire) == PROMOTED && status.is_terminal()
-        }) && !state.terminal_membership.contains(&id)
-        {
-            if let Some(session) = state.active.get(&id) {
-                let _ = self.observe_job(id, session, false);
+        let (observe, release_output) = {
+            let mut state = lock(&self.inner.state);
+            if state.finished.contains_key(&id)
+                || state.tombstones.iter().any(|(retired, _)| *retired == id)
+            {
+                return;
             }
-            state.terminal_membership.insert(id);
-            state.terminal_jobs.push(id);
+            let mut observe = None;
+            if state.active.get(&id).is_some_and(|session| {
+                session.promoted.load(Ordering::Acquire) == PROMOTED && status.is_terminal()
+            }) && !state.terminal_membership.contains(&id)
+            {
+                if let Some(session) = state.active.get(&id) {
+                    observe = Some(Arc::clone(session));
+                }
+                state.terminal_membership.insert(id);
+                state.terminal_jobs.push(id);
+            }
+            if let Some(session) = state.active.remove(&id)
+                && session.promoted.load(Ordering::Acquire) == PROMOTED
+                && !session.consumed.load(Ordering::Acquire)
+            {
+                *lock(&session.ended) = Some(session.started.elapsed());
+                state.finished.insert(id, session);
+                (observe, false)
+            } else {
+                state.tombstones.push_back((id, status));
+                while state.tombstones.len() > self.inner.active_limit {
+                    state.tombstones.pop_front();
+                }
+                (observe, true)
+            }
+        };
+        if let Some(session) = observe {
+            let _ = self.observe_job(id, &session, false);
         }
-        if let Some(session) = state.active.remove(&id)
-            && session.promoted.load(Ordering::Acquire) == PROMOTED
-            && !session.consumed.load(Ordering::Acquire)
-        {
-            *lock(&session.ended) = Some(session.started.elapsed());
-            state.finished.insert(id, session);
-            return;
-        }
-        state.tombstones.push_back((id, status));
-        while state.tombstones.len() > self.inner.active_limit {
-            state.tombstones.pop_front();
-        }
-        drop(state);
-        if self.job_output_file(Self::job_number(id)).is_some() {
+        if release_output && self.job_output_file(Self::job_number(id)).is_some() {
             self.release_job_outputs(vec![Self::job_number(id)]);
         }
     }
