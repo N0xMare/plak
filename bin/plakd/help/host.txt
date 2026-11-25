@@ -4,7 +4,7 @@ USAGE:
   plakd host [--web <unix:path|127.0.0.1:port>] [--ui <dir>]
   plakd host install --web unix:<absolute socket> --ui <absolute dir> [--dry-run]
   plakd host connect --stdio [--auto-start]
-  plakd host upgrade --expect-binary <id> [--drain <duration|idle>]
+  plakd host upgrade --expect-binary <id> [--drain <duration|idle>] [--backup-store]
   plakd host --help
 
 The supported default build includes the host and web endpoint. A private
@@ -37,6 +37,9 @@ an unsuccessful preparation reopens the source's gates. Notice requests
 joined tool results, never permission to cancel paid compaction. Progress shows
 what remains running and waiting time on stderr. Mandatory freeze and
 planned-release acknowledgements retain their ordinary bounded joins.
+--backup-store optionally saves private, size-bounded SQLite copies before
+surrender. It is off by default; host upgrade never restores a backup.
+The destination verifies health and preservation before reporting ready.
 Same-key upgrade can retain promoted jobs across runner revision or flavor
 changes, but not a native runner protocol change. For paired roots, advance
 the runner's dedicated link to the matching snapshot before upgrading.
