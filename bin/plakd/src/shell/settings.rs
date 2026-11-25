@@ -1173,6 +1173,18 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
         accounts::serving(session, events);
     }
 
+    fn serving_keyed(
+        &self,
+        session: &plakous_hosted::runtime::SurfaceSession,
+        events: &Sender<PlakExtension>,
+    ) {
+        // Invalidate any composer read that started on the predecessor.
+        if let Ok(mut generation) = self.chrome_generation.lock() {
+            *generation = generation.wrapping_add(1);
+        }
+        send_session_profile(&self.paths, session, events);
+    }
+
     fn alternatives_read(
         &self,
         account: &str,

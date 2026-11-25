@@ -119,6 +119,10 @@ session tier in `root_service_tier`.
 observation at session open or after RefreshTemplates for evaluated readiness:
 `ready` or `not_ready` with a reason.
 
+The root attachment snapshot includes the current `session_profile` state.
+The host publishes it again after a profile switch lands, without a
+`list_profiles` request.
+
 The host serves only 13. Use the exact build's schema and pair it with
 matching client artifacts before connecting. A Hello for 12 receives
 `{"frame":"refused","kind":"version_mismatch","host":13,"client":12}` and no

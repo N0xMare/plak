@@ -4550,6 +4550,8 @@ The definition-only `templates_list` read returns
 `readiness: {state: not_evaluated}`. The evaluated source is the
 `template_readiness` observation at session open and on `RefreshTemplates`;
 it reports `ready` or `not_ready {reason}`.
+Protocol 13 includes `session_profile` in the root attach snapshot and
+publishes the successor's row after a profile switch lands.
 The separate session model picker and settings still use the generic extras
 fields and only advertise a tier for an account and model offering it.
 

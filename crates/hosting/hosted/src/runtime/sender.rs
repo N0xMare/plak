@@ -88,6 +88,13 @@ impl RootTranscript {
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
+    pub(super) fn has_keyed_root(&self) -> bool {
+        self.presentations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .emits_keyed_root()
+    }
+
     pub(crate) fn advance_root_history(&self, session: &str, applied: FeedSeq) {
         self.presentations
             .lock()

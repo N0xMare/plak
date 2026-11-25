@@ -507,6 +507,9 @@ pub trait SurfaceHandler<P: ProtocolExtension>: Send {
     /// the session state it owns (its account choices).
     fn serving(&self, _session: &SurfaceSession, _events: &Sender<P>) {}
 
+    /// Publish any additional product state kept for keyed root attachments.
+    fn serving_keyed(&self, _session: &SurfaceSession, _events: &Sender<P>) {}
+
     /// Whether the dispatch reads the session's frozen MCP tools
     /// ([`SurfaceSession::mcp`]); they are gathered only when it does.
     fn needs_session_tools(&self, _intent: &P::Intent) -> bool {
@@ -699,13 +702,15 @@ impl<P: ProtocolExtension> AccountReads<P> {
 }
 
 /// Tells the surface the host serves `session` now.
-pub(super) fn serving<P: ProtocolExtension>(
-    surface: Option<&dyn SurfaceHandler<P>>,
-    session: &crate::sessions::SessionRecord,
-    events: &Sender<P>,
-) {
-    if let Some(handler) = surface {
-        handler.serving(&session_facts(session, None, false), events);
+pub(super) fn serving<P: ProtocolExtension>(config: &super::HostConfig<P>, events: &Sender<P>) {
+    if let Some(handler) = config.surface.as_deref() {
+        handler.serving(&session_facts(&config.session, None, false), events);
+        if events.has_keyed_root() {
+            handler.serving_keyed(
+                &session_facts(&config.session, Some(&config.topology_rows()), false),
+                events,
+            );
+        }
     }
 }
 
