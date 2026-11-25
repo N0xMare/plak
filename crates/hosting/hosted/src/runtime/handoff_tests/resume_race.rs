@@ -259,6 +259,36 @@ fn retry_deferred(
     command
 }
 
+fn successor_binding(
+    tree: String,
+    evidence: std::path::PathBuf,
+    ready: tokio::sync::watch::Receiver<bool>,
+    gate: std::path::PathBuf,
+    retry: bool,
+) -> Arc<crate::runtime::ScriptedChildBinding> {
+    // Model a provider that cannot settle work in the reattach window.
+    // The schedule, not the provider fault itself, is what Resume changes.
+    let second = child_binding(tree, evidence, move || {
+        if *ready.borrow() {
+            json!([
+                {"gate": {"file": gate}, "output": {"tool": {"name": "submit_result", "arguments": {
+                    "turn_token": 1, "output_json": RESULT
+                }}}, "finish": "tool_calls"},
+                {"output": {"text": "done"}}
+            ])
+        } else {
+            json!([{"fault": {"at": "in_band", "kind": "outcome_unknown"}}])
+        }
+    });
+    let refuse = AtomicBool::new(retry);
+    Arc::new(move |agent, path, roots| {
+        if refuse.swap(false, Ordering::AcqRel) {
+            return Err("injected child reopen refusal".into());
+        }
+        second(agent, path, roots)
+    })
+}
+
 fn handoff_child_while_recovery_is_pending(scenario: ResumeScenario) {
     let retry = scenario == ResumeScenario::Retry;
     let HandoffFixture {
@@ -276,30 +306,14 @@ fn handoff_child_while_recovery_is_pending(scenario: ResumeScenario) {
         crate::runtime::ResumeAfterLoss::Continue
     };
     let (entered, release) = crate::agent::resume_race_hook::install(lost.id.clone());
-    let ready = release.subscribe();
     let answer_gate = home.path().join("answer-after-bind");
-    let gate = answer_gate.clone();
-    // Model a provider that cannot settle work in the reattach window.
-    // The schedule, not the provider fault itself, is what Resume changes.
-    let second = child_binding(lost.id.clone(), child_evidence.clone(), move || {
-        if *ready.borrow() {
-            json!([
-                {"gate": {"file": gate}, "output": {"tool": {"name": "submit_result", "arguments": {
-                    "turn_token": 1, "output_json": RESULT
-                }}}, "finish": "tool_calls"},
-                {"output": {"text": "done"}}
-            ])
-        } else {
-            json!([{"fault": {"at": "in_band", "kind": "outcome_unknown"}}])
-        }
-    });
-    let refuse = AtomicBool::new(retry);
-    let second: Arc<crate::runtime::ScriptedChildBinding> = Arc::new(move |agent, path, roots| {
-        if refuse.swap(false, Ordering::AcqRel) {
-            return Err("injected child reopen refusal".into());
-        }
-        second(agent, path, roots)
-    });
+    let second = successor_binding(
+        lost.id.clone(),
+        child_evidence.clone(),
+        release.subscribe(),
+        answer_gate.clone(),
+        retry,
+    );
     let runtime = executor.block_on(attach(&next, trees.clone(), second));
     assert_eq!(
         runtime
