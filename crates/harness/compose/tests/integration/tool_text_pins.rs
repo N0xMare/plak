@@ -95,7 +95,7 @@ fn codex_prompts_digest_is_stable() {
 
 /// The concatenated digest of every string this module owns.
 const GROK_PROMPTS_DIGEST: &str =
-    "41bb645e342b02eea1613761c51b4281607c341dd85369d552734e7c4575f885";
+    "98171e40f981383f6977b11b6b2022671249dead1b6d8432fcb6fff9449584c7";
 #[test]
 fn grok_prompts_digest_is_stable() {
     let combined = [

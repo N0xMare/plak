@@ -146,6 +146,96 @@ fn image_retirement_drops_native_reasoning_invalidated_by_the_new_prefix() {
 }
 
 #[test]
+fn image_retirement_preserves_reasoning_before_first_retired_image() {
+    use plakous_model::{
+        DataClassification, ProtocolId, ReasoningBlock, ReasoningVisibility, ReplayEnvelope,
+        ReplayKindId, ReplayScope,
+    };
+    let replay = |tag: &str| {
+        ContentBlock::Reasoning(
+            ReasoningBlock::new(
+                ReasoningVisibility::Omitted,
+                None,
+                Some(
+                    ReplayEnvelope::new(
+                        ProtocolId::new("fixture.protocol").expect("protocol"),
+                        None,
+                        ReplayScope::Protocol,
+                        ReplayKindId::new("fixture.reasoning").expect("kind"),
+                        1,
+                        DataClassification::Sensitive,
+                        serde_json::value::RawValue::from_string(format!("\"{tag}\""))
+                            .expect("payload"),
+                    )
+                    .expect("replay"),
+                ),
+            )
+            .expect("reasoning"),
+        )
+    };
+    let early_reasoning = segment(
+        11,
+        HistorySegmentKind::ReasoningReplay,
+        Actor::Assistant,
+        vec![replay("early"), text()],
+    );
+    let source = CanonicalHistory::new(vec![
+        segment(
+            10,
+            HistorySegmentKind::RecentIntent,
+            Actor::User,
+            vec![text()],
+        ),
+        early_reasoning.clone(),
+        segment(
+            12,
+            HistorySegmentKind::RecentIntent,
+            Actor::User,
+            images(21),
+        ),
+        segment(
+            13,
+            HistorySegmentKind::ReasoningReplay,
+            Actor::Assistant,
+            vec![replay("late"), text()],
+        ),
+        segment(14, HistorySegmentKind::RecentIntent, Actor::User, images(1)),
+    ])
+    .expect("history");
+    let plan = evaluate(&source, ImageTotals::ZERO, ResidentImageBudget::default())
+        .expect("policy")
+        .expect("plan");
+    let successor = residency_successor(&source, &plan, workflow()).expect("successor");
+    assert_eq!(
+        successor.history.segments()[0],
+        source.segments()[0],
+        "leading user intent stays untouched for prefix cache"
+    );
+    assert_eq!(
+        successor.history.segments()[1],
+        early_reasoning,
+        "native reasoning before the first retired image must survive"
+    );
+    assert_eq!(
+        successor.history.segments()[3].kind(),
+        HistorySegmentKind::Compaction,
+        "retirement notice lands right after the first rewritten segment"
+    );
+    let late = successor
+        .history
+        .segments()
+        .iter()
+        .flat_map(HistorySegment::items)
+        .find(|item| item.id() == EntryId::try_from(Uuid::from_u128(13)).expect("entry"))
+        .expect("retained late assistant");
+    assert_eq!(
+        late.blocks(),
+        &[text()],
+        "native reasoning after the retired image must still be dropped"
+    );
+}
+
+#[test]
 fn retiring_uri_images_decrements_unknown_bytes_and_recomputes_totals() {
     let uri = ImageBlock::new(
         "image/png",
@@ -482,7 +572,9 @@ fn tool_image_rewrite_preserves_calls_text_parts_pairing_and_unanswered_batch() 
         .expect("plan");
     let successor = residency_successor(&source, &plan, workflow()).expect("rewrite");
     let segments = successor.history.segments();
-    let items = segments[2].items();
+    assert_eq!(segments[0].kind(), HistorySegmentKind::RecentIntent);
+    assert_eq!(segments[2].kind(), HistorySegmentKind::Compaction);
+    let items = segments[1].items();
     assert!(matches!(&items[0].blocks()[0], ContentBlock::ToolCall(retained) if retained == &call));
     let ContentBlock::ToolResult(result) = &items[1].blocks()[0] else {
         panic!("result");

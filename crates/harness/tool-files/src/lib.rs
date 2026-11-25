@@ -609,12 +609,12 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "files.grok.search_replace",
         PLAKOUS_GROK_SEARCH_REPLACE_DESCRIPTION,
-        "8b972d4f156e7265360579d25dd499b7ebbf4656b3a4515a5f71906a16e6457c",
+        "548cdb997842dfa97c25759be79095fc24709a0a78b3188a4f16479be6eff9a8",
     ),
     PromptPin::new(
         "files.grok.write",
         PLAKOUS_GROK_WRITE_DESCRIPTION,
-        "192f70146da8b70c667e19d42a79c35c20883db243864eaba3b5970ea3918c5d",
+        "616b98dd4ad306f8b88908f48dc552b73c849b1561bbf2941453325e312e1dc7",
     ),
     PromptPin::new(
         "files.pi.read",

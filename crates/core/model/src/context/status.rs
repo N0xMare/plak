@@ -423,13 +423,13 @@ impl ContextStatus {
         })
     }
 
-    /// The context measure of this request: [`context_occupancy_tokens`] over
-    /// the parts estimate and the attached anchor, or the unanchored bound
-    /// when no parts were attached.
+    /// The context measure of this request: anchored provider usage plus the
+    /// `bytes/4` estimate of uncovered new items (or [`context_occupancy_tokens`]
+    /// over the parts estimate), or the unanchored bound when no parts were attached.
     #[must_use]
     pub fn occupancy_tokens(&self) -> Option<u64> {
         if let (Some(input), Some(anchor)) = (&self.wire_input, &self.request_anchor) {
-            return Some(anchor.occupied_tokens(input));
+            return Some(anchor.estimated_occupied_tokens(input));
         }
         if let Some(input) = &self.wire_input {
             return Some(input.estimate_tokens());

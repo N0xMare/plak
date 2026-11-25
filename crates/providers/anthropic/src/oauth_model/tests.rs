@@ -781,7 +781,7 @@ fn enrolled_oauth_descriptor_uses_route_evidence_and_pin_expiry() {
         CapacityRule::ProviderReservedInput {
             reported_context_window: Some(1_000_000),
             maximum_projected_input: 1_000_000,
-            auto_compact_input: None,
+            auto_compact_input: Some(CLAUDE_LARGE_WINDOW_AUTO_COMPACT_INPUT),
         }
     );
     assert_eq!(
@@ -915,7 +915,7 @@ fn oauth_complete_wire_boundary_preserves_typed_context_denial() {
         CapacityRule::ProviderReservedInput {
             reported_context_window: Some(limit),
             maximum_projected_input: limit,
-            auto_compact_input: None,
+            auto_compact_input: Some(CLAUDE_LARGE_WINDOW_AUTO_COMPACT_INPUT),
         }
     );
     for wire_size in [limit - 1, limit, limit + 1] {
@@ -1374,12 +1374,50 @@ fn haiku_5_5_is_enrolled_on_oauth_with_the_shared_window() {
         CapacityRule::ProviderReservedInput {
             reported_context_window: Some(1_000_000),
             maximum_projected_input: 1_000_000,
-            auto_compact_input: None,
+            auto_compact_input: Some(CLAUDE_LARGE_WINDOW_AUTO_COMPACT_INPUT),
         }
     );
     assert_eq!(
         resolved.dialect().beta_header().as_deref(),
         Some(crate::claude_oauth_beta_header("claude-haiku-5-5"))
+    );
+}
+
+#[test]
+fn claude_oauth_auto_compact_input_applies_only_above_large_window_threshold() {
+    let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).expect("reviewed at");
+    let expires_at = pin_expires_at(now).expect("pin expiry");
+    let large = reference_client_context_contract(
+        "claude-sonnet-5",
+        1_000_000,
+        test_context_authority(),
+        now,
+        expires_at,
+    )
+    .expect("1M contract");
+    assert_eq!(
+        large.capacity().rule(),
+        CapacityRule::ProviderReservedInput {
+            reported_context_window: Some(1_000_000),
+            maximum_projected_input: 1_000_000,
+            auto_compact_input: Some(250_000),
+        }
+    );
+    let standard = reference_client_context_contract(
+        "claude-sonnet-5",
+        200_000,
+        test_context_authority(),
+        now,
+        expires_at,
+    )
+    .expect("200k contract");
+    assert_eq!(
+        standard.capacity().rule(),
+        CapacityRule::ProviderReservedInput {
+            reported_context_window: Some(200_000),
+            maximum_projected_input: 200_000,
+            auto_compact_input: None,
+        }
     );
 }
 

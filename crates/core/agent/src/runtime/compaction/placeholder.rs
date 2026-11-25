@@ -23,8 +23,8 @@ use crate::runtime::driver::turn_position::summarized_turns;
 use crate::{AgentError, AgentErrorKind, SessionWorkflowId};
 use plakous_model::{
     Actor, CallId, CanonicalHistory, CompactionBlock, ContentBlock, ConversationItem, EntryId,
-    HistorySegment, HistorySegmentKind, Provenance, SemanticCompactionCut, SummarizedTurns,
-    TextBlock, ToolName, ToolResultBlock, ToolResultPart,
+    HistorySegment, HistorySegmentKind, PLACEHOLDER_NOTICE_PREFIX, Provenance,
+    SemanticCompactionCut, SummarizedTurns, TextBlock, ToolName, ToolResultBlock, ToolResultPart,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -362,15 +362,6 @@ pub(super) fn replace_compaction_result_body(
     CanonicalHistory::new(segments).map_err(|_| invalid("summary reduction history is invalid"))
 }
 
-/// Opens the one line a placeholder pass contributes to the canonical summary.
-///
-/// Coalescing on this prefix keeps the notice to a single line however many
-/// passes a session runs: the exact per-pass counts live in the compaction
-/// provenance and the `context.placeholders` records, which is where an auditor
-/// reads them. The model only needs to know that bodies were replaced and how
-/// to get them back.
-const PLACEHOLDER_NOTICE_PREFIX: &str = "Tool result placeholders:";
-
 fn placeholder_notice_line() -> String {
     format!(
         "{PLACEHOLDER_NOTICE_PREFIX} tool result bodies and images in this conversation may have been replaced \
@@ -570,9 +561,9 @@ pub(crate) fn harness_note_segment(
 ///
 /// The successor keeps every source segment in order and rewrites only the
 /// selected tool-result bodies. The placeholder pass is recorded in the history's sole
-/// compaction segment: merged into the existing summary when the source has
-/// one, and otherwise created at position zero, which is where a semantic
-/// summary sits and where the planner's barrier rule wants it. A second
+/// compaction segment: merged in place into the existing summary when the source has
+/// one, and otherwise inserted immediately after the first replaced segment so
+/// earlier prompt prefix cache and native reasoning survive untouched. A second
 /// compaction segment would make the whole history unplannable, so the rung
 /// would work exactly once.
 pub(in crate::runtime) fn placeholder_successor(
@@ -600,6 +591,8 @@ pub(in crate::runtime) fn placeholder_successor(
         replaced_bytes = replaced_bytes.saturating_add(candidate.bytes);
     }
     let mut segments = Vec::new();
+    let mut existing_in_segments = None;
+    let mut first_replaced_in_segments = None;
     for (segment_index, segment) in history.segments().iter().enumerate() {
         // A previous pass's note is stale the moment this one runs: it names
         // results that are no longer the newest loss. One note, always at the
@@ -607,12 +600,18 @@ pub(in crate::runtime) fn placeholder_successor(
         if is_placeholder_harness_note(segment) {
             continue;
         }
+        if segment.kind() == HistorySegmentKind::Compaction {
+            existing_in_segments = Some(segments.len());
+        }
         let touched = by_item
             .keys()
             .any(|(candidate_segment, _)| *candidate_segment == segment_index);
         if !touched {
             segments.push(segment.clone());
             continue;
+        }
+        if first_replaced_in_segments.is_none() {
+            first_replaced_in_segments = Some(segments.len());
         }
         let mut items = Vec::with_capacity(segment.items().len());
         for (item_index, item) in segment.items().iter().enumerate() {
@@ -660,14 +659,16 @@ pub(in crate::runtime) fn placeholder_successor(
         existing.as_ref().map(|(_, text)| text.as_str()),
         summarized_turns(history, segments.iter()),
     )?;
-    match existing {
-        Some((index, _)) => {
-            let slot = segments
-                .get_mut(index)
-                .ok_or_else(|| invalid("tool-result placeholders lost the existing summary"))?;
-            *slot = notice.clone();
-        }
-        None => segments.insert(0, notice.clone()),
+    if let Some(index) = existing_in_segments {
+        let slot = segments
+            .get_mut(index)
+            .ok_or_else(|| invalid("tool-result placeholders lost the existing summary"))?;
+        *slot = notice.clone();
+    } else {
+        let insert_at = first_replaced_in_segments.map_or(segments.len(), |index| {
+            index.saturating_add(1).min(segments.len())
+        });
+        segments.insert(insert_at, notice.clone());
     }
     // Exactly one note per pass, published in the same commit as the
     // placeholders, so a model can never see the placeholders without the note or

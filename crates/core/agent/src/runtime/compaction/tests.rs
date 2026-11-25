@@ -1172,19 +1172,20 @@ mod placeholders {
         let candidates = collect_placeholder_candidates(&history);
         let successor =
             placeholder_successor(&history, &candidates, 1, workflow()).expect("successor");
-        // Source segments are preserved in order behind the sole compaction
-        // segment, which a placeholder pass creates at position zero. Appending it
-        // instead would give the history two compaction segments as soon as a
-        // second pass ran, and the planner refuses that outright.
-        // Four source segments, the notice at position zero, and the
+        // Four source segments, the notice placed immediately after the first
+        // replaced exchange (index 2, leaving position 0 intact), and the
         // harness note at the tail.
         assert_eq!(successor.history.segments().len(), 6);
         assert_eq!(
-            successor.history.segments().get(0).expect("notice").kind(),
+            successor.history.segments().get(0).expect("intent").kind(),
+            HistorySegmentKind::RecentIntent
+        );
+        assert_eq!(
+            successor.history.segments().get(2).expect("notice").kind(),
             HistorySegmentKind::Compaction
         );
         assert_eq!(compaction_segments(&successor.history), 1);
-        let first = successor.history.segments().get(2).expect("first exchange");
+        let first = successor.history.segments().get(1).expect("first exchange");
         assert_eq!(first.items().len(), 2, "the call must survive its result");
         let ContentBlock::ToolResult(replaced) = first
             .items()
@@ -1226,6 +1227,135 @@ mod placeholders {
     }
 
     #[test]
+    fn placeholder_successor_preserves_reasoning_before_first_replaced_result() {
+        use plakous_model::{
+            DataClassification, ProtocolId, ReasoningBlock, ReasoningVisibility, ReplayEnvelope,
+            ReplayKindId, ReplayScope, ToolCallBlock, ToolCallState, ToolCallerLineage,
+            ToolCorrelation, ToolExecutionOwner, ToolName,
+        };
+        let replay = |tag: &str| {
+            ContentBlock::Reasoning(
+                ReasoningBlock::new(
+                    ReasoningVisibility::Omitted,
+                    None,
+                    Some(
+                        ReplayEnvelope::new(
+                            ProtocolId::new("fixture.protocol").expect("protocol"),
+                            None,
+                            ReplayScope::Protocol,
+                            ReplayKindId::new("fixture.reasoning").expect("kind"),
+                            1,
+                            DataClassification::Sensitive,
+                            serde_json::value::RawValue::from_string(format!("\"{tag}\""))
+                                .expect("payload"),
+                        )
+                        .expect("replay"),
+                    ),
+                )
+                .expect("reasoning"),
+            )
+        };
+        let call_with_reasoning = |entry: u128, id: u128, tag: &str| {
+            ConversationItem::new(
+                EntryId::try_from(Uuid::from_u128(entry)).expect("entry"),
+                Actor::Assistant,
+                vec![
+                    replay(tag),
+                    ContentBlock::ToolCall(
+                        ToolCallBlock::new(
+                            CallId::try_from(Uuid::from_u128(id)).expect("call id"),
+                            ToolName::new("read_file").expect("tool"),
+                            ToolExecutionOwner::Local,
+                            ToolCallState::Completed,
+                            ToolCorrelation::new(None, None, ToolCallerLineage::Direct)
+                                .expect("correlation"),
+                            r#"{"path":"a.txt"}"#,
+                        )
+                        .expect("tool call"),
+                    ),
+                ],
+                Provenance::ModelOutput,
+            )
+            .expect("assistant call")
+        };
+        let earlier_reasoning = HistorySegment::new(
+            HistorySegmentKind::ReasoningReplay,
+            vec![
+                ConversationItem::new(
+                    EntryId::try_from(Uuid::from_u128(60)).expect("entry"),
+                    Actor::Assistant,
+                    vec![
+                        replay("before-first-exchange"),
+                        ContentBlock::Text(TextBlock::new("thinking first", None).expect("text")),
+                    ],
+                    Provenance::ModelOutput,
+                )
+                .expect("earlier reasoning item"),
+            ],
+        )
+        .expect("earlier reasoning");
+        let history = CanonicalHistory::new(vec![
+            HistorySegment::new(HistorySegmentKind::RecentIntent, vec![user(59, "inspect")])
+                .expect("intent"),
+            earlier_reasoning.clone(),
+            HistorySegment::new(
+                HistorySegmentKind::ToolExchange,
+                vec![
+                    call_with_reasoning(61, 61, "inside-first-call"),
+                    result(62, 61, &"a".repeat(4_000)),
+                ],
+            )
+            .expect("first exchange"),
+            HistorySegment::new(
+                HistorySegmentKind::ToolExchange,
+                vec![
+                    call_with_reasoning(63, 63, "after-first-result"),
+                    result(64, 63, &"b".repeat(4_000)),
+                ],
+            )
+            .expect("second exchange"),
+            HistorySegment::new(
+                HistorySegmentKind::ToolExchange,
+                vec![call(65, 65, "read_file", "{}"), result(66, 65, "fresh")],
+            )
+            .expect("current batch"),
+        ])
+        .expect("history");
+
+        let candidates = collect_placeholder_candidates(&history);
+        let successor =
+            placeholder_successor(&history, &candidates, 1, workflow()).expect("successor");
+        assert_eq!(
+            successor.history.segments()[0],
+            history.segments()[0],
+            "leading user intent stays untouched for prefix cache"
+        );
+        assert_eq!(
+            successor.history.segments()[1],
+            earlier_reasoning,
+            "native reasoning before the first replaced exchange must survive"
+        );
+        assert!(
+            successor.history.segments()[2].items()[0]
+                .blocks()
+                .iter()
+                .any(|block| matches!(block, ContentBlock::Reasoning(_))),
+            "reasoning inside the first exchange preceding its replaced tool result must survive"
+        );
+        assert_eq!(
+            successor.history.segments()[3].kind(),
+            HistorySegmentKind::Compaction
+        );
+        assert!(
+            !successor.history.segments()[4].items()[0]
+                .blocks()
+                .iter()
+                .any(|block| matches!(block, ContentBlock::Reasoning(_))),
+            "reasoning after the replaced tool result must be invalidated"
+        );
+    }
+
+    #[test]
     fn a_second_pass_skips_bodies_already_replaced() {
         let history = fixture();
         let candidates = collect_placeholder_candidates(&history);
@@ -1236,8 +1366,8 @@ mod placeholders {
             1,
             "an already-replaced body is not a candidate again"
         );
-        // Position 3 in the successor: the leading notice shifted the source
-        // segments by one.
+        // Position 3 in the successor: the notice inserted right after the
+        // first replaced exchange shifted later segments by one.
         assert_eq!(next[0].segment_index(), 3);
     }
 

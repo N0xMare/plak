@@ -20,7 +20,6 @@ use text::{
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
-use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -122,86 +121,85 @@ fn query_root(context: &ToolContext, path: &Path) -> Result<PathBuf, ToolRuntime
     context.workspace().relative_input(path)
 }
 
-fn execute_list_directory(
+async fn execute_list_directory(
     context: &ToolContext,
     args: &SearchArgs,
     want_value: bool,
 ) -> Result<ToolOutcome, ToolRuntimeError> {
     context.check_cancelled()?;
-    let directory = context.workspace().resolve_existing(&args.path)?;
-    let metadata = fs::metadata(&directory).map_err(|_| {
-        ToolRuntimeError::new(
-            ToolRuntimeErrorKind::InvalidArguments,
-            "list_dir target is not accessible",
-        )
-    })?;
-    if !metadata.is_dir() {
+    let root = query_root(context, &args.path)?;
+    let limits = RepositoryQueryLimits::new(
+        MAX_STANDARD_SEARCH_FILES,
+        STANDARD_SEARCH_TREE_ENTRIES,
+        STANDARD_SEARCH_FILE_BYTES,
+        STANDARD_SEARCH_FILE_BYTES,
+        MAX_STANDARD_SEARCH_MATCHES,
+        1,
+        STANDARD_SEARCH_RESULT_BYTES - 1024,
+    )
+    .map_err(backend_runtime_error)?;
+    let query =
+        RepositoryQuery::list(root.clone(), None, 1, limits).map_err(backend_runtime_error)?;
+    let result = context
+        .environment()
+        .query_repository(query, operation_context(context))
+        .await
+        .map_err(backend_runtime_error)?;
+    context.check_cancelled()?;
+    if matches!(result.matches(), [only] if !only.is_directory() && only.path() == root.as_path()) {
         return ToolOutcome::failure_text("list_dir target is not a directory");
     }
-    let mut incomplete = false;
-    let mut entries = fs::read_dir(&directory)
-        .map_err(|_| {
-            ToolRuntimeError::new(
-                ToolRuntimeErrorKind::Execution,
-                "list_dir could not read the directory",
-            )
-        })?
+    let mut entries = result
+        .matches()
+        .iter()
         .filter_map(|entry| {
-            if let Ok(entry) = entry {
-                Some(entry)
-            } else {
-                incomplete = true;
-                None
+            let name = entry.path().file_name()?.to_str()?;
+            if name.starts_with('.') {
+                return None;
             }
-        })
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .is_some_and(|name| !name.starts_with('.'))
-        })
-        .map(|entry| {
-            let suffix = if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-                "/"
+            let display = if entry.is_directory() {
+                format!("{name}/")
             } else {
-                ""
+                name.to_owned()
             };
-            format!("{}{suffix}", entry.file_name().to_string_lossy())
+            Some((display, entry.is_directory(), entry.entry_size()))
         })
         .collect::<Vec<_>>();
-    entries.sort();
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
     let stamp = generation_stamp_prefix(context);
-    let outcome = ToolOutcome::success_text(format!("{stamp}{}", entries.join("\n")))?;
+    let rendered = entries
+        .iter()
+        .map(|(display, _, _)| display.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let outcome = ToolOutcome::success_text(format!("{stamp}{rendered}"))?;
     Ok(if want_value {
         let mut listed = args.path.display().to_string();
         listed.shrink_to_fit();
         let count = bounded_value_count::<plakous_tools::ListedEntry>(
             listed.capacity(),
-            entries.iter().map(String::len),
+            entries.iter().map(|(display, _, _)| display.len()),
         );
         let entries_cut = (entries.len() - count) as u64;
-        let mut values = Vec::with_capacity(count);
-        values.extend(entries.into_iter().take(count).map(|name| {
-            let path = name.trim_end_matches('/').to_owned();
-            let metadata = fs::symlink_metadata(directory.join(&path)).ok();
-            incomplete |= metadata.is_none();
-            let kind = match metadata.as_ref().map(fs::Metadata::file_type) {
-                Some(kind) if kind.is_file() => plakous_tools::ListedEntryKind::File,
-                Some(kind) if kind.is_dir() => plakous_tools::ListedEntryKind::Directory,
-                Some(kind) if kind.is_symlink() => plakous_tools::ListedEntryKind::Link,
-                _ => plakous_tools::ListedEntryKind::Other,
-            };
-            let size = metadata
-                .filter(fs::Metadata::is_file)
-                .map_or(0, |metadata| metadata.len());
-            plakous_tools::ListedEntry { path, kind, size }
-        }));
+        let values = entries
+            .into_iter()
+            .take(count)
+            .map(|(display, is_dir, size)| plakous_tools::ListedEntry {
+                path: display.trim_end_matches('/').to_owned(),
+                kind: if is_dir {
+                    plakous_tools::ListedEntryKind::Directory
+                } else {
+                    plakous_tools::ListedEntryKind::File
+                },
+                size,
+            })
+            .collect();
         outcome.with_value(plakous_tools::ExecutionValue::Listing(
             plakous_tools::ListingValue {
                 path: listed,
                 entries: values,
                 entries_cut,
-                incomplete,
+                incomplete: result.incomplete() || result.entries_skipped() > 0,
             },
         ))?
     } else {
@@ -791,7 +789,7 @@ impl ToolExecutor for SearchRepositoryTool {
                     .as_str(),
             );
             if args.list_directory.unwrap_or(false) {
-                return execute_list_directory(&context, &args, invocation.want_value());
+                return execute_list_directory(&context, &args, invocation.want_value()).await;
             }
             if args.use_regex.unwrap_or(false) {
                 return execute_regex_search(&context, &args, advice, invocation.want_value())
@@ -1104,8 +1102,7 @@ impl ToolPack for SearchToolPack {
                                 "-C": {"type": "integer"},
                                 "-i": {"type": "boolean"},
                                 "type": {"type": "string"},
-                                "head_limit": {"type": "integer", "maximum": 4096},
-                                "multiline": {"type": "boolean"}
+                                "head_limit": {"type": "integer", "maximum": 4096}
                             }),
                             &["pattern"],
                         ),
@@ -1121,7 +1118,7 @@ impl ToolPack for SearchToolPack {
                             json!({
                                 "target_directory": {"type": "string"}
                             }),
-                            &["target_directory"],
+                            &[],
                         ),
                     },
                     ToolProjectionLoweringV2::GrokListDir,
@@ -1150,6 +1147,6 @@ static SEARCH_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "search.grok.list_dir",
         PLAKOUS_GROK_LIST_DIR_DESCRIPTION,
-        "cd94b4cbdcb325d712a1604e11140570e86b46e14c340698412690890ec6d773",
+        "73e23271d7db40708aa032d276357e1ee580bfbfba9275bd9ae33fdeac24a0e8",
     ),
 ];

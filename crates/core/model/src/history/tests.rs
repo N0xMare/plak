@@ -1328,6 +1328,94 @@ fn semantic_cut_rejects_non_native_non_intent_and_multiple_prior_compactions() {
 }
 
 #[test]
+fn semantic_cut_folds_nonleading_placeholder_notice_across_turns_and_intra_turn() {
+    let notice = compaction_summary(
+        92,
+        &format!(
+            "{} tool result bodies were replaced.",
+            crate::PLACEHOLDER_NOTICE_PREFIX
+        ),
+    );
+    let turn1_intent = HistorySegment::new(
+        HistorySegmentKind::RecentIntent,
+        vec![text(1, Actor::User, "turn one")],
+    )
+    .expect("turn1 intent");
+    let turn2_intent = HistorySegment::new(
+        HistorySegmentKind::RecentIntent,
+        vec![text(2, Actor::User, "turn two")],
+    )
+    .expect("turn2 intent");
+
+    // Multi-turn shape: nonleading placeholder notice inside Turn 1 folds cleanly
+    // with Turn 1 into a single leading semantic summary while retaining Turn 2.
+    let multi_turn = ConversationView::from_shared(
+        CanonicalHistory::new(vec![
+            turn1_intent.clone(),
+            complete_exchange(100),
+            notice.clone(),
+            complete_exchange(200),
+            turn2_intent.clone(),
+        ])
+        .expect("multi-turn history"),
+        WorkingProjection::default(),
+    );
+    let plan = ContextHistoryPlan::new(&multi_turn).expect("multi-turn plan");
+    let cut = SemanticCompactionCut::seal(&multi_turn, &plan).expect("multi-turn cut");
+    assert_eq!(cut.prior_compaction(), Some(&notice));
+    assert_eq!(cut.selected_segments().len(), 3);
+    assert_eq!(cut.retained_segments(), &[turn2_intent]);
+    let successor = cut
+        .build_successor(&compaction_summary(1_001, "folded turn 1"))
+        .expect("multi-turn successor");
+    assert_eq!(successor.segments().len(), 2);
+    assert_eq!(
+        successor.segments()[0].kind(),
+        HistorySegmentKind::Compaction
+    );
+    assert_eq!(
+        successor.segments()[1].kind(),
+        HistorySegmentKind::RecentIntent
+    );
+
+    // Intra-turn rolling shape: nonleading placeholder notice between older
+    // exchanges folds with them while retaining the latest intent and newest exchange.
+    let newest_exchange = complete_exchange(500);
+    let intra_turn = ConversationView::from_shared(
+        CanonicalHistory::new(vec![
+            turn1_intent.clone(),
+            complete_exchange(300),
+            notice.clone(),
+            complete_exchange(400),
+            newest_exchange.clone(),
+        ])
+        .expect("intra-turn history"),
+        WorkingProjection::default(),
+    );
+    let plan = ContextHistoryPlan::new(&intra_turn).expect("intra-turn plan");
+    let cut = SemanticCompactionCut::seal(&intra_turn, &plan).expect("intra-turn cut");
+    assert_eq!(cut.prior_compaction(), Some(&notice));
+    assert_eq!(cut.selected_segments().len(), 2);
+    assert_eq!(cut.retained_segments(), &[turn1_intent, newest_exchange]);
+    let successor = cut
+        .build_successor(&compaction_summary(1_002, "folded intra-turn"))
+        .expect("intra-turn successor");
+    assert_eq!(successor.segments().len(), 3);
+    assert_eq!(
+        successor.segments()[0].kind(),
+        HistorySegmentKind::Compaction
+    );
+    assert_eq!(
+        successor.segments()[1].kind(),
+        HistorySegmentKind::RecentIntent
+    );
+    assert_eq!(
+        successor.segments()[2].kind(),
+        HistorySegmentKind::ToolExchange
+    );
+}
+
+#[test]
 fn semantic_compaction_cut_rejects_nonprefix_and_noncanonical_prior_summary() {
     let leading = HistorySegment::new(
         HistorySegmentKind::Conversation,

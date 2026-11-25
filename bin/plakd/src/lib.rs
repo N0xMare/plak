@@ -350,6 +350,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
     }
 
     if matches!(command, Command::Help) {
+        let home = shell::home::Home::from_env(launch.as_deref());
+        if let Some(paths) = home.paths_if_resolved() {
+            build_identity::install_identity_cache_home(paths.home().to_path_buf());
+        }
         cli::render::global_help(&mut io::stdout().lock())
             .map_err(|_| CliFailure::new("stdout failed"))?;
         return Ok(ProcessOutcome::Success);
@@ -495,9 +499,11 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
             "the home-local runner's product home no longer exists",
         ));
     }
-    // Only a command that uses product state records a fresh binary id in the
-    // home; inspection commands read the identity cache and never write it.
-    if command_needs_product_state(&command) {
+    // Record a fresh binary id in an already-existing private home when this
+    // command uses product state or reports the binary version, so repeated
+    // `plakd --version` and `plakd --help` invocations hit the cache without
+    // re-hashing the executable. Missing or non-private homes are never written.
+    if command_needs_product_state(&command) || matches!(command, Command::Version) {
         build_identity::allow_identity_cache_writes();
     }
 

@@ -11,7 +11,7 @@ pub(super) fn start_schema() -> Value {
     object_schema(
         json!({
             "command": {
-                "description": "The bash command to run.",
+                "description": "The /bin/sh command to run.",
                 "type": "string"
             },
             "block_until_ms": {

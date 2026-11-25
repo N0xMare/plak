@@ -104,7 +104,12 @@ fn validate_successor(
             || successor.replaced_bytes != request.replaced_bytes
             || successor.replaced_bytes != evidence.replaced_bytes
             || successor.history.identity() != evidence.successor_history
-            || successor.history.identity() != manifest.canonical().history().identity()
+            || !super::record::published_successor_ok(
+                manifest.canonical().history(),
+                &successor.history,
+                identity.workflow_id,
+                false,
+            )
             || successor.notice.identity() != evidence.notice_segment
         {
             continue;

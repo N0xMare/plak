@@ -770,6 +770,58 @@ fn version_prints_the_build_label_and_update_is_not_a_verb() {
     assert_eq!(out.status.code(), Some(2), "stderr={}", stderr(&out));
 }
 
+#[test]
+fn version_caches_binary_id_in_existing_private_home_and_help_stays_read_only() {
+    let help_dir = isolated_home_dir();
+    let help_home = help_dir.path();
+    let help_out = run_plak(help_home, &["--help"]);
+    assert!(help_out.status.success(), "stderr={}", stderr(&help_out));
+    assert!(
+        !help_home.join("binary-ids").exists(),
+        "--help must never write binary-ids to home"
+    );
+
+    let version_dir = isolated_home_dir();
+    let version_home = version_dir.path();
+    let version_out = run_plak(version_home, &["--version"]);
+    assert!(
+        version_out.status.success(),
+        "stderr={}",
+        stderr(&version_out)
+    );
+    assert_eq!(
+        stdout(&version_out),
+        format!("plakd {}\n", expected_version_label())
+    );
+    assert!(
+        version_home.join("binary-ids").exists(),
+        "--version should cache binary-ids in an existing private 0700 home"
+    );
+    // Warm --help in the same home reads the cached identity and matches verbatim.
+    let warm_help = run_plak(version_home, &["--help"]);
+    assert!(warm_help.status.success(), "stderr={}", stderr(&warm_help));
+    assert!(stdout(&warm_help).contains(&expected_version_label()));
+
+    // Missing home must never be created by --version.
+    let parent = isolated_home_dir();
+    let missing_home = parent.path().join("does-not-exist");
+    let missing_out = Command::new(plak_bin())
+        .env("PLAK_HOME", &missing_home)
+        .env("HOME", parent.path())
+        .arg("--version")
+        .output()
+        .expect("spawn plakd");
+    assert!(
+        missing_out.status.success(),
+        "stderr={}",
+        stderr(&missing_out)
+    );
+    assert!(
+        !missing_home.exists(),
+        "--version must not create a missing home"
+    );
+}
+
 /// Spec 02 §3.2: the help pages are static files, and what the binary prints
 /// is those files byte for byte — the global page with its version line filled
 /// in and its maintainer block gated by the feature, every command page

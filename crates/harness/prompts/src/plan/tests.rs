@@ -298,3 +298,70 @@ fn a_ptc_hub_earns_the_topology_paragraph_from_the_callable_surface() {
     assert!(assembled.contains(PLAK_PRODUCT_TOPOLOGY_AGREEMENTS));
     assert!(!assembled.contains(PLAK_PRODUCT_ASSIGNMENT_AGREEMENTS));
 }
+
+/// Codex PTC compositions replace the Codex family base with the PTC harness
+/// or SDK instructions, so they must retain the full product working
+/// agreements rather than stripping tool-narration and parallel-call guidance.
+/// Legacy Codex bases also lack the parity base's commentary/parallel clauses.
+#[test]
+fn codex_ptc_and_legacy_compositions_keep_product_working_agreements() {
+    use crate::bases::{self, PromptVariant};
+
+    let surface = surface(CodingPresentation::Codex, &[]);
+    let workspace =
+        PromptWorkspace::new(Path::new("/repo"), Path::new("/repo"), std::env::consts::OS);
+
+    for composition in [
+        Composition::JavaScriptCell,
+        Composition::PythonCell,
+        Composition::PythonSdk,
+    ] {
+        for variant in [PromptVariant::Parity, PromptVariant::Legacy] {
+            let family_base = bases::codex_direct_base_instructions_for(variant);
+            let assembled = target_instructions(
+                family_base,
+                composition,
+                &surface,
+                workspace,
+                "gpt-5.4",
+                Some("high"),
+            );
+            assert!(
+                assembled.contains("Do not narrate tool calls"),
+                "missing tool-narration agreement for {composition:?} / {variant:?}"
+            );
+            assert!(
+                assembled.contains("You may call independent presented tools together"),
+                "missing parallel-call agreement for {composition:?} / {variant:?}"
+            );
+        }
+    }
+
+    for (composition, family_base) in [
+        (
+            Composition::Direct,
+            bases::codex_direct_base_instructions_for(PromptVariant::Legacy),
+        ),
+        (
+            Composition::NativeCell,
+            bases::codex_code_mode_base_instructions_template_for(PromptVariant::Legacy),
+        ),
+    ] {
+        let assembled = target_instructions(
+            family_base,
+            composition,
+            &surface,
+            workspace,
+            "gpt-5.4",
+            Some("high"),
+        );
+        assert!(
+            assembled.contains("Do not narrate tool calls"),
+            "legacy base must keep tool-narration agreement for {composition:?}"
+        );
+        assert!(
+            assembled.contains("You may call independent presented tools together"),
+            "legacy base must keep parallel-call agreement for {composition:?}"
+        );
+    }
+}

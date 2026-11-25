@@ -88,6 +88,13 @@ const REFERENCE_MEASUREMENT_REVISION: &str = "claude-code-2.1.284-wire-bytes-v1"
 /// 1M model as 800k and compacted at 680k — far too early, since the measured
 /// count is already a byte upper bound over the lowered request.
 const REFERENCE_INPUT_PERCENT: u64 = 100;
+/// Default scheduled compaction trigger for Claude OAuth models with context
+/// windows larger than 250k tokens (e.g. 1M-window models).
+///
+/// Leaving `auto_compact_input` unset on a 1M window defers scheduled
+/// compaction until 900k tokens (90%), well past the range where latency,
+/// cost, and context quality degrade. Admission still uses the full window.
+pub(crate) const CLAUDE_LARGE_WINDOW_AUTO_COMPACT_INPUT: u64 = 250_000;
 const DEFAULT_TIMEOUT_SECS: u64 = 300;
 
 /// Executable Claude OAuth Messages model.
@@ -1060,6 +1067,8 @@ fn reference_client_context_contract(
     )?;
     let freshness =
         EvidenceFreshness::new(observed_at, Some(expires_at)).map_err(configuration_identity)?;
+    let auto_compact_input = (reported_context_window > CLAUDE_LARGE_WINDOW_AUTO_COMPACT_INPUT)
+        .then_some(CLAUDE_LARGE_WINDOW_AUTO_COMPACT_INPUT);
     let capacity = CapacityCertificate::reference_client_envelope(
         &plakous_model::StandardIntegrationAuthority::release_owned(),
         "claude-authenticated-reference-input-envelope",
@@ -1067,7 +1076,7 @@ fn reference_client_context_contract(
         CapacityRule::ProviderReservedInput {
             reported_context_window: Some(reported_context_window),
             maximum_projected_input,
-            auto_compact_input: None,
+            auto_compact_input,
         },
         authority_binding,
         freshness,

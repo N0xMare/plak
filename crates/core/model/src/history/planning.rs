@@ -593,10 +593,13 @@ impl SemanticCompactionCut {
             .last()
             .and_then(|selected| selected.position().checked_add(1))
             .ok_or(SemanticCompactionCutError::InvalidSelectedSemantics)?;
-        if selected_start < u32::from(prior_compaction.is_some())
-            || evidence
-                .windows(2)
-                .any(|pair| pair[1].position() <= pair[0].position())
+        if prior_position.is_some_and(|prior| {
+            evidence
+                .iter()
+                .any(|selected| usize::try_from(selected.position()).ok() == Some(prior))
+        }) || evidence
+            .windows(2)
+            .any(|pair| pair[1].position() <= pair[0].position())
         {
             return Err(SemanticCompactionCutError::NoEligibleSelectedPrefix);
         }
@@ -936,7 +939,26 @@ fn is_canonical_compaction_summary(segment: &HistorySegment) -> bool {
         && matches!(segment.items()[0].blocks(), [ContentBlock::Compaction(_)])
 }
 
-// Native successors place retained instructions before their sole bound item.
+fn is_placeholder_notice_segment(segment: &HistorySegment) -> bool {
+    is_canonical_compaction_summary(segment)
+        && matches!(
+            segment.items()[0].blocks(),
+            [ContentBlock::Compaction(block)] if block.is_placeholder_notice()
+        )
+}
+
+fn is_nonleading_placeholder_notice(source: &ConversationView, position: usize) -> bool {
+    position > 0
+        && source
+            .history()
+            .segments()
+            .get(position)
+            .is_some_and(is_placeholder_notice_segment)
+}
+
+// Native successors place retained instructions before their sole bound item,
+// and offline placeholder/residency passes place their notice right after the
+// first rewritten segment so earlier reasoning and prompt cache survive.
 // Nothing else authorizes moving a nonleading summary into a semantic cut.
 fn prior_compaction_position(source: &ConversationView) -> Option<usize> {
     let segments = source.history().segments();
@@ -954,6 +976,9 @@ fn prior_compaction_position(source: &ConversationView) -> Option<usize> {
     let [ContentBlock::Compaction(block)] = segment.items()[0].blocks() else {
         return None;
     };
+    if block.is_placeholder_notice() {
+        return Some(position);
+    }
     (block.native_item().is_some()
         && block.native_binding().is_some()
         && segments.iter().take(position).all(|segment| {
@@ -1105,17 +1130,23 @@ fn analyze_context_history(
 }
 
 fn context_summary_barrier(source: &ConversationView, analysis: &ContextHistoryAnalysis) -> u32 {
-    prior_compaction_position(source)
-        .and_then(|position| u32::try_from(position).ok())
-        .or_else(|| {
-            analysis.latest_user_intent.and_then(|latest| {
-                analysis
-                    .compaction_positions
-                    .iter()
-                    .rev()
-                    .copied()
-                    .find(|position| *position < latest)
-            })
+    if let Some(position) = prior_compaction_position(source) {
+        if is_nonleading_placeholder_notice(source, position) {
+            return 0;
+        }
+        return u32::try_from(position)
+            .ok()
+            .map_or(0, |position| position.saturating_add(1));
+    }
+    analysis
+        .latest_user_intent
+        .and_then(|latest| {
+            analysis
+                .compaction_positions
+                .iter()
+                .rev()
+                .copied()
+                .find(|position| *position < latest)
         })
         .map_or(0, |position| position.saturating_add(1))
 }
@@ -1153,6 +1184,9 @@ fn select_context_summary_prefix(
                 .segments()
                 .get(index)
                 .ok_or(HistoryPlanningError::LimitExceeded)?;
+            if segment.kind() == HistorySegmentKind::Compaction {
+                continue;
+            }
             segments.push(ContextSelectedSegment {
                 position,
                 identity: segment.identity(),
@@ -1187,6 +1221,7 @@ fn select_context_summary_prefix(
         if let Some(tail_start) = tail_start {
             let mut run_start = None;
             let start = prior_compaction_position(source)
+                .filter(|&position| !is_nonleading_placeholder_notice(source, position))
                 .and_then(|position| u32::try_from(position).ok())
                 .map_or(latest.saturating_add(1), |prior| {
                     latest.max(prior).saturating_add(1)

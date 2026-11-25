@@ -202,12 +202,18 @@ fn open_running_image() -> Option<std::fs::File> {
 /// it, so a test can make a manifest-less build's identity slow.
 pub(crate) static HASH_DELAY: OnceLock<std::time::Duration> = OnceLock::new();
 
+/// Read buffer size for streaming SHA-256 over the running executable.
+/// Large enough to amortize `read(2)` syscalls on 500+ MiB debug/maintainer images.
+const IMAGE_HASH_BUFFER_BYTES: usize = 1024 * 1024;
+
 fn hash_image(file: &mut std::fs::File) -> Option<String> {
     if let Some(delay) = HASH_DELAY.get() {
         std::thread::sleep(*delay);
     }
+    #[cfg(target_os = "linux")]
+    let _ = rustix::fs::fadvise(&*file, 0, None, rustix::fs::Advice::Sequential);
     let mut hash = Sha256::new();
-    let mut bytes = [0u8; 8 * 1024];
+    let mut bytes = vec![0u8; IMAGE_HASH_BUFFER_BYTES];
     loop {
         let count = file.read(&mut bytes).ok()?;
         if count == 0 {
@@ -342,9 +348,11 @@ pub(crate) fn install_identity_cache_home(home: PathBuf) {
     let _ = IDENTITY_CACHE_HOME.set(home);
 }
 
-/// Lets this process record a fresh hash in the cache. Only commands that use
-/// product state call it; inspection commands (`version`, help, `session
-/// rehearse`, `status`) read a hit and never write.
+/// Lets this process record a fresh hash in an already-existing private home's
+/// identity cache. Commands that use product state or print the binary version
+/// call it (missing or non-private homes are never created or written); purely
+/// read-only inspection commands (`help`, `session rehearse`, `status`) read a
+/// hit and never write.
 pub(crate) fn allow_identity_cache_writes() {
     IDENTITY_CACHE_WRITES.store(true, std::sync::atomic::Ordering::Relaxed);
 }

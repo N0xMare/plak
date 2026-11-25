@@ -579,7 +579,7 @@ fn recorded_semantic_tail_context_matches(
 /// query does not have and which may change between builds, so the note is
 /// rebuilt from the entry and text its segment holds and accepted only when
 /// that rebuild is the whole segment.
-fn published_successor_ok(
+pub(super) fn published_successor_ok(
     published: &CanonicalHistory,
     successor: &CanonicalHistory,
     workflow_id: SessionWorkflowId,

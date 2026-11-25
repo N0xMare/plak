@@ -38,6 +38,11 @@ pub(in crate::runtime) fn residency_successor(
         *segment = HistorySegment::new(segment.kind(), items)
             .map_err(|_| invalid("image residency segment invalid"))?;
     }
+    let first_replaced_source = plan
+        .selection
+        .iter()
+        .map(|selected| selected.segment as usize)
+        .min();
     let existing: Vec<_> = segments
         .iter()
         .filter(|segment| segment.kind() == HistorySegmentKind::Compaction)
@@ -56,15 +61,30 @@ pub(in crate::runtime) fn residency_successor(
             placeholders_notice_segment(workflow, summary, summarized_turns(source, segments.iter()))?
         }
     };
-    if let Some(index) = segments
-        .iter()
-        .position(|segment| segment.kind() == HistorySegmentKind::Compaction)
-    {
+    let mut filtered = Vec::with_capacity(segments.len().saturating_add(2));
+    let mut existing_in_segments = None;
+    let mut first_replaced_in_segments = None;
+    for (source_index, segment) in segments.into_iter().enumerate() {
+        if is_placeholder_harness_note(&segment) {
+            continue;
+        }
+        if segment.kind() == HistorySegmentKind::Compaction {
+            existing_in_segments = Some(filtered.len());
+        }
+        if first_replaced_source == Some(source_index) {
+            first_replaced_in_segments = Some(filtered.len());
+        }
+        filtered.push(segment);
+    }
+    let mut segments = filtered;
+    if let Some(index) = existing_in_segments {
         segments[index] = notice.clone();
     } else {
-        segments.insert(0, notice.clone());
+        let insert_at = first_replaced_in_segments.map_or(segments.len(), |index| {
+            index.saturating_add(1).min(segments.len())
+        });
+        segments.insert(insert_at, notice.clone());
     }
-    segments.retain(|segment| !is_placeholder_harness_note(segment));
     segments.push(note(source, plan, workflow)?);
     Ok(ResidencySuccessor {
         history: CanonicalHistory::new(segments)

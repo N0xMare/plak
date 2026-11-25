@@ -30,13 +30,11 @@ pub(crate) const GPT6_DIRECT: &str = include_str!("../../vendor/codex-prompt/gpt
 
 pub(crate) const GPT6_EDIT_BULLET: &str = "- Edit files with apply_patch. Do not use it for generated changes (lockfiles, formatter output) or for a search-and-replace across many files; script those.\n";
 
-/// Recognizes only this pack's bases, not arbitrary operator instructions.
-pub(crate) fn is_codex_base(base: &str) -> bool {
+/// Recognizes only this pack's parity Codex bases, which own commentary and
+/// parallel-call guidance. Legacy bases omit that guidance and keep the full
+/// product working agreements.
+pub(crate) fn is_codex_parity_base(base: &str) -> bool {
     base.starts_with(CODEX_VENDOR_BASE.trim_end())
-        || base == legacy::PLAKOUS_CODEX_DIRECT_BASE_INSTRUCTIONS
-        || base.starts_with(
-            "You are a precise and proficient coding agent operating in Codex Code Mode.",
-        )
 }
 
 pub(crate) fn model_base(

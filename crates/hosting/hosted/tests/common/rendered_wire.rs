@@ -986,7 +986,7 @@ pub(crate) mod suite {
         ),
         (
             "grok.direct.root",
-            "1d07a29008157a89682e13825a630d4ad5c7c57676bf8b3cad1aaba5d0472516",
+            "cb5090f7d7315a53c132bac46303364423c23dc5e48e65fc6dcda32853139110",
         ),
         (
             "claude.direct.root",
@@ -1010,7 +1010,7 @@ pub(crate) mod suite {
         ),
         (
             "xai-api.direct.root.single-agent",
-            "e7e0b74a91aa42a81905409e3a15cc5d4f4340ffd7bf4f5d995537b9b76de4ce",
+            "d06ef3a070dfed7c7fcea2808b88bffcd48a22e4e020208eca83c5121b3ecfea",
         ),
         (
             "anthropic-api.direct.root.single-agent",

@@ -109,19 +109,25 @@ pub fn target_instructions(
     selected_model: &str,
     selected_effort: Option<&str>,
 ) -> String {
-    let codex = crate::bases::codex::is_codex_base(family_base);
-    let base = match composition {
-        Composition::JavaScriptCell => PtcHarness::JavaScript.instructions(surface.exposed_names()),
-        Composition::PythonCell => PtcHarness::Python.instructions(surface.exposed_names()),
-        Composition::PythonSdk => crate::bases::python_sdk::BASE.to_owned(),
+    let (base, codex_agreements) = match composition {
+        Composition::JavaScriptCell => (
+            PtcHarness::JavaScript.instructions(surface.exposed_names()),
+            false,
+        ),
+        Composition::PythonCell => (
+            PtcHarness::Python.instructions(surface.exposed_names()),
+            false,
+        ),
+        Composition::PythonSdk => (crate::bases::python_sdk::BASE.to_owned(), false),
         Composition::Direct | Composition::NativeCell => {
+            let codex_parity = crate::bases::codex::is_codex_parity_base(family_base);
             let base = crate::bases::codex::model_base(
                 family_base,
                 selected_model,
                 composition,
                 surface.exposed_names(),
             );
-            catalog_bound_family_base(&base, surface)
+            (catalog_bound_family_base(&base, surface), codex_parity)
         }
     };
     let mut plan = PromptPlan::new(
@@ -131,7 +137,7 @@ pub fn target_instructions(
         selected_effort,
         surface.contributions().to_vec(),
     );
-    if codex {
+    if codex_agreements {
         plan.agreements = crate::identity::CODEX_WORKING_AGREEMENTS;
     }
     plan.assemble()

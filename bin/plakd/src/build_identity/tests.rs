@@ -523,3 +523,23 @@ fn a_snapshot_path_launch_follows_its_flavors_current_install() {
         Some(not_an_id.clone())
     );
 }
+
+#[test]
+fn hash_image_matches_sha256_across_multi_megabyte_buffer_boundaries() {
+    use sha2::{Digest as _, Sha256};
+    use std::fmt::Write as _;
+
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("plakd");
+    let payload: Vec<u8> = (0..(2 * 1024 * 1024 + 37_003))
+        .map(|index| u8::try_from((index * 31 + 17) % 251).unwrap())
+        .collect();
+    std::fs::write(&image, &payload).unwrap();
+
+    let mut expected = String::new();
+    for byte in Sha256::digest(&payload) {
+        write!(&mut expected, "{byte:02x}").unwrap();
+    }
+    let mut file = std::fs::File::open(&image).unwrap();
+    assert_eq!(hash_image(&mut file).as_deref(), Some(&expected[..12]));
+}

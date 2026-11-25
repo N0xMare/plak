@@ -3,6 +3,7 @@ use plakous_model::CancellationToken;
 use plakous_tools::{
     ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, OperationContext,
 };
+use std::fs;
 use std::str::FromStr as _;
 use std::time::Duration;
 

@@ -19,6 +19,7 @@
 //! rather than adding one beside it; see `compaction::placeholder`.
 
 use crate::runtime::PromptCommand;
+use crate::runtime::compaction::continuation::with_post_compaction_note;
 use crate::runtime::compaction::placeholder::{
     PlaceholderCandidate, PlaceholderSuccessor, collect_placeholder_candidates,
     placeholder_successor, portable_placeholder_successor, replay_omission_successor,
@@ -116,11 +117,78 @@ struct PlaceholdersProbe {
     wire_digest: Option<Digest>,
 }
 
+struct PlaceholderBinarySearch {
+    lo: usize,
+    hi: usize,
+    source_audit: SourceAudit,
+    best_clearing: Option<AcceptedPlaceholders>,
+    best_fitting: Option<AcceptedPlaceholders>,
+}
+
+impl PlaceholderBinarySearch {
+    const fn new(len: usize, source_audit: SourceAudit) -> Self {
+        Self {
+            lo: 1,
+            hi: len,
+            source_audit,
+            best_clearing: None,
+            best_fitting: None,
+        }
+    }
+
+    const fn next_depth(&self) -> Option<usize> {
+        if self.lo > self.hi {
+            None
+        } else {
+            Some(self.lo + (self.hi - self.lo) / 2)
+        }
+    }
+
+    fn observe(&mut self, count: usize, probe: PlaceholdersProbe) {
+        let candidate = probe
+            .after
+            .filter(|_| probe.fits)
+            .map(|after| AcceptedPlaceholders {
+                count,
+                after,
+                occupancy_after: probe.occupancy,
+                wire_digest: probe.wire_digest,
+                clears_fence: probe.clears_fence,
+            })
+            .filter(|accepted| self.source_audit.accepts(accepted));
+        if let Some(accepted) = candidate {
+            if accepted.clears_fence {
+                self.best_clearing = Some(accepted);
+                if count <= 1 {
+                    self.lo = self.hi.saturating_add(1);
+                } else {
+                    self.hi = count - 1;
+                }
+            } else {
+                if self.best_fitting.as_ref().is_none_or(|current| {
+                    accepted.after.input_tokens() < current.after.input_tokens()
+                }) {
+                    self.best_fitting = Some(accepted);
+                }
+                self.lo = count.saturating_add(1);
+            }
+        } else {
+            self.lo = count.saturating_add(1);
+        }
+    }
+
+    fn finish(self) -> Option<AcceptedPlaceholders> {
+        self.best_clearing.or(self.best_fitting)
+    }
+}
+
+#[cfg(test)]
 struct PlaceholderPreference {
     before_input_tokens: u64,
     smallest: Option<(usize, u64)>,
 }
 
+#[cfg(test)]
 impl PlaceholderPreference {
     fn new(before_input_tokens: u64) -> Self {
         Self {
@@ -399,18 +467,11 @@ impl Driver {
         )))
     }
 
-    /// Finds a measured successor meeting the reduction minimum, preferring the shallowest one
-    /// that also lands below the fence.
-    ///
-    /// Placeholder text and the two notices have real size. Replacing another
-    /// small result can therefore grow the projection, so candidate depths are
-    /// not a monotone predicate and cannot be binary searched. Every accepted
-    /// depth is measured independently against the source. The first
-    /// qualifying depth that clears the fence is therefore the shallowest
-    /// qualifying depth and ends the search. If none clears the fence, every
-    /// depth is measured and the smallest fitting successor wins for a fresh
-    /// source. An unbound rescue has no comparable source wire and must clear
-    /// the landing fence; a merely fitting successor cannot win that search.
+    /// Binary-searches `1..=candidates.len()` in `O(log N)` probes for the
+    /// minimal depth that meets the reduction minimum and lands below the
+    /// fence, falling back to the smallest-token qualifying fitting depth
+    /// probed when no depth clears the fence. An unbound rescue requires
+    /// clearing the landing fence.
     async fn search_placeholder_depth(
         &mut self,
         runtime: &ExactCompactionRuntime,
@@ -419,42 +480,14 @@ impl Driver {
         candidates: &[PlaceholderCandidate],
         source_audit: SourceAudit,
     ) -> Result<Option<AcceptedPlaceholders>, AgentSessionEndpointError> {
-        let mut preference =
-            PlaceholderPreference::new(source_audit.measurements().0.input_tokens());
-        let mut smallest = None;
-        for count in 1..=candidates.len() {
+        let mut search = PlaceholderBinarySearch::new(candidates.len(), source_audit);
+        while let Some(count) = search.next_depth() {
             let probe = self
                 .probe_placeholder_depth(runtime, identity, history, candidates, count)
                 .await?;
-            let Some(after) = probe.after else {
-                continue;
-            };
-            let accepted = AcceptedPlaceholders {
-                count,
-                after,
-                occupancy_after: probe.occupancy,
-                wire_digest: probe.wire_digest,
-                clears_fence: probe.clears_fence,
-            };
-            if !source_audit.accepts(&accepted) {
-                continue;
-            }
-            if matches!(source_audit, SourceAudit::UnboundRescue { .. }) {
-                return Ok(Some(accepted));
-            }
-            if preference.observe(
-                count,
-                probe.fits,
-                probe.clears_fence,
-                accepted.after.input_tokens(),
-            ) {
-                return Ok(Some(accepted));
-            }
-            if preference.smallest() == Some(count) {
-                smallest = Some(accepted);
-            }
+            search.observe(count, probe);
         }
-        Ok(smallest)
+        Ok(search.finish())
     }
 
     /// Measures one candidate depth offline.
@@ -749,6 +782,19 @@ impl Driver {
                 .map_err(runtime_manifest_error)?,
             )
             .map_err(runtime_manifest_error)?;
+        let source_history = self
+            .authority
+            .checkpoint()
+            .manifest()
+            .canonical()
+            .history()
+            .clone();
+        let published_history = with_post_compaction_note(
+            successor.history,
+            &source_history,
+            self.post_compaction_note.as_ref(),
+            || self.entry_id(),
+        )?;
         // Drop the family artifact. Placeholders change the next request's
         // binding; keeping SuperGrok's prior artifact fails the following
         // ordinary round with ArtifactBindingMismatch.
@@ -758,7 +804,7 @@ impl Driver {
             StoreAdmission::Ordinary,
             identity.success_checkpoint,
             lifecycle,
-            successor.history,
+            published_history,
             ledger,
             context,
             None,

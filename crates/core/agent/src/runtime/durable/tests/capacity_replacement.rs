@@ -377,9 +377,20 @@ async fn a_turn_after_placeholders_continues_without_stacking_compaction_segment
         );
     }
     let first_checkpoint = agent.checkpoint();
-    let first_line = first_checkpoint.manifest().canonical().history().segments()[0].items()[0]
-        .blocks()
-        .to_vec();
+    let first_notice = first_checkpoint
+        .manifest()
+        .canonical()
+        .history()
+        .segments()
+        .iter()
+        .find(|segment| segment.kind() == HistorySegmentKind::Compaction)
+        .ok_or("first-turn compaction notice")?;
+    let first_line = first_notice.items()[0].blocks().to_vec();
+    assert_eq!(
+        first_checkpoint.manifest().canonical().history().segments()[0].kind(),
+        HistorySegmentKind::RecentIntent,
+        "offline passes must leave position zero untouched for prefix cache"
+    );
     assert_eq!(
         first_checkpoint.manifest().canonical().context().affinity(),
         &original_affinity,
@@ -407,13 +418,20 @@ async fn a_turn_after_placeholders_continues_without_stacking_compaction_segment
         manifest.canonical().context().affinity(),
         &original_affinity
     );
+    let notice_segment = history
+        .segments()
+        .iter()
+        .find(|segment| segment.kind() == HistorySegmentKind::Compaction)
+        .ok_or("a compacted successor")?;
     assert_eq!(
-        history.segments()[0].items()[0].blocks(),
+        notice_segment.items()[0].blocks(),
         first_line.as_slice(),
-        "position-zero text is constant across offline passes"
+        "placeholder notice text is constant across offline passes"
     );
-    let first_segment = history.segments().get(0).ok_or("a compacted successor")?;
-    assert_eq!(first_segment.kind(), HistorySegmentKind::Compaction);
+    assert_eq!(
+        history.segments()[0].kind(),
+        HistorySegmentKind::RecentIntent
+    );
     let provenance = manifest
         .canonical()
         .context()
@@ -421,7 +439,7 @@ async fn a_turn_after_placeholders_continues_without_stacking_compaction_segment
         .ok_or("second-turn compaction provenance")?;
     assert_eq!(
         provenance.summary_segment_identity(),
-        first_segment.identity()
+        notice_segment.identity()
     );
     assert_eq!(
         provenance.strategy(),
@@ -1571,5 +1589,109 @@ async fn summary_headroom_case(
         DurableCompactionReceipt::Compacted { .. }
     ));
     assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 1);
+    Ok(())
+}
+
+/// Placeholder compaction preserves the active plan restoration note just like
+/// paid compaction, and its durable offline receipt stays valid across reopen.
+#[tokio::test]
+async fn durable_placeholders_preserve_post_compaction_plan_note_and_receipt() -> TestResult {
+    const PLAN_NOTE: &str = "[plak: active plan restored]\n- [in_progress] finish audit";
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let store = Arc::new(TestCreateStore::default());
+    let lease = NonZeroU64::new(30).ok_or("nonzero lease")?;
+    let sessions =
+        DurableSessionRuntime::current(store.clone(), RuntimeDurability::Required, lease)?;
+    let (builder, model) = placeholder_fixture(
+        Arc::clone(&workspace),
+        76_000,
+        40_000,
+        &[20_000, 20_000, 60_000],
+        &[0, 1, 2],
+        false,
+        LocalDurabilityDisposition::DurableRequired,
+    )?;
+    model.fail_compaction_call();
+    let agent = sessions
+        .create(
+            "create:placeholders-plan-note",
+            builder.post_compaction_note(Arc::new(|_, _| Some(PLAN_NOTE.to_owned()))),
+        )
+        .await?;
+    let outcome = agent.prompt("read the big file").await?.result().await?;
+    assert!(
+        matches!(outcome.outcome(), TurnResultOutcome::Completed(_)),
+        "expected turn completion after placeholder compaction: {:?}",
+        outcome.outcome()
+    );
+    let checkpoint = agent.checkpoint();
+    let history = checkpoint.manifest().canonical().history();
+    assert!(
+        !placeholder_bodies(history).is_empty(),
+        "expected placeholder replacement to run"
+    );
+    let steering_texts: Vec<&str> = history
+        .segments()
+        .iter()
+        .filter(|segment| segment.kind() == HistorySegmentKind::Steering)
+        .flat_map(HistorySegment::items)
+        .flat_map(ConversationItem::blocks)
+        .filter_map(|block| match block {
+            ContentBlock::Text(text) => Some(text.text()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        steering_texts.contains(&PLAN_NOTE),
+        "placeholder compaction must append the active plan restoration note: {steering_texts:?}"
+    );
+    let compaction_op = checkpoint
+        .manifest()
+        .ledger()
+        .operations()
+        .into_iter()
+        .find_map(|record| match record.kind() {
+            DurableOperationKind::Compaction { .. } => serde_json::from_slice::<
+                crate::runtime::compaction::DurablePlaceholderRequestRecord,
+            >(record.request().bytes())
+            .ok(),
+            _ => None,
+        })
+        .ok_or("placeholder compaction operation record missing")?;
+    let receipt_source = DurableSessionAddress::new(
+        compaction_op.source_session,
+        compaction_op.source_branch,
+        compaction_op.source_checkpoint,
+    );
+    let head = DurableSessionAddress::new(agent.session_id(), agent.branch_id(), checkpoint.id());
+    agent.shutdown().await?;
+
+    assert!(
+        matches!(
+            sessions
+                .compaction_receipt(&compaction_op.operation_id, receipt_source)
+                .await?,
+            DurableCompactionReceipt::Compacted { .. }
+        ),
+        "noted placeholder successor must validate as a durable receipt"
+    );
+    let (reopen_builder, reopened_model) = placeholder_fixture(
+        workspace,
+        76_000,
+        40_000,
+        &[],
+        &[],
+        false,
+        LocalDurabilityDisposition::DurableRequired,
+    )?;
+    let DurableRuntimeOpen::Opened(reopened) = sessions
+        .open("open:placeholders-plan-note", head, reopen_builder)
+        .await?
+    else {
+        return Err("noted placeholder head must reopen cleanly".into());
+    };
+    assert_eq!(reopened_model.calls.load(Ordering::Acquire), 0);
+    reopened.shutdown().await?;
     Ok(())
 }

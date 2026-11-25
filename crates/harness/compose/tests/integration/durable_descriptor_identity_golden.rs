@@ -152,7 +152,7 @@ const DURABLE_DESCRIPTOR_PINS: &[(&str, &str, &str, &str)] = &[
     (
         "SuperGrokOAuth",
         "6b928cca7e7434b3792290744857df0b3c44c72d6ef0c117906eb4c34df462c6",
-        "284dca8a9173085102a408c82296fa58769933502504beefa47a78b49e5fbe3e",
+        "8cd8eed6a7668da20a156e2d9e74ff94d552d5c14c7937b9e1ca2f6deae64284",
         "44b8430fce9ce883c54102f9808f260a6c1687c139ce13db82fe85791a178f62",
     ),
     (
@@ -176,7 +176,7 @@ const DURABLE_DESCRIPTOR_PINS: &[(&str, &str, &str, &str)] = &[
     (
         "SuperGrokOAuth+topology",
         "0c88f7c742b0952a5bc7979a9736f2d07539758db138eaef8d94190e5627f94f",
-        "5ae75ec0cecd6e67a22590d1987b5b397b20d96e3cab35afba1537ae93ce3299",
+        "58d23684f897639c1fcccbc22cdb50ea2403775057b5e00ff98f51ac5de21062",
         "237f71d3fab19c96694b061fe1f8a057a7fe2d20e3a383a7ce784fb8f3ed409f",
     ),
     (

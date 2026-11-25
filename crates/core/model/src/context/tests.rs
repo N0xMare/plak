@@ -827,11 +827,15 @@ fn item_delta_anchor_counts_dynamic_system_changes_but_not_old_input_or_response
         anchor.occupied_tokens(&current),
         298_468 + 1_000 + new_system + result + 32
     );
+    assert_eq!(
+        anchor.estimated_occupied_tokens(&current),
+        298_468 + 1_000 + new_system.div_ceil(4) + result.div_ceil(4) + 32
+    );
     let status = item_status(&current, Some(&anchor), binding, false);
     assert!(matches!(status.kind(), ContextStatusKind::Fits { .. }));
     assert_eq!(
         status.occupancy_tokens(),
-        Some(anchor.occupied_tokens(&current))
+        Some(anchor.estimated_occupied_tokens(&current))
     );
     assert!(!status.uses_unanchored_estimate());
     // A later zero-usage response cannot spend the prior output credit.
@@ -839,6 +843,43 @@ fn item_delta_anchor_counts_dynamic_system_changes_but_not_old_input_or_response
         &serde_json::json!({"instructions":"clock=2", "input":[{"role":"user", "content":huge}, {"role":"assistant", "content":"changed-output"}, {"type":"function_call_output", "output":"tool-result"}, {"role":"assistant", "content":"later-response"}]}),
     );
     assert!(anchor.occupied_tokens(&later) > 299_468 + new_system + result + 32);
+}
+
+#[test]
+fn large_tool_output_after_anchor_estimates_tokens_at_four_bytes_per_token() {
+    let binding = authority(b"binding");
+    let old = wire_input(&serde_json::json!({"input":[{"role":"user","content":"start"}]}));
+    let anchor = ContextRequestAnchor::new(
+        binding,
+        RouteId::new("test-route").expect("route"),
+        ModelId::new("requested-model").expect("model"),
+        crate::Usage::new(120_000, 0, 0, 0, 0),
+        old,
+    )
+    .expect("anchor");
+    let payload = "x".repeat(102_400);
+    let current = wire_input(&serde_json::json!({
+        "input": [
+            {"role": "user", "content": "start"},
+            {"type": "function_call_output", "output": payload}
+        ]
+    }));
+    let output_bytes = json_bytes(&serde_json::json!({
+        "type": "function_call_output",
+        "output": payload
+    }));
+    // Hard admission bound remains conservative (1 byte/token).
+    assert_eq!(
+        anchor.occupied_tokens(&current),
+        120_000 + output_bytes + 16
+    );
+    // Scheduled compaction occupancy uses bytes / 4 so a 100 KiB tool output
+    // at 60% of a 200k window does not overcount 4x into premature compaction.
+    let estimated = anchor.estimated_occupied_tokens(&current);
+    assert_eq!(estimated, 120_000 + output_bytes.div_ceil(4) + 16);
+    assert!(estimated < 150_000);
+    let status = item_status(&current, Some(&anchor), binding, false);
+    assert_eq!(status.occupancy_tokens(), Some(estimated));
 }
 
 #[test]

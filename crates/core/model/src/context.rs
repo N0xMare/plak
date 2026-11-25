@@ -750,9 +750,11 @@ impl ContextRequestAnchor {
         self.response_items = Some(output);
     }
 
-    /// Provider input already includes cache reads and writes; add output once.
-    #[must_use]
-    pub(crate) fn occupied_tokens(&self, current: &ContextWireInput) -> u64 {
+    fn delta_occupied_tokens(
+        &self,
+        current: &ContextWireInput,
+        bytes_to_tokens: impl Fn(u64) -> u64,
+    ) -> u64 {
         let mut observed = self.clone();
         observed.observe_response_items(current);
         let mut covered: std::collections::BTreeMap<&str, usize> =
@@ -775,11 +777,27 @@ impl ContextRequestAnchor {
                     return total;
                 }
                 total
-                    .saturating_add(item.bytes)
+                    .saturating_add(bytes_to_tokens(item.bytes))
                     .saturating_add(item.image_tokens)
                     .saturating_add(16)
             },
         )
+    }
+
+    /// Provider input already includes cache reads and writes; add output once.
+    /// Uncovered items use the conservative 1 token/byte upper bound for hard
+    /// context admission.
+    #[must_use]
+    pub(crate) fn occupied_tokens(&self, current: &ContextWireInput) -> u64 {
+        self.delta_occupied_tokens(current, |bytes| bytes)
+    }
+
+    /// Anchored occupancy estimate for scheduled compaction triggers and context
+    /// gauges: provider usage plus `bytes.div_ceil(4) + image_tokens + 16` for
+    /// uncovered items added since the anchor.
+    #[must_use]
+    pub(crate) fn estimated_occupied_tokens(&self, current: &ContextWireInput) -> u64 {
+        self.delta_occupied_tokens(current, |bytes| bytes.div_ceil(4))
     }
 }
 
