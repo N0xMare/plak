@@ -2767,6 +2767,7 @@ name = "plakd-wire-types"
 version = "0.0.4"
 dependencies = [
  "plakous-host-protocol",
+ "regex",
  "schemars",
  "serde",
  "serde_json",

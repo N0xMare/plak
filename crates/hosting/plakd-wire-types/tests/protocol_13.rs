@@ -6,8 +6,17 @@ use plakous_host_protocol::wire;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
+#[path = "protocol_13/schema.rs"]
+mod schema;
+
 const CLIENT: &str = include_str!("fixtures/protocol-13-client.jsonl");
 const HOST: &str = include_str!("fixtures/protocol-13-host.jsonl");
+
+#[test]
+fn every_example_matches_the_pinned_schema() -> Result<(), Box<dyn std::error::Error>> {
+    schema::validate("client_frame", CLIENT)?;
+    schema::validate("host_frame", HOST)
+}
 
 fn round_trip<T: DeserializeOwned + Serialize>(
     fixture: &str,
@@ -32,14 +41,38 @@ fn examples_round_trip_as_complete_frames() -> Result<(), Box<dyn std::error::Er
     assert_eq!(client[0]["proto"], 13);
     assert_eq!(wire::WIRE_VERSION, 13);
 
-    let append = &host[5]["observation"]["body"];
-    let first = &host[1];
-    let baseline = &host[6];
-    let original = first["items"][1]["row"]["text"]
-        .as_str()
-        .unwrap_or_default();
+    let (first, last) = (&host[1], &host[2]);
+    assert_eq!(
+        (first["part"].as_u64(), last["part"].as_u64()),
+        (Some(0), Some(1))
+    );
+    assert_eq!(first["last"], false);
+    assert_eq!(last["last"], true);
+    for field in [
+        "revision",
+        "has_older",
+        "older_cursor",
+        "older_rows",
+        "older_bytes",
+    ] {
+        assert_eq!(first[field], last[field]);
+    }
+    assert_eq!(host[3]["attachment"], first["attachment"]);
+    assert_eq!(host[3]["class"], "state");
+    assert!(host[3]["observation"]["body"]["session_profile"]["root"]["template"].is_string());
+    assert_eq!(client[2]["op"]["cursor"], first["older_cursor"]);
+    assert_eq!(host[5]["last"], false);
+    assert_eq!(host[6]["last"], true);
+    assert_eq!(host[5]["id"], host[6]["id"]);
+    assert_eq!(host[5]["id"], client[2]["id"]);
+    assert_eq!(host[5]["items"][1]["truncated_bytes"], 2);
+
+    let append = &host[7]["observation"]["body"];
+    let baseline = &host[8];
+    let original = last["items"][0]["row"]["text"].as_str().unwrap_or_default();
     let text = append["text"].as_str().unwrap_or_default();
-    assert_eq!(append["row"], first["live_rows"][0]["row"]);
+    assert_eq!(append["row"], last["live_rows"][0]["row"]);
+    assert_eq!(append["offset"], last["live_rows"][0]["len"]);
     assert_eq!(append["offset"], original.len());
     assert_eq!(append["end"], original.len() + text.len());
     assert_eq!(baseline["live_rows"][0]["len"], append["end"]);
@@ -47,17 +80,16 @@ fn examples_round_trip_as_complete_frames() -> Result<(), Box<dyn std::error::Er
         baseline["items"][1]["row"]["text"],
         format!("{original}{text}"),
     );
-    assert_eq!(host[3]["last"], false);
-    assert_eq!(host[4]["last"], true);
-    assert_eq!(host[3]["id"], host[4]["id"]);
-    assert_eq!(host[3]["items"][1]["truncated_bytes"], 2);
-    assert_eq!(host[9]["request_id"], client[4]["id"]);
+    assert_eq!(host[11]["request_id"], client[4]["id"]);
+    assert!(host.iter().any(|frame| {
+        frame["frame"] == "attachment_status" && frame.get("request_id").is_none()
+    }));
     assert_eq!(
-        host[10]["outcome"]["ok"]["transcript"]["from"],
+        host[12]["outcome"]["ok"]["transcript"]["from"],
         first["revision"]
     );
     assert_eq!(
-        host[10]["outcome"]["ok"]["transcript"]["to"],
+        host[12]["outcome"]["ok"]["transcript"]["to"],
         baseline["revision"]
     );
     Ok(())
@@ -124,11 +156,15 @@ fn named_template_writes_and_profile_reads_do_not_accept_legacy_tiers()
 
     let named = HOST
         .lines()
-        .find(|line| line.contains("\"kind\":\"extension\"") && line.contains("\"service_tier\""))
+        .find(|line| line.contains("\"profiles\"") && line.contains("\"service_tier\""))
         .ok_or("profile fixture")?;
     let mut old: Value = serde_json::from_str(named)?;
-    old["observation"]["body"]["profiles"]["rows"][0]["root"] = json!({
+    let profile = &mut old["observation"]["body"]["profiles"]["rows"][0];
+    profile["root"] = json!({
         "label":"root","account":"codex","model":"gpt-6.2-sol","effort":"low","fast":true,"depth":0
+    });
+    profile["cards"][0] = json!({
+        "label":"worker","account":"codex","model":"gpt-6.2-sol","effort":"low","fast":false,"depth":0
     });
     serde_json::from_value::<wire::HostFrame<PlakExtension>>(old.clone())?;
     assert!(serde_json::from_value::<HostFrame>(old).is_err());
