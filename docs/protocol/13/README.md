@@ -105,6 +105,11 @@ is complete. Discard the old token and attach for a fresh first page.
 
 Stream offsets, baseline live lengths, omitted row bytes and older body
 totals use UTF-8 bytes, not JavaScript string length or JSON wire size.
+Integers such as `host_generation` and provisional row anchors use the
+full unsigned 64-bit range and can exceed 2^53; a JavaScript client must
+decode and re-encode them exactly (for example as `BigInt` or the original
+text), never as `Number`. One frame is at most 16 MiB of JSON, so a single
+snapshot part can carry a row of several MiB.
 Assistant and reasoning deltas have the same shape; the row's type comes
 from its baseline or opening patch, before the host streams that row.
 The root gives each contiguous assistant or reasoning run a new provisional
