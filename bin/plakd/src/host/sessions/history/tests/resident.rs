@@ -47,7 +47,8 @@ fn draft_attach_replays_exactly_and_pages_after_restart_or_prune() {
             return page;
         }
         let stamp = wire.begin_viewport(&node, generation).unwrap();
-        let page = prepare_first_page(&fixture.paths, &fixture.id, 1, generation, &root).unwrap();
+        let page =
+            prepare_first_page(&fixture.paths, &fixture.id, 1, generation, Some(&root)).unwrap();
         finish_first_page(wire, &stamp, 1, page).unwrap().unwrap()
     };
     let first = attach(&mut wire, 13, None);
@@ -189,7 +190,7 @@ fn first_page_and_replay_admit_during_an_unbroken_keyed_run() {
     assert!(sender.send(ContentEvent::AssistantDelta("first".into())));
     pump().unwrap();
     let read = wire.begin_viewport(&node, 13).unwrap();
-    let page = prepare_first_page(&fixture.paths, &fixture.id, 1, 13, &root).unwrap();
+    let page = prepare_first_page(&fixture.paths, &fixture.id, 1, 13, Some(&root)).unwrap();
     let missed = "é".repeat(64);
     for _ in 0..64 {
         assert!(sender.send(ContentEvent::AssistantDelta("é".into())));

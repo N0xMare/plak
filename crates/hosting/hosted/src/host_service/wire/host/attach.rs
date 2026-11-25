@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use plakous_host_protocol::wire::RequestId;
 use tokio::sync::oneshot::{self, error::TryRecvError};
 
@@ -5,14 +7,19 @@ use super::super::slot::HeldSession;
 use super::archived::StoredAttachment;
 use super::{
     Arc, CliFailure, CliResult, ClientFrame, DeserializeOwned, Forwarded, HostConnection,
-    HostFrame, NodeAddress, Outcome, PoisonError, ProtocolExtension, RequestRefusal, Serialize,
-    SessionHost, Write, stopping, write_frame,
+    HostFrame, NodeAddress, NodeLink, Outcome, PoisonError, PreparedViewport, ProtocolExtension,
+    RequestRefusal, Serialize, SessionHost, ViewportMode, ViewportRead, ViewportRevision, Write,
+    stopping,
 };
 
 const MAX_QUEUED_ATTACHES: usize = 4;
+const VIEWPORT_CAPTURE_WAIT: Duration = Duration::from_millis(120);
 
 enum Target<P: ProtocolExtension> {
-    Resident(Undelivered<P>),
+    Resident(
+        Undelivered<P>,
+        Option<(ViewportRead, Box<dyn PreparedViewport>)>,
+    ),
     Stored(StoredAttachment<P>),
     Refused(RequestRefusal),
 }
@@ -39,6 +46,7 @@ pub(super) struct AttachRequest {
     node: NodeAddress,
     text: String,
     allow_open: bool,
+    retained: Option<ViewportRevision>,
 }
 
 pub(super) struct PendingAttach<P: ProtocolExtension> {
@@ -56,7 +64,12 @@ where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
-    fn prepare_attach(&self, node: &NodeAddress, allow_open: bool) -> Target<P> {
+    fn prepare_attach(
+        &self,
+        node: &NodeAddress,
+        allow_open: bool,
+        retained: Option<&ViewportRevision>,
+    ) -> Target<P> {
         if self.closed() {
             return Target::Refused(stopping());
         }
@@ -67,10 +80,14 @@ where
         // Archiving releases the live slot before publishing the archive
         // flag. A held resident cannot have an archived transcript.
         if let Some(resident) = slot.try_hold_resident() {
-            return Target::Resident(Undelivered {
-                held: Some(resident),
-                from_open: false,
-            });
+            return self.prepare_resident(
+                node,
+                Undelivered {
+                    held: Some(resident),
+                    from_open: false,
+                },
+                retained,
+            );
         }
         if !allow_open {
             return Target::Refused(RequestRefusal::Backpressure);
@@ -97,11 +114,49 @@ where
                 if self.closed() {
                     return Target::Refused(stopping());
                 }
-                Target::Resident(opened)
+                self.prepare_resident(node, opened, retained)
             }
             Err(failure) => self
                 .stored_target(node, &id, Some(&failure))
                 .unwrap_or_else(|| Target::Refused(self.sessions.refusal(&id, &failure))),
+        }
+    }
+
+    fn prepare_resident(
+        &self,
+        node: &NodeAddress,
+        resident: Undelivered<P>,
+        retained: Option<&ViewportRevision>,
+    ) -> Target<P> {
+        let Some((session, _, _)) = &resident.held else {
+            unreachable!("a prepared attach owns its session hold");
+        };
+        let Some(root) = &session.root_transcript else {
+            return Target::Resident(resident, None);
+        };
+        if session.root() != *node {
+            return Target::Resident(resident, None);
+        }
+        let deadline = Instant::now() + VIEWPORT_CAPTURE_WAIT;
+        let id = session.session_id();
+        loop {
+            if let Some(stamp) = session.viewport_read(node, self.generation) {
+                match self
+                    .sessions
+                    .prepare_viewport(&id, self.generation, Some(root), retained)
+                {
+                    Ok(Some(page)) => return Target::Resident(resident, Some((stamp, page))),
+                    Ok(None) => return Target::Resident(resident, None),
+                    Err(RequestRefusal::Backpressure) => {}
+                    Err(refusal) => return Target::Refused(refusal),
+                }
+            }
+            // Store and observation publication run independently. Let an
+            // opening or committing root reach its next coherent cut.
+            if Instant::now() >= deadline || session.ended() {
+                return Target::Refused(RequestRefusal::Backpressure);
+            }
+            std::thread::sleep(Duration::from_millis(4));
         }
     }
 
@@ -140,8 +195,15 @@ where
                 refusal
             }));
         }
+        let page = match self
+            .sessions
+            .prepare_viewport(id, self.generation, None, None)
+        {
+            Ok(page) => page,
+            Err(reason) => return Some(Target::Refused(reason)),
+        };
         Some(Target::Stored(StoredAttachment::new(
-            view, refusal, failure,
+            view, refusal, failure, page,
         )))
     }
 }
@@ -167,6 +229,7 @@ where
         node: NodeAddress,
         text: &str,
         allow_open: bool,
+        retained: Option<ViewportRevision>,
     ) -> CliResult<Forwarded<P>> {
         if self.host_reads.contains_key(&id) {
             return Ok(Forwarded::Answered(Outcome::Refused(
@@ -186,6 +249,7 @@ where
                 node,
                 text: text.to_owned(),
                 allow_open,
+                retained,
             });
             return Ok(Forwarded::Reading(true));
         }
@@ -193,12 +257,14 @@ where
             .ok()
             .filter(|_| self.buffered_output)
         else {
-            let target = self.host.prepare_attach(&node, allow_open);
-            if let Some(done) = self.finish_attach(target, text, true)? {
+            let target = self
+                .host
+                .prepare_attach(&node, allow_open, retained.as_ref());
+            if let Some(done) = self.finish_attach(id, target, text, true)? {
                 return Ok(done);
             }
-            let target = self.host.prepare_attach(&node, allow_open);
-            let Some(done) = self.finish_attach(target, text, false)? else {
+            let target = self.host.prepare_attach(&node, allow_open, None);
+            let Some(done) = self.finish_attach(id, target, text, false)? else {
                 unreachable!("the second preparation answers");
             };
             return Ok(done);
@@ -209,6 +275,7 @@ where
                 node,
                 text: text.to_owned(),
                 allow_open,
+                retained,
             },
             runtime,
             true,
@@ -227,6 +294,7 @@ where
         let wake = Arc::clone(&self.read_ready);
         let node = request.node.clone();
         let allow_open = request.allow_open;
+        let retained = request.retained.clone();
         runtime.spawn_blocking(move || {
             let paused = host
                 .upgrade_admission
@@ -235,7 +303,7 @@ where
             if send.is_closed() {
                 return;
             }
-            let result = host.prepare_attach(&node, allow_open && !*paused);
+            let result = host.prepare_attach(&node, allow_open && !*paused, retained.as_ref());
             if send.is_closed() {
                 return;
             }
@@ -261,7 +329,7 @@ where
         };
         let _timing = super::super::test_timing::phase("settle attach").entered();
         let Some(PendingAttach {
-            request,
+            mut request,
             runtime,
             retry,
             ..
@@ -269,7 +337,8 @@ where
         else {
             unreachable!("the connection owns its pending attach");
         };
-        let Some(finished) = self.finish_attach(target, &request.text, retry)? else {
+        let Some(finished) = self.finish_attach(request.id, target, &request.text, retry)? else {
+            request.retained = None;
             self.prepare_buffered(request, runtime, false);
             return Ok(());
         };
@@ -279,9 +348,10 @@ where
             node,
             text,
             allow_open,
+            retained,
         }) = self.attach_queue.pop_front()
         {
-            let started = self.start_attach(id, node, &text, allow_open)?;
+            let started = self.start_attach(id, node, &text, allow_open, retained)?;
             self.complete_attach(id, started)?;
             if self.attaching.is_some() {
                 break;
@@ -292,7 +362,7 @@ where
 
     fn complete_attach(&mut self, id: RequestId, result: Forwarded<P>) -> CliResult<()> {
         if let Forwarded::Answered(outcome) = result {
-            write_frame(&mut self.out, &HostFrame::<P>::Response { id, outcome })?;
+            self.write(&HostFrame::<P>::Response { id, outcome })?;
         }
         Ok(())
     }
@@ -301,12 +371,13 @@ where
     // request's place to another queued attach.
     fn finish_attach(
         &mut self,
+        id: RequestId,
         target: Target<P>,
         text: &str,
         retry: bool,
     ) -> CliResult<Option<Forwarded<P>>> {
         match target {
-            Target::Resident(mut resident) => {
+            Target::Resident(mut resident, page) => {
                 if self.host.closed() {
                     return Ok(Some(Forwarded::Answered(Outcome::Refused(stopping()))));
                 }
@@ -326,10 +397,59 @@ where
                 let Some(held) = resident.held.take() else {
                     unreachable!("a prepared attach owns its session hold");
                 };
+                if let Some((stamp, page)) = page {
+                    if let Some(link) = self.node.as_mut().filter(|link| {
+                        Arc::ptr_eq(&held.0, &link.session) && link.releases == held.2
+                    }) {
+                        return Self::write_viewport(link, id, &stamp, page, retry);
+                    }
+                    let mut link = self.resident_link(held);
+                    let result = Self::write_viewport(&mut link, id, &stamp, page, retry)?;
+                    if matches!(result, Some(Forwarded::Reading(true))) {
+                        self.unlink();
+                        self.node = Some(link);
+                    }
+                    return Ok(result);
+                }
                 self.attach_resident(held, text).map(Some)
             }
-            Target::Stored(stored) => self.attach_stored(stored, text).map(Some),
+            Target::Stored(stored) => self.attach_stored(id, stored, text).map(Some),
             Target::Refused(refusal) => Ok(Some(Forwarded::Answered(Outcome::Refused(refusal)))),
+        }
+    }
+
+    fn write_viewport(
+        link: &mut NodeLink<P, W>,
+        id: RequestId,
+        stamp: &ViewportRead,
+        page: Box<dyn PreparedViewport>,
+        retry: bool,
+    ) -> CliResult<Option<Forwarded<P>>> {
+        let connection = &mut link.connection;
+        let start = match page.mode() {
+            ViewportMode::Replay(revision) => {
+                connection.replay_viewport(stamp, page.fence(), &revision)
+            }
+            ViewportMode::Page(revision) => {
+                connection.install_viewport_page(stamp, page.fence(), revision)
+            }
+        };
+        match start {
+            Ok(Some(start)) => {
+                let attachment = start.attachment;
+                let mut binding = None;
+                connection.write_viewport_prefix(attachment, |out| {
+                    binding = Some(page.write(out, id, start)?);
+                    Ok(())
+                })?;
+                connection.history = binding;
+                Ok(Some(Forwarded::Reading(true)))
+            }
+            Ok(None) if retry => Ok(None),
+            Ok(None) => Ok(Some(Forwarded::Answered(Outcome::Refused(
+                RequestRefusal::Backpressure,
+            )))),
+            Err(reason) => Ok(Some(Forwarded::Answered(Outcome::Refused(reason)))),
         }
     }
 }

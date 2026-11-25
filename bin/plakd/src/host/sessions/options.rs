@@ -116,6 +116,9 @@ impl ProductSessions {
                             if !rows.iter().any(|row| row.runner.runner_id == event.runner_id) {
                                 continue;
                             }
+                            if runner_views::opening_barrier(event.phase, event.row.as_ref()) {
+                                continue;
+                            }
                             let phase = runner_views::phase(event.phase);
                             let row = if let Some(row) = event.row {
                                 if !completed.insert(event.runner_id.clone()) { continue; }

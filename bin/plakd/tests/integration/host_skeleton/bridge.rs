@@ -109,9 +109,14 @@ impl Bridge {
     }
 
     fn next(&self) -> HostFrame<PlakExtension> {
-        let line = self.lines.recv_timeout(WAIT).expect("bridge frame");
-        decode_line(&line)
-            .unwrap_or_else(|error| panic!("stdout was not protocol-only: {error}: {line}"))
+        loop {
+            let line = self.lines.recv_timeout(WAIT).expect("bridge frame");
+            if let Some(frame) = crate::protocol_13::decode(&line)
+                .unwrap_or_else(|error| panic!("stdout was not protocol-only: {error}: {line}"))
+            {
+                return frame;
+            }
+        }
     }
 
     fn request(&mut self, id: RequestId, op: Op<PlakExtension>) -> Outcome<PlakExtension> {

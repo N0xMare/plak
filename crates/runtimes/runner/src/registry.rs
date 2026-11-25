@@ -167,6 +167,32 @@ struct Entry {
     placement_users: Arc<()>,
 }
 
+impl Entry {
+    fn placement(&self, reason: &PlacementFailure) -> PlacementFailure {
+        match reason {
+            PlacementFailure::RunnerUnreachable {
+                phase: ProbePhase::Reconcile,
+                timed_out: false,
+            } if matches!(
+                self.refresh.phase,
+                ProbePhase::ReconcileStore
+                    | ProbePhase::ReconcileObsoleteLines
+                    | ProbePhase::ReconcileTerminals
+                    | ProbePhase::ReconcileJobs
+                    | ProbePhase::ReconcileStops
+                    | ProbePhase::ReconcileForeground
+            ) =>
+            {
+                PlacementFailure::RunnerUnreachable {
+                    phase: self.refresh.phase,
+                    timed_out: false,
+                }
+            }
+            _ => reason.clone(),
+        }
+    }
+}
+
 struct RetainedServices {
     registry: RunnerRegistry,
     id: String,
@@ -341,16 +367,6 @@ impl RunnerRegistry {
 
     /// Publishes a phase without changing completed-probe timestamps.
     pub fn progress(&self, id: &str, phase: ProbePhase) {
-        self.record_probe_phase(id, phase);
-        let _ = self.progress.send(RunnerProgress {
-            runner_id: id.into(),
-            phase,
-            row: None,
-        });
-    }
-
-    /// Records the operation for timeout diagnostics without publishing a new progress frame.
-    pub fn record_probe_phase(&self, id: &str, phase: ProbePhase) {
         if let Some(entry) = self
             .entries
             .write()
@@ -358,8 +374,24 @@ impl RunnerRegistry {
             .get_mut(id)
         {
             entry.refresh.phase = phase;
+            if matches!(
+                entry.row.status,
+                RunnerStatus::Blocked(PlacementFailure::RunnerUnreachable {
+                    phase: ProbePhase::Reconcile,
+                    timed_out: false,
+                })
+            ) {
+                self.changed
+                    .send_modify(|sequence| *sequence = sequence.wrapping_add(1));
+            }
         }
+        let _ = self.progress.send(RunnerProgress {
+            runner_id: id.into(),
+            phase,
+            row: None,
+        });
     }
+
     /// Process-local readiness changes, including delayed first bind. A
     /// continuation scanner waits here rather than blocking other runners.
     #[must_use]
@@ -406,7 +438,13 @@ impl RunnerRegistry {
             .unwrap_or_else(PoisonError::into_inner)
             .values()
             .filter(|entry| !entry.row.runner.names.is_empty())
-            .map(|entry| entry.row.clone())
+            .map(|entry| {
+                let mut row = entry.row.clone();
+                if let RunnerStatus::Blocked(reason) = &row.status {
+                    row.status = RunnerStatus::Blocked(entry.placement(reason));
+                }
+                row
+            })
             .collect()
     }
 
@@ -734,7 +772,7 @@ impl RunnerRegistry {
                 connection => connection.clone().ok_or_else(reconciling),
             },
             RunnerStatus::Unknown => Err(reconciling()),
-            RunnerStatus::Blocked(reason) => Err(reason.clone()),
+            RunnerStatus::Blocked(reason) => Err(entry.placement(reason)),
         }
     }
 

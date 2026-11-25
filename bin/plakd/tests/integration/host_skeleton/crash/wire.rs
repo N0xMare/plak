@@ -70,6 +70,9 @@ impl Bindings {
     }
 
     fn outgoing(&mut self, value: &Value, key: &str) -> Value {
+        if key == "proto" && value == 12 {
+            return json!(WIRE_VERSION);
+        }
         match value {
             Value::Object(fields) => fields
                 .iter()
@@ -149,6 +152,10 @@ impl Bindings {
     }
 
     fn compare_at(&mut self, expected: &Value, actual: &Value, key: &str) {
+        if key == "proto" && expected == 12 {
+            assert_eq!(actual, WIRE_VERSION);
+            return;
+        }
         if matches!(key, "created_at" | "updated_at") && expected == "@time" {
             assert!(actual.is_u64(), "timestamp: {actual}");
             return;
@@ -172,14 +179,36 @@ impl Bindings {
         }
         match (expected, actual) {
             (Value::Object(left), Value::Object(right)) => {
-                assert_eq!(
-                    left.keys().collect::<Vec<_>>(),
-                    right.keys().collect::<Vec<_>>(),
-                    "field {key}: expected {expected}; actual {actual}"
-                );
-                for (key, value) in left {
-                    self.compare_at(value, &right[key], key);
+                // The capture is preserved as recorded. Compare its unchanged
+                // control facts after checking the new shape where it differs.
+                if left
+                    .get("answer")
+                    .is_some_and(|answer| answer == "attached")
+                {
+                    let mut actual = right.clone();
+                    assert_eq!(
+                        actual.remove("transcript"),
+                        Some(json!({"mode":"first_page"}))
+                    );
+                    self.compare_object(left, &actual, key);
+                    return;
                 }
+                if left.contains_key("needs_operator") {
+                    let mut actual = right.clone();
+                    let reasons = actual.remove("attention").unwrap();
+                    let actionable = reasons
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|reason| reason["reason"] != "interrupted_by_upgrade");
+                    actual.insert("needs_operator".into(), json!(actionable));
+                    assert!(actual.remove("cost_root").is_some());
+                    assert!(actual.remove("cost_tree").is_some());
+                    actual.remove("preview");
+                    self.compare_object(left, &actual, key);
+                    return;
+                }
+                self.compare_object(left, right, key);
             }
             (Value::Array(left), Value::Array(right)) => {
                 if key == "rows" {
@@ -192,6 +221,22 @@ impl Bindings {
                 }
             }
             _ => assert_eq!(expected, actual),
+        }
+    }
+
+    fn compare_object(
+        &mut self,
+        left: &serde_json::Map<String, Value>,
+        right: &serde_json::Map<String, Value>,
+        key: &str,
+    ) {
+        assert_eq!(
+            left.keys().collect::<Vec<_>>(),
+            right.keys().collect::<Vec<_>>(),
+            "field {key}: expected {left:?}; actual {right:?}"
+        );
+        for (key, value) in left {
+            self.compare_at(value, &right[key], key);
         }
     }
 }
@@ -387,7 +432,13 @@ fn replay(
             } else if barrier == "stop-time-boundary" {
                 separate_stop_timestamp(fixture);
             } else if barrier == "answered" {
-                connections.get_mut(&1).unwrap().answer_barrier()?;
+                connections
+                    .get_mut(&1)
+                    .unwrap()
+                    .answer_barrier()
+                    .map_err(|error| {
+                        io::Error::new(error.kind(), format!("answer barrier: {error}"))
+                    })?;
                 let until = Instant::now() + WAIT;
                 while child && child_dispatches(fixture) == 0 {
                     if mode.cut() && host.child.as_mut().unwrap().try_wait()?.is_some() {
@@ -442,7 +493,16 @@ fn replay(
                 .unwrap()
                 .send(&serde_json::to_value(frame)?)?;
         } else if entry["direction"] == "host" {
-            let actual = connections.get_mut(&id).unwrap().control()?;
+            let actual = connections
+                .get_mut(&id)
+                .unwrap()
+                .control()
+                .map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!("waiting for captured {}: {error}", entry["frame"]["frame"]),
+                    )
+                })?;
             if before.is_some() {
                 bindings.compare_after_reconcile(&entry["frame"], &actual);
             } else {

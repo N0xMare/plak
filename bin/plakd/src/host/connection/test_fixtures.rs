@@ -39,8 +39,8 @@ pub(crate) fn connection(
     host.connect(outbox.clone(), Face::Remote, principal, || false)
         // Synchronous preparation avoids a paused test clock racing a
         // blocking encoder. The real ordered page cursor is still used.
-        .with_snapshot_output(move |attachment, snapshot| {
-            snapshots.snapshot_inline(attachment, snapshot)
+        .with_snapshot_output(move |attachment, snapshot, _| {
+            snapshots.snapshot_inline(attachment, snapshot, None)
         })
 }
 

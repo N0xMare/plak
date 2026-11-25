@@ -61,20 +61,15 @@ fn profile_differences(
             profile: row.root.effort.clone(),
         });
     }
-    let session_fast = session.service_tier.is_some();
-    if session_fast != row.root.fast {
-        differences.push(Difference::RootFast {
-            session: session_fast,
+    let tier = session
+        .service_tier
+        .as_deref()
+        .map(|tier| if tier == "priority" { "fast" } else { tier });
+    if tier != row.root.service_tier.as_deref() {
+        differences.push(Difference::RootServiceTier {
+            session: session.service_tier.clone(),
         });
     }
-    // Protocol 12 cannot describe a Fast/Ultrafast distinction. Keep the
-    // comparison exact without inventing a different Fast toggle.
-    let named_tier_differs = session_fast
-        && row.root.fast
-        && session.service_tier.as_deref()
-            != config
-                .root_template()
-                .and_then(|root| root.extra.as_deref());
     let roster = crate::roster_input::roster_input_from_config(
         config,
         row.root.account.clone(),
@@ -95,9 +90,7 @@ fn profile_differences(
                 differences.push(Difference::Card(name.to_string()));
             }
         }
-        if named_tier_differs
-            || (differences.is_empty() && frozen.templates_digest != roster.templates_digest)
-        {
+        if differences.is_empty() && frozen.templates_digest != roster.templates_digest {
             differences.push(Difference::Roster);
         }
     } else {
@@ -213,6 +206,12 @@ fn session_profile_row(
                 model: card.tuple_id.clone(),
                 effort: card.effort.clone().unwrap_or_else(|| "default".to_owned()),
                 fast,
+                service_tier: match &card.processing_tier {
+                    plakous::model::ProcessingTierDisposition::ProviderNamed(tier) => {
+                        Some(tier.to_string())
+                    }
+                    plakous::model::ProcessingTierDisposition::Standard => None,
+                },
                 depth,
             }
         })
@@ -235,6 +234,7 @@ fn session_profile_row(
                 .unwrap_or_else(|| "not attached".to_owned()),
             effort: effort.to_owned(),
             fast: session.service_tier.is_some(),
+            service_tier: session.service_tier.clone(),
             depth: 0,
         },
         cards,

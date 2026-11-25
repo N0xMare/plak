@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "isolated host read fixtures")]
 
 use super::*;
+use plakous_host_protocol::wire::decode_line;
 use plakous_host_protocol::{Never, ProtocolExtension};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::task::{Context, Poll, Waker};

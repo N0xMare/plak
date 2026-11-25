@@ -585,18 +585,20 @@ where
         opened.worker.watch_directory(notify.clone());
     }
     let roots = opened.roots;
+    let mut session = WireSession::start_counted(
+        opened.root,
+        opened.session_id,
+        opened.actions,
+        opened.events,
+        move |id| roots(id),
+        &opened.attachments,
+    )
+    .with_runner_pending(opened.runner_pending);
+    session
+        .root_transcript
+        .clone_from(&opened.worker.root_transcript);
     Slot::Resident {
-        session: Arc::new(
-            WireSession::start_counted(
-                opened.root,
-                opened.session_id,
-                opened.actions,
-                opened.events,
-                move |id| roots(id),
-                &opened.attachments,
-            )
-            .with_runner_pending(opened.runner_pending),
-        ),
+        session: Arc::new(session),
         worker: opened.worker,
         attachments: opened.attachments,
     }

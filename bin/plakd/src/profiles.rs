@@ -504,6 +504,7 @@ fn role(label: &str, template: &AgentTemplate, depth: usize) -> ProfileRole {
             .clone()
             .unwrap_or_else(|| "default".to_owned()),
         fast: template.service_tier().is_some(),
+        service_tier: template.service_tier().map(str::to_owned),
         depth,
     }
 }

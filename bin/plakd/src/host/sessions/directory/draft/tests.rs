@@ -5,6 +5,7 @@ use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptRow};
 use plakous_host_protocol::wire::SessionResidency;
 use plakous_hosted::host_service::{KeptActivity, KeptDirectoryAttention};
 use plakous_hosted::sessions::projector::{SessionViews, ViewWrites};
+use std::sync::Arc;
 
 #[test]
 fn draft_differences_preserve_the_exact_named_session_tier() {
@@ -46,7 +47,7 @@ fn publication_and_list_project_the_same_draft_row_and_clear_live_attention() {
     let mut record = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
     store.commit(&mut record).unwrap();
     let tree = Arc::new(crate::store::tree::open_tree_store(&paths).unwrap());
-    let directory = Directory::start_draft(&paths, tree).unwrap();
+    let directory = Directory::start(&paths, tree).unwrap();
     let (observed, slot_changes) = watch::channel(0_u64);
     let mut listener = Watch::new(directory.changes(), slot_changes);
     let mut slots = BTreeMap::new();

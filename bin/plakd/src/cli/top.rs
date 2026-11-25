@@ -510,10 +510,8 @@ impl TopCommand {
                 idle_release: idle_release.map(std::time::Duration::from_secs),
             })),
             Self::Wire {
-                action: Some(WireAction::Schema { protocol }),
-            } => Ok(Command::WireSchema {
-                draft: protocol.is_some(),
-            }),
+                action: Some(WireAction::Schema),
+            } => Ok(Command::WireSchema),
             Self::Wire { action: None } => Ok(Command::CommandHelp {
                 command: "wire".into(),
             }),

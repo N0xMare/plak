@@ -443,12 +443,10 @@ async fn connection(
     drop(first);
     let stop = Arc::clone(&stopped);
     let principal = plakous_hosted::host_service::wire::HostPrincipal::Socket(uid);
-    let admitted = handshake::<PlakExtension>(
-        &hellos,
-        host.welcome_for(&principal),
-        &mut outbox.clone(),
-        &move || stop(),
-    );
+    let welcome = host.welcome_for(&principal);
+    let generation = welcome.host_generation;
+    let admitted =
+        handshake::<PlakExtension>(&hellos, welcome, &mut outbox.clone(), &move || stop());
     if send(&mut write, &outbox, &*stopped).await.is_err() || !matches!(admitted, Ok(true)) {
         return;
     }
@@ -457,7 +455,12 @@ async fn connection(
     let mut connection = host
         .connect(outbox.clone(), Face::Remote, principal, move || stop())
         .buffered_output()
-        .with_snapshot_output(move |attachment, snapshot| snapshots.snapshot(attachment, snapshot));
+        .with_blob_refusal_output(crate::draft_wire::write_blob_refusal)
+        .with_lifecycle_output(crate::draft_wire::write_lifecycle)
+        .with_attachment_status(super::protocol_13::status)
+        .with_snapshot_output(move |attachment, snapshot, retained| {
+            snapshots.snapshot_v13(generation, attachment, snapshot, retained)
+        });
     attached(reader, write, &mut connection, &outbox, host, &stopped).await;
     drop(place);
 }

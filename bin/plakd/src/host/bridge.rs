@@ -6,10 +6,10 @@ use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::surface_protocol::PlakExtension;
 use crate::test_hooks::host_lifecycle::{bridge_discovery_window, bridge_start_blocked};
 use crate::wire_transport::hosts;
 use crate::{CliFailure, CliResult, ProcessOutcome, product_paths::PlakPaths};
+use plakd_wire_types::v13;
 use plakous_host_protocol::wire::{
     BridgeUnavailableReason, ClientFrame, HandshakeRefusal, HostFrame, MAX_LINE_BYTES,
     WIRE_VERSION, decode_line, encode_line,
@@ -26,7 +26,13 @@ pub(super) fn connect(paths: &PlakPaths, auto_start: bool) -> CliResult<ProcessO
             return Ok(ProcessOutcome::Success);
         }
     };
-    let Ok(ClientFrame::<PlakExtension>::Hello(hello)) = decode_line(&line) else {
+    let Ok(v13::ClientFrame::Shared(frame)) = decode_line(&line) else {
+        refuse(HandshakeRefusal::Malformed {
+            detail: "the first frame must be hello".into(),
+        })?;
+        return Ok(ProcessOutcome::Success);
+    };
+    let ClientFrame::Hello(hello) = frame.into_inner() else {
         refuse(HandshakeRefusal::Malformed {
             detail: "the first frame must be hello".into(),
         })?;
@@ -84,8 +90,9 @@ fn hello() -> Result<String, HandshakeRefusal> {
 }
 
 fn refuse(reason: HandshakeRefusal) -> CliResult<()> {
-    let line = encode_line(&HostFrame::<PlakExtension>::Refused(reason))
-        .map_err(|_| CliFailure::new("cannot encode bridge refusal"))?;
+    let frame = v13::HostFrame::unchanged(HostFrame::Refused(reason))
+        .ok_or_else(|| CliFailure::new("cannot project bridge refusal"))?;
+    let line = encode_line(&frame).map_err(|_| CliFailure::new("cannot encode bridge refusal"))?;
     let mut output = io::stdout().lock();
     output
         .write_all(line.as_bytes())

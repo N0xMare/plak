@@ -7,45 +7,35 @@ use std::collections::BTreeSet;
 use std::io::Write;
 
 use plakd_wire_types::v13;
-use plakous_host_protocol::wire::{ClientFrame, HostFrame, WIRE_VERSION};
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 use schemars::{JsonSchema, generate::SchemaSettings};
 use serde_json::Value;
-
-use crate::surface_protocol::PlakExtension;
 
 /// The schema document: `client_frame` and `host_frame` reference their
 /// definitions under `$defs`.
 #[must_use]
 pub(crate) fn document() -> Value {
-    schema(crate::build_identity::known_binary_id())
+    schema(Some(crate::build_identity::binary_id().to_owned()))
 }
 
 fn schema(binary_id: Option<String>) -> Value {
-    frame_schema::<ClientFrame<PlakExtension>, HostFrame<PlakExtension>>(WIRE_VERSION, binary_id)
+    frame_schema::<v13::ClientFrame, v13::HostFrame>(binary_id)
 }
 
-fn draft_schema() -> Value {
-    frame_schema::<v13::ClientFrame, v13::HostFrame>(v13::WIRE_VERSION, None)
-}
-
-fn frame_schema<C: JsonSchema, H: JsonSchema>(version: u32, binary_id: Option<String>) -> Value {
+fn frame_schema<C: JsonSchema, H: JsonSchema>(binary_id: Option<String>) -> Value {
     let mut generator = SchemaSettings::draft2020_12().into_generator();
     let client = generator.subschema_for::<C>();
     let host = generator.subschema_for::<H>();
     let mut definitions = generator.take_definitions(true);
-    if version == v13::WIRE_VERSION {
-        // The draft shares unchanged v12 cases. Schemars can discover definitions
-        // for replaced cases before the draft DTOs remove those branches.
-        let mut reachable = BTreeSet::new();
-        visit_schema_refs(client.as_value(), &definitions, &mut reachable);
-        visit_schema_refs(host.as_value(), &definitions, &mut reachable);
-        definitions.retain(|name, _| reachable.contains(name.as_str()));
-    }
+    // Schemars may discover definitions before the shared DTOs remove replaced branches.
+    let mut reachable = BTreeSet::new();
+    visit_schema_refs(client.as_value(), &definitions, &mut reachable);
+    visit_schema_refs(host.as_value(), &definitions, &mut reachable);
+    definitions.retain(|name, _| reachable.contains(name.as_str()));
     serde_json::json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "plakd wire v2",
-        "wire_version": version,
+        "wire_version": v13::WIRE_VERSION,
         "binary_id": binary_id,
         "client_frame": client,
         "host_frame": host,
@@ -94,13 +84,13 @@ fn visit_schema_refs(
     }
 }
 
-/// Prints the selected schema as one pretty JSON document.
+/// Prints the serving schema as one pretty JSON document.
 ///
 /// # Errors
 ///
 /// A lost stdout.
-pub(crate) fn print(stdout: &mut dyn Write, draft: bool) -> CliResult<ProcessOutcome> {
-    let schema = if draft { draft_schema() } else { document() };
+pub(crate) fn print(stdout: &mut dyn Write) -> CliResult<ProcessOutcome> {
+    let schema = document();
     let text = serde_json::to_string_pretty(&schema)
         .map_err(|_| CliFailure::new("plakd wire schema could not encode its schema"))?;
     writeln!(stdout, "{text}").map_err(|_| CliFailure::new("stdout failed"))?;

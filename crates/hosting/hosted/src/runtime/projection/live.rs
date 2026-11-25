@@ -32,6 +32,7 @@ pub(crate) struct LiveTarget {
     pub(crate) followed: SessionLocator,
     pub(crate) tree_id: String,
     pub(crate) emit_settled: Arc<dyn Fn(TranscriptRow) + Send + Sync>,
+    pub(crate) publish_cursor: Arc<dyn Fn(plakous::sessions::feed::FeedSeq) + Send + Sync>,
 }
 
 impl LiveTarget {
@@ -511,6 +512,7 @@ async fn run(
                     &mut shown,
                     &*request.target.emit_settled,
                 );
+                (request.target.publish_cursor)(projected.views.cursor);
             } else {
                 shown.initialized = false;
                 #[cfg(test)]

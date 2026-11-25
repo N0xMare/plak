@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use plakd_wire_types::v13::{
     AnswerV13, Baseline, HostFrameV13, LiveRowLength, PAGE_TARGET_BYTES, PageItem, RetainedRevision,
@@ -51,16 +51,44 @@ pub(super) fn baseline(
     target: BaselineTarget,
     live: LiveTail,
 ) -> Result<Vec<HostFrameV13>, HistoryError> {
+    let mut seen = HashSet::new();
+    let mut calls = HashMap::new();
+    for item in &page.items {
+        if let TranscriptRow::User {
+            text,
+            sent_at_ms: Some(sent_at_ms),
+        } = &item.row
+        {
+            seen.insert((text.clone(), *sent_at_ms));
+        }
+        if let Some(id) = item.row.call_id() {
+            calls.insert(id.to_owned(), item.key);
+        }
+    }
     let mut by_key: BTreeMap<_, _> = std::mem::take(&mut page.items)
         .into_iter()
         .map(|item| (item.key, item.row))
         .collect();
-    by_key.extend(
-        live.upserts
-            .into_iter()
-            .filter(|item| item.key.anchor >= page.from)
-            .map(|item| (item.key, item.row)),
-    );
+    for item in live
+        .upserts
+        .into_iter()
+        .filter(|item| item.key.anchor >= page.from)
+    {
+        if RootTranscript::is_provisional(item.key) {
+            if let TranscriptRow::User {
+                text,
+                sent_at_ms: Some(sent_at_ms),
+            } = &item.row
+                && seen.contains(&(text.clone(), *sent_at_ms))
+            {
+                continue;
+            }
+            if let Some(key) = item.row.call_id().and_then(|id| calls.get(id)) {
+                by_key.remove(key);
+            }
+        }
+        by_key.insert(item.key, item.row);
+    }
     let items = by_key
         .into_iter()
         .map(|(key, row)| TranscriptItem { key, row });

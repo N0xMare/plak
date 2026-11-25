@@ -480,7 +480,7 @@ where
     P::Intent: Serialize + DeserializeOwned + Send,
     P::Observation: Serialize + DeserializeOwned + Send,
 {
-    connect_rooted(transport, hello, None, false)
+    connect_rooted(transport, hello, None, false, shared_frame)
 }
 
 /// [`connect`] to a host of many sessions, whose welcome names none: the
@@ -500,7 +500,25 @@ where
     P::Intent: Serialize + DeserializeOwned + Send,
     P::Observation: Serialize + DeserializeOwned + Send,
 {
-    connect_rooted(transport, hello, Some(root), false)
+    connect_to_with(transport, hello, root, shared_frame)
+}
+
+/// Attach to an explicit root using a product-specific host frame projection.
+///
+/// # Errors
+/// As [`connect_to`].
+pub fn connect_to_with<P>(
+    transport: Transport,
+    hello: Hello,
+    root: NodeAddress,
+    decode: Decode<P>,
+) -> Result<Connected<P>, ConnectError>
+where
+    P: ProtocolExtension,
+    P::Intent: Serialize + DeserializeOwned + Send,
+    P::Observation: Serialize + DeserializeOwned + Send,
+{
+    connect_rooted(transport, hello, Some(root), false, decode)
 }
 
 /// Says hello to a session directory without attaching a node. The caller
@@ -519,7 +537,36 @@ where
     P::Intent: Serialize + DeserializeOwned + Send,
     P::Observation: Serialize + DeserializeOwned + Send,
 {
-    connect_rooted(transport, hello, None, true)
+    connect_directory_with(transport, hello, shared_frame)
+}
+
+type Decode<P> = fn(&str) -> Result<Option<HostFrame<P>>, WireError>;
+
+fn shared_frame<P>(line: &str) -> Result<Option<HostFrame<P>>, WireError>
+where
+    P: ProtocolExtension,
+    P::Intent: DeserializeOwned,
+    P::Observation: DeserializeOwned,
+{
+    decode_host_line(line).map(Some)
+}
+
+/// Open a directory connection with a product-specific host frame projection.
+/// The decoder can ignore advisory frames the caller does not use.
+///
+/// # Errors
+/// As [`connect_directory`].
+pub fn connect_directory_with<P>(
+    transport: Transport,
+    hello: Hello,
+    decode: Decode<P>,
+) -> Result<Connected<P>, ConnectError>
+where
+    P: ProtocolExtension,
+    P::Intent: Serialize + DeserializeOwned + Send,
+    P::Observation: Serialize + DeserializeOwned + Send,
+{
+    connect_rooted(transport, hello, None, true, decode)
 }
 
 fn connect_rooted<P>(
@@ -527,6 +574,7 @@ fn connect_rooted<P>(
     hello: Hello,
     root: Option<NodeAddress>,
     directory: bool,
+    decode: Decode<P>,
 ) -> Result<Connected<P>, ConnectError>
 where
     P: ProtocolExtension,
@@ -581,9 +629,9 @@ where
         }
     }
     let welcome = match first {
-        Some(Ok(line)) => match decode_host_line::<P>(&line).map_err(ConnectError::Wire)? {
-            HostFrame::Welcome(welcome) => welcome,
-            HostFrame::Refused(refusal) => return Err(ConnectError::Refused(refusal)),
+        Some(Ok(line)) => match decode(&line).map_err(ConnectError::Wire)? {
+            Some(HostFrame::Welcome(welcome)) => welcome,
+            Some(HostFrame::Refused(refusal)) => return Err(ConnectError::Refused(refusal)),
             _ => return Err(ConnectError::Closed),
         },
         Some(Err(error)) => return Err(ConnectError::Wire(error)),
@@ -601,7 +649,7 @@ where
         inner.attach(&mut state).map_err(ConnectError::Io)?;
     }
     let follower = Arc::clone(&inner);
-    thread::spawn(move || follower.follow(&mut lines));
+    thread::spawn(move || follower.follow(&mut lines, decode));
     let connection = Arc::new(Connection { inner });
     Ok((
         WireSender {
@@ -1214,7 +1262,7 @@ impl<P: ProtocolExtension> Inner<P> {
     }
 
     /// Reads and follows the host until the transport ends.
-    fn follow(&self, lines: &mut Lines)
+    fn follow(&self, lines: &mut Lines, decode: Decode<P>)
     where
         P::Intent: Serialize + DeserializeOwned,
         P::Observation: DeserializeOwned,
@@ -1222,8 +1270,9 @@ impl<P: ProtocolExtension> Inner<P> {
         let mut ended = "the host closed the transport".to_owned();
         while let Some(line) = lines.next_line() {
             // A line the client cannot read leaves the connection.
-            let frame = match line.and_then(|line| decode_host_line::<P>(&line)) {
-                Ok(frame) => frame,
+            let frame = match line.and_then(|line| decode(&line)) {
+                Ok(Some(frame)) => frame,
+                Ok(None) => continue,
                 Err(error) => {
                     ended = format!("an unreadable host frame: {error}");
                     break;

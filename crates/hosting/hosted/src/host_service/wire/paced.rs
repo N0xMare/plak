@@ -48,7 +48,7 @@ where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
-    /// Installs the draft status projection. No current listener selects it.
+    /// Installs the product's attachment status projection.
     #[must_use]
     pub fn with_attachment_status(mut self, output: AttachmentStatusOutput) -> Self {
         self.status_output = Some(output);

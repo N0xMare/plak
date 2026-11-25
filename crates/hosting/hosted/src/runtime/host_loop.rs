@@ -236,6 +236,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     fn live_target(&mut self) -> super::projection::live::LiveTarget {
         let rows = self.role.config.topology_rows();
         let events = self.role.events.clone();
+        let history = events.clone();
+        let product_id = self.role.config.session.id.clone();
         self.role
             .pending_usage
             .lock()
@@ -253,6 +255,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .resolved_id(&rows, &self.role.config.session),
             emit_settled: std::sync::Arc::new(move |row| {
                 let _ = events.send(ContentEvent::Row(row));
+            }),
+            publish_cursor: std::sync::Arc::new(move |cursor| {
+                history.advance_root_history(&product_id, cursor);
             }),
         }
     }

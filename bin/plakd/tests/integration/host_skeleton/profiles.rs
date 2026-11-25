@@ -123,27 +123,57 @@ pub(super) fn wait_idle(client: &mut Client, session: &str) {
 }
 
 fn attach_history(host: &Host, node: &NodeAddress, answer: &str) -> String {
+    use plakd_wire_types::v13;
+
     let mut client = Client::connect(host);
     let attachment = client.attach(1, node);
-    let mut snapshot = plakous_host_protocol::wire::SnapshotAssembler::default();
-    let mut transcript = plakous_host_protocol::views::transcript::TranscriptState::default();
+    let mut items = Vec::new();
+    let mut id = 1;
     loop {
-        match client.next() {
-            HostFrame::Snapshot(page) if page.attachment == attachment => {
-                if let Some(snapshot) = snapshot.push(page).unwrap() {
-                    transcript.replace(snapshot).unwrap();
-                }
+        let line = client.read_wire_line();
+        let v13::HostFrame::Draft(frame) = decode_line(line.trim_end()).unwrap() else {
+            continue;
+        };
+        let (page, last, older) = match *frame {
+            v13::HostFrameV13::Snapshot(page) if page.attachment == attachment => {
+                (page.items, page.last, page.older_cursor)
             }
-            HostFrame::Event {
-                attachment: held,
-                observation: SessionObservation::TranscriptPatch(patch),
+            v13::HostFrameV13::HistoryPage {
+                id: request,
+                items,
+                last,
+                older_cursor,
                 ..
-            } if held == attachment => transcript.apply(patch).unwrap(),
+            } if request == id => (items, last, older_cursor),
+            v13::HostFrameV13::Response {
+                id: request,
+                outcome,
+            } if request == id => {
+                assert!(matches!(outcome, v13::Outcome::Ok(value)
+                    if matches!(*value, v13::Answer::Draft(v13::AnswerV13::HistoryStarted))));
+                continue;
+            }
             _ => continue,
-        }
-        let history = format!("{transcript:?}");
-        if history.contains(answer) {
-            return history;
+        };
+        items.extend(page);
+        if last {
+            let Some(cursor) = older else {
+                let history = format!("{items:?}");
+                assert!(history.contains(answer), "missing {answer:?} in {history}");
+                return history;
+            };
+            id += 1;
+            let request = v13::ClientFrameV13::Request {
+                id,
+                op: Box::new(v13::Op::Draft(v13::OpV13::OlderHistory {
+                    attachment,
+                    cursor,
+                })),
+            };
+            client
+                .stream
+                .write_all(encode_line(&request).unwrap().as_bytes())
+                .unwrap();
         }
     }
 }

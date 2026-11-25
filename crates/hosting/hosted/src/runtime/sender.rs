@@ -12,6 +12,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 #[derive(Clone)]
 pub struct RootTranscript(Arc<Mutex<Presentations>>);
 
+impl std::fmt::Debug for RootTranscript {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RootTranscript").finish_non_exhaustive()
+    }
+}
+
 /// One resident transcript revision and its uncommitted contribution to a page.
 pub struct RootHistoryCapture {
     /// The feed sequence used to assemble the last canonical publication.
@@ -82,6 +88,13 @@ impl RootTranscript {
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
+    pub(crate) fn advance_root_history(&self, session: &str, applied: FeedSeq) {
+        self.presentations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .advance_root_history(session, applied);
+    }
+
     pub(crate) fn publish_root_projection(
         &self,
         session: &str,
@@ -119,7 +132,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         } else {
             presentations.publish(snapshot, &self.inner)
         };
-        presentations.mark_root_publication(session, applied.filter(|_| published));
+        presentations.mark_root_publication(
+            session,
+            published.then(|| applied.unwrap_or(FeedSeq::new(0))),
+        );
         published
     }
 
@@ -146,7 +162,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
     }
 
     /// Wrap an observation channel for a product consuming keyed root
-    /// appends. Do not use this on the v12 or JSONL serving path.
+    /// appends. This does not change the separate JSONL projection.
     #[must_use]
     pub fn over_keyed_root(
         inner: crate::surface_protocol::HostEventSender<P>,

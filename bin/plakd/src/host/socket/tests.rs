@@ -610,22 +610,32 @@ fn an_admitted_connection_is_welcomed_to_the_directory_and_a_stop_ends_the_host(
     stop.store(true, Ordering::Release);
     let bound = server.join().unwrap();
     // A planned notice precedes the transport's EOF.
-    assert_stopping(next(&mut reader));
+    assert_stopping(&mut reader);
     let mut rest = String::new();
     assert_eq!(reader.read_line(&mut rest).unwrap(), 0, "{rest}");
     bound.remove();
     assert!(!socket.exists());
 }
 
-fn assert_stopping(frame: HostFrame<PlakExtension>) {
+fn assert_stopping(reader: &mut BufReader<std::os::unix::net::UnixStream>) {
+    use plakd_wire_types::v13::{HostFrameV13, HostLifecyclePhase, HostLifecycleReason};
+
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let plakd_wire_types::v13::HostFrame::Draft(frame) =
+        plakous_host_protocol::wire::decode_line(&line).unwrap()
+    else {
+        panic!("expected a protocol 13 lifecycle frame");
+    };
     assert!(matches!(
-        frame,
-        HostFrame::HostLifecycle {
+        *frame,
+        HostFrameV13::HostLifecycle {
             host_generation: 7,
-            phase: plakd_wire_types::lifecycle::HostLifecyclePhase::Stopping,
-            reason: plakd_wire_types::lifecycle::HostLifecycleReason::Shutdown,
+            phase: HostLifecyclePhase::Stopping,
+            reason: HostLifecycleReason::Shutdown,
             target: None,
             retry_after_ms: None,
+            ..
         }
     ));
 }

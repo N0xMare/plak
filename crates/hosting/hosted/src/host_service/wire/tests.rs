@@ -66,7 +66,7 @@ fn a_too_large_paced_patch_requests_a_fresh_scope_without_closing() {
     use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem, TranscriptPatch};
     let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
     let mut connection = WireConnection::new(root(), Vec::new(), actions)
-        .with_snapshot_output(Some(std::sync::Arc::new(|_, _| Ok(()))));
+        .with_snapshot_output(Some(std::sync::Arc::new(|_, _, _| Ok(()))));
     connection
         .service
         .observe(SessionObservation::PresentationSnapshot(
@@ -624,13 +624,13 @@ fn the_hello_wait_ends_at_its_deadline_or_a_stop() {
 }
 
 #[test]
-fn protocol_ten_is_explicitly_refused_before_any_attachment() {
+fn protocol_twelve_is_explicitly_refused_before_any_attachment() {
     use plakous_host_protocol::Core;
     use plakous_host_protocol::wire::Hello;
     let (sender, lines) = lines(1);
     sender
         .send(Ok(encode_line(&ClientFrame::<Core>::Hello(Hello {
-            proto: 10,
+            proto: 12,
             binary_id: "old-client".into(),
             caps: Vec::new(),
         }))
@@ -641,8 +641,8 @@ fn protocol_ten_is_explicitly_refused_before_any_attachment() {
     assert!(matches!(
         host_frames(&stdout).as_slice(),
         [HostFrame::Refused(HandshakeRefusal::VersionMismatch {
-            host: 12,
-            client: 10
+            host: WIRE_VERSION,
+            client: 12
         })]
     ));
 }

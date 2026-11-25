@@ -13,7 +13,7 @@ where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
-    /// Supplies the unserved draft blob projection before the first client frame.
+    /// Supplies the product's blob refusal projection before the first client frame.
     #[must_use]
     pub const fn with_blob_refusal_output(mut self, output: BlobRefusalOutput) -> Self {
         self.blob_refusal_output = Some(output);

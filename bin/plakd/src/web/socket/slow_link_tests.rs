@@ -107,7 +107,7 @@ fn archived_connection(served: &Served, outbox: &Outbox) -> Connection {
             plakous_hosted::host_service::wire::HostPrincipal::Web("fixture".into()),
             || false,
         )
-        .with_snapshot_output(move |attachment, snapshot| {
+        .with_snapshot_output(move |attachment, snapshot, _| {
             for page in page_snapshot(snapshot, attachment).unwrap() {
                 let line = encode_line(&HostFrame::<PlakExtension>::Snapshot(page)).unwrap();
                 snapshots.clone().write_all(line.as_bytes()).unwrap();

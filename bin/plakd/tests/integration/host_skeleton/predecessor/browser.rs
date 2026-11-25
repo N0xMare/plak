@@ -1,5 +1,6 @@
 use super::*;
 use crate::web_endpoint::upgrade_at;
+use plakd_wire_types::v13;
 use plakous_host_protocol::SessionObservation;
 use plakous_host_protocol::observation::TurnPhase;
 use plakous_host_protocol::views::transcript::{TranscriptRow, TranscriptStreamDelta};
@@ -16,19 +17,20 @@ pub(super) struct Browser {
 }
 
 impl Browser {
-    pub(super) fn connect(path: &Path, cookie: &str) -> Self {
+    pub(super) fn connect(path: &Path, cookie: &str, protocol: u32) -> Self {
         let mut socket = upgrade_at(path, cookie);
         send(
             &mut socket,
             &ClientFrame::Hello(Hello {
-                proto: WIRE_VERSION,
+                proto: protocol,
                 binary_id: "install-predecessor".into(),
                 caps: Vec::new(),
             }),
         );
-        let HostFrame::Welcome(welcome) = next(&mut socket).unwrap() else {
+        let HostFrame::Welcome(welcome) = next(&mut socket, protocol).unwrap() else {
             panic!("web welcome missing");
         };
+        assert_eq!(welcome.proto, protocol);
         Self {
             socket,
             welcome,
@@ -48,7 +50,7 @@ impl Browser {
             },
         );
         loop {
-            match next(&mut self.socket).unwrap() {
+            match next(&mut self.socket, self.welcome.proto).unwrap() {
                 HostFrame::Response { id, outcome } => {
                     assert_eq!(id, self.sequence);
                     return outcome;
@@ -59,7 +61,9 @@ impl Browser {
     }
 
     fn next(&mut self) -> Option<HostFrame<PlakExtension>> {
-        self.pending.pop_front().or_else(|| next(&mut self.socket))
+        self.pending
+            .pop_front()
+            .or_else(|| next(&mut self.socket, self.welcome.proto))
     }
 
     pub(super) fn attach(&mut self, node: &NodeAddress) {
@@ -94,7 +98,9 @@ impl Browser {
                 observation:
                     SessionObservation::AssistantDelta(delta)
                     | SessionObservation::TranscriptStream {
-                        delta: TranscriptStreamDelta::Assistant(delta),
+                        delta:
+                            TranscriptStreamDelta::Assistant(delta)
+                            | TranscriptStreamDelta::Keyed { text: delta, .. },
                         ..
                     },
                 ..
@@ -107,25 +113,78 @@ impl Browser {
         }
     }
 
-    pub(super) fn snapshot_contains(&mut self, expected: &[&str]) {
+    pub(super) fn history_contains(&mut self, expected: &[&str]) {
+        let until = Instant::now() + WAIT;
+        let attachment = self.attachment;
         let mut rows = Vec::new();
+        let mut cursor = None;
         loop {
-            if let HostFrame::Snapshot(page) = self.next().unwrap()
-                && page.attachment == self.attachment
-            {
-                rows.extend(page.items.into_iter().filter_map(|item| match item.row {
-                    TranscriptRow::Assistant { text } => Some(text),
-                    _ => None,
-                }));
-                if page.last {
-                    break;
+            let v13::HostFrame::Draft(frame) = next_until(
+                &mut self.socket,
+                until,
+                || {},
+                |text| Some(decode_line::<v13::HostFrame>(text).unwrap()),
+            )
+            .unwrap() else {
+                continue;
+            };
+            let (page, last, older) = match *frame {
+                v13::HostFrameV13::Snapshot(page) if page.attachment == attachment => {
+                    (page.items, page.last, page.older_cursor)
                 }
+                v13::HostFrameV13::HistoryPage {
+                    attachment: owner,
+                    id,
+                    items,
+                    last,
+                    older_cursor,
+                    ..
+                } if owner == attachment && id == self.sequence => (items, last, older_cursor),
+                v13::HostFrameV13::Response { id, outcome } if id == self.sequence => {
+                    assert!(matches!(outcome, v13::Outcome::Ok(answer)
+                        if matches!(*answer, v13::Answer::Draft(v13::AnswerV13::HistoryStarted))));
+                    continue;
+                }
+                _ => continue,
+            };
+            rows.extend(page.into_iter().filter_map(|item| match item.row.0 {
+                TranscriptRow::Assistant { text } => Some(text),
+                _ => None,
+            }));
+            if !last {
+                continue;
+            }
+            if expected
+                .iter()
+                .all(|text| rows.iter().any(|row| row.contains(text)))
+            {
+                break;
+            }
+            if let Some(older) = older {
+                assert_ne!(
+                    cursor.as_ref(),
+                    Some(&older),
+                    "older cursor did not advance"
+                );
+                cursor = Some(older.clone());
+                self.sequence += 1;
+                let line = encode_line(&v13::ClientFrameV13::Request {
+                    id: self.sequence,
+                    op: Box::new(v13::Op::Draft(v13::OpV13::OlderHistory {
+                        attachment,
+                        cursor: older,
+                    })),
+                })
+                .unwrap();
+                self.socket.send(Message::text(line)).unwrap();
+            } else {
+                break;
             }
         }
         for text in expected {
             assert!(
                 rows.iter().any(|row| row.contains(text)),
-                "snapshot lost {text:?}: {rows:?}"
+                "history lost {text:?}: {rows:?}"
             );
         }
     }
@@ -144,10 +203,11 @@ impl Browser {
                 Instant::now() < deadline,
                 "lifecycle {expected:?} was not sent"
             );
-            let frame = self
-                .pending
-                .pop_front()
-                .or_else(|| next_until(&mut self.socket, deadline, &mut check_upgrade));
+            let frame = self.pending.pop_front().or_else(|| {
+                next_until(&mut self.socket, deadline, &mut check_upgrade, |text| {
+                    decode(text, self.welcome.proto)
+                })
+            });
             match frame.unwrap() {
                 HostFrame::HostLifecycle {
                     host_generation,
@@ -207,15 +267,29 @@ fn terminal(frame: &HostFrame<PlakExtension>, current: u64) -> Option<TurnPhase>
     }
 }
 
-fn next(socket: &mut WebSocket<UnixStream>) -> Option<HostFrame<PlakExtension>> {
-    next_until(socket, Instant::now() + WAIT, || {})
+fn next(socket: &mut WebSocket<UnixStream>, protocol: u32) -> Option<HostFrame<PlakExtension>> {
+    next_until(
+        socket,
+        Instant::now() + WAIT,
+        || {},
+        |text| decode(text, protocol),
+    )
 }
 
-fn next_until(
+fn decode(text: &str, protocol: u32) -> Option<HostFrame<PlakExtension>> {
+    if protocol == WIRE_VERSION {
+        crate::protocol_13::decode(text).unwrap()
+    } else {
+        Some(decode_line(text).unwrap())
+    }
+}
+
+fn next_until<T>(
     socket: &mut WebSocket<UnixStream>,
     deadline: Instant,
     mut check: impl FnMut(),
-) -> Option<HostFrame<PlakExtension>> {
+    decode: impl Fn(&str) -> Option<T>,
+) -> Option<T> {
     socket
         .get_mut()
         .set_read_timeout(Some(Duration::from_millis(250)))
@@ -227,7 +301,11 @@ fn next_until(
             "no web frame before the deadline"
         );
         match socket.read() {
-            Ok(Message::Text(text)) => return Some(decode_line(text.as_str()).unwrap()),
+            Ok(Message::Text(text)) => {
+                if let Some(frame) = decode(text.as_str()) {
+                    return Some(frame);
+                }
+            }
             Ok(Message::Ping(_) | Message::Pong(_)) => {}
             Ok(Message::Close(_))
             | Err(

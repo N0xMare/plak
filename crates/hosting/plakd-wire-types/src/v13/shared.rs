@@ -1,4 +1,4 @@
-//! Reuse only the unchanged cases of tagged v12 DTOs during the draft.
+//! Reuse the unchanged cases of the common dispatcher DTOs.
 
 use plakous_host_protocol::wire;
 use plakous_host_protocol::{SessionObservation, views::transcript::TranscriptPatch};
@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::{PlakExtension, SurfaceObservation, console};
 
 // Use the same set of tags in the decoder and schema. No unchecked constructor
-// is exposed: even a typed v12 value must pass the tag check to enter v13.
+// is exposed: each constructor admits only the cases shared by protocol 13.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct Shared<T>(T);
@@ -18,6 +18,11 @@ impl<T> Shared<T> {
     #[must_use]
     pub const fn as_inner(&self) -> &T {
         &self.0
+    }
+
+    #[must_use]
+    pub fn into_inner(self) -> T {
+        self.0
     }
 }
 
@@ -102,6 +107,29 @@ impl Cases for wire::HostFrame<PlakExtension> {
     ];
 }
 
+impl super::HostFrame {
+    /// Reuse the handshake, delivery and connection controls unchanged.
+    pub fn unchanged(frame: wire::HostFrame<PlakExtension>) -> Option<Self> {
+        use wire::HostFrame as F;
+        match frame {
+            F::Welcome(_)
+            | F::Refused(_)
+            | F::TerminalStream { .. }
+            | F::Blob(_)
+            | F::ResyncRequired { .. }
+            | F::Moved { .. }
+            | F::Detached { .. }
+            | F::Bye => Some(Self::Shared(Box::new(Shared(frame)))),
+            F::Response { .. }
+            | F::Event { .. }
+            | F::Snapshot(_)
+            | F::Directory { .. }
+            | F::OptionsProgress { .. }
+            | F::HostLifecycle { .. } => None,
+        }
+    }
+}
+
 pub type SharedOp = Shared<wire::Op<PlakExtension>>;
 impl Cases for wire::Op<PlakExtension> {
     const NAME: &'static str = "SharedOp";
@@ -114,6 +142,16 @@ impl Cases for wire::Answer<PlakExtension> {
     const NAME: &'static str = "SharedAnswer";
     const TAG: &'static str = "answer";
     const REPLACED: &'static [&'static str] = &["attached", "sessions", "options", "host"];
+}
+
+impl super::Answer {
+    pub fn unchanged(answer: wire::Answer<PlakExtension>) -> Option<Self> {
+        use wire::Answer as A;
+        match answer {
+            A::Attached { .. } | A::Sessions { .. } | A::Options { .. } | A::Host { .. } => None,
+            _ => Some(Self::Shared(Box::new(Shared(answer)))),
+        }
+    }
 }
 
 pub type SharedRefusal = Shared<wire::RequestRefusal>;
@@ -173,6 +211,21 @@ impl Cases for console::HostResponse {
     ];
 }
 
+impl super::HostResponse {
+    pub fn unchanged(response: console::HostResponse) -> Option<Self> {
+        use console::HostResponse as R;
+        match response {
+            R::AccountsUsage { .. }
+            | R::Refused { .. }
+            | R::ProfilesList { .. }
+            | R::ProfilesGet { .. }
+            | R::TemplatesList { .. }
+            | R::TemplatesGet { .. } => None,
+            _ => Some(Self::Shared(Box::new(Shared(response)))),
+        }
+    }
+}
+
 pub type SharedHostRequest = Shared<console::HostRequest>;
 impl Cases for console::HostRequest {
     const NAME: &'static str = "SharedHostRequest";
@@ -194,6 +247,15 @@ impl Cases for SurfaceObservation {
     const REPLACED: &'static [&'static str] = &["profiles", "session_profile"];
 }
 
+impl super::SurfaceObservation {
+    pub fn unchanged(observation: SurfaceObservation) -> Option<Self> {
+        match observation {
+            SurfaceObservation::Profiles(_) | SurfaceObservation::SessionProfile(_) => None,
+            _ => Some(Self::Shared(Box::new(Shared(observation)))),
+        }
+    }
+}
+
 pub type SharedObservation = Shared<wire::FramedObservation<PlakExtension>>;
 
 impl From<TranscriptPatch> for super::Observation {
@@ -201,6 +263,24 @@ impl From<TranscriptPatch> for super::Observation {
         Self::Shared(Box::new(Shared(wire::FramedObservation(
             SessionObservation::TranscriptPatch(patch),
         ))))
+    }
+}
+
+impl super::Observation {
+    pub fn unchanged(observation: SessionObservation<PlakExtension>) -> Option<Self> {
+        use SessionObservation as O;
+        match observation {
+            O::AssistantDelta(_)
+            | O::ReasoningDelta { .. }
+            | O::TranscriptStream { .. }
+            | O::PresentationSnapshot(_)
+            | O::UsageLimits(_)
+            | O::Extension(_)
+            | O::TemplateReadiness(_) => None,
+            _ => Some(Self::Shared(Box::new(Shared(wire::FramedObservation(
+                observation,
+            ))))),
+        }
     }
 }
 

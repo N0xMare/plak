@@ -26,6 +26,7 @@ use super::{ATTACHMENT_CAPACITY, Face, Leave, LostTranscripts, POLL, WireConnect
 
 /// A session served to any number of connections over time.
 pub struct WireSession<P: ProtocolExtension> {
+    pub(super) root_transcript: Option<crate::runtime::RootTranscript>,
     runner_pending: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     actions: IntentSender<P>,
     served: Shared<P>,
@@ -128,7 +129,8 @@ impl<P: ProtocolExtension> WireSession<P> {
         let service = HostService::new(actions.clone(), root.clone(), ATTACHMENT_CAPACITY)
             .with_nodes(Arc::new(TreeNodes::new(root.tree_id)))
             .with_attachment_count(attachments);
-        let before_pump = super::super::test_open_observations::before_pump(&session_id, &service);
+        let mut recovery =
+            super::super::test_open_observations::OpeningRecovery::selected(&session_id, &service);
         let served = ServedSession::shared(session_id, Box::new(roots), service);
         let (notify, changes) = watch::channel(0_u64);
         let wake = notify.clone();
@@ -143,12 +145,6 @@ impl<P: ProtocolExtension> WireSession<P> {
         // The pump is the session's only observation consumer; it ends
         // with the session's observations and is never joined.
         thread::spawn(move || {
-            if !before_pump() {
-                pump_ended.store(true, Ordering::Release);
-                notify.send_modify(|revision| *revision = revision.wrapping_add(1));
-                directory.directory_changed();
-                return;
-            }
             let mut lost = LostTranscripts::default();
             let mut batch = Vec::with_capacity(16);
             loop {
@@ -157,22 +153,6 @@ impl<P: ProtocolExtension> WireSession<P> {
                         use super::super::fanout::Publication;
                         batch.push(Publication::prepare(event));
                         batch.extend(events.try_iter().take(15).map(Publication::prepare));
-                        let mut guard = served::lock(&pumped);
-                        let mut affects_directory = false;
-                        let mut found = true;
-                        for publication in batch.drain(..) {
-                            affects_directory |= directory_event(&publication.observation);
-                            found &= guard.observe(publication);
-                        }
-                        lost.check(&guard.service(), &events);
-                        drop(guard);
-                        if !found {
-                            pump_ended.store(true, Ordering::Release);
-                        }
-                        notify.send_modify(|revision| *revision = revision.wrapping_add(1));
-                        if affects_directory || !found {
-                            directory.directory_changed();
-                        }
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -182,6 +162,31 @@ impl<P: ProtocolExtension> WireSession<P> {
                         directory.directory_changed();
                         return;
                     }
+                }
+                if recovery
+                    .as_mut()
+                    .is_some_and(|hold| hold.interleave(&mut batch))
+                {
+                    recovery = None;
+                }
+                if batch.is_empty() {
+                    continue;
+                }
+                let mut guard = served::lock(&pumped);
+                let mut affects_directory = false;
+                let mut found = true;
+                for publication in batch.drain(..) {
+                    affects_directory |= directory_event(&publication.observation);
+                    found &= guard.observe(publication);
+                }
+                lost.check(&guard.service(), &events);
+                drop(guard);
+                if !found {
+                    pump_ended.store(true, Ordering::Release);
+                }
+                notify.send_modify(|revision| *revision = revision.wrapping_add(1));
+                if affects_directory || !found {
+                    directory.directory_changed();
                 }
             }
         });
@@ -196,6 +201,7 @@ impl<P: ProtocolExtension> WireSession<P> {
             attachments: attachments.clone(),
             reopening: AtomicBool::new(false),
             lifecycle_retired: AtomicBool::new(false),
+            root_transcript: None,
         }
     }
 
@@ -210,6 +216,14 @@ impl<P: ProtocolExtension> WireSession<P> {
     #[must_use]
     pub fn session_id(&self) -> String {
         served::lock(&self.served).session().to_owned()
+    }
+
+    pub(super) fn viewport_read(
+        &self,
+        node: &NodeAddress,
+        generation: u64,
+    ) -> Option<super::ViewportRead> {
+        served::lock(&self.served).viewport_read(node, generation)
     }
 
     /// Publishes host-owned observations to the currently served generation,

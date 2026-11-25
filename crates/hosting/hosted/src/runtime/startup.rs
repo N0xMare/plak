@@ -81,11 +81,33 @@ pub type HostWorker<P = plakous_host_protocol::Core> = (
 pub fn spawn_host_worker<P: plakous_host_protocol::ProtocolExtension>(
     config: HostConfig<P>,
 ) -> CliResult<HostWorker<P>> {
+    spawn_worker(config, false)
+}
+
+/// Spawn the protocol host's worker with keyed root transcript publication.
+///
+/// # Errors
+/// The worker did not complete startup.
+pub fn spawn_keyed_host_worker<P: plakous_host_protocol::ProtocolExtension>(
+    config: HostConfig<P>,
+) -> CliResult<HostWorker<P>> {
+    spawn_worker(config, true)
+}
+
+fn spawn_worker<P: plakous_host_protocol::ProtocolExtension>(
+    config: HostConfig<P>,
+    keyed: bool,
+) -> CliResult<HostWorker<P>> {
     let (action_tx, action_rx) = crate::surface_protocol::user_action_channel();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel();
     let (startup_tx, startup_rx) = std::sync::mpsc::sync_channel(1);
-    let event_tx = Sender::over(event_tx);
-    let handle = HostWorkerHandle::spawn_with_receipt(move |receipt, steps| {
+    let (event_tx, root) = if keyed {
+        let (sender, root) = Sender::over_keyed_root(event_tx);
+        (sender, Some(root))
+    } else {
+        (Sender::over(event_tx), None)
+    };
+    let mut handle = HostWorkerHandle::spawn_with_receipt(move |receipt, steps| {
         let mut event_tx = event_tx;
         event_tx.quit_receipt = receipt;
         event_tx.step_control = steps;
@@ -113,6 +135,7 @@ pub fn spawn_host_worker<P: plakous_host_protocol::ProtocolExtension>(
         }
         result
     });
+    handle.root_transcript = root;
     await_host_startup(startup_rx, action_tx, event_rx, handle)
 }
 

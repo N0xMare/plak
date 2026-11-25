@@ -77,7 +77,9 @@ pub use tool_rows::{FramedObservation, FramedTranscriptRow};
 /// 11 adds host state identity, advisory planned lifecycle and typed bridge refusals.
 /// 12 adds session account choices, account-choice refusals, the account
 /// switch, the failed-turn usage limit and console custody.
-pub const WIRE_VERSION: u32 = 12;
+/// 13 adds retained transcript viewports, typed directory and console facts,
+/// and attachment, blob and host lifecycle outcomes.
+pub const WIRE_VERSION: u32 = 13;
 
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;

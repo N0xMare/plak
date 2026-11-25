@@ -14,7 +14,8 @@ use plakous_host_protocol::wire::{
 use plakous_host_protocol::{SessionIntent, SessionObservation};
 use serde_json::{Map, Value, json};
 
-use super::*;
+use crate::surface_protocol::PlakExtension;
+use schemars::generate::SchemaSettings;
 
 type Observation = SessionObservation<PlakExtension>;
 type Intent = SessionIntent<PlakExtension>;
@@ -63,9 +64,12 @@ impl Schema {
     }
 
     fn new() -> Self {
-        let document = document();
+        // Exercise the dispatcher DTOs separately from the served schema.
+        let mut generator = SchemaSettings::draft2020_12().into_generator();
+        let _ = generator.subschema_for::<Client>();
+        let _ = generator.subschema_for::<Host>();
         Self {
-            defs: document["$defs"].as_object().unwrap().clone(),
+            defs: generator.take_definitions(true),
         }
     }
 

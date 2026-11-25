@@ -18,6 +18,7 @@ pub(super) struct StoredAttachment<P: ProtocolExtension> {
     service: crate::host_service::HostService<P>,
     actions: plakous_host_protocol::IntentSender<P>,
     mailbox: plakous_host_protocol::IntentReceiver<P>,
+    page: Option<Box<dyn super::PreparedViewport>>,
 }
 
 impl<P: ProtocolExtension> StoredAttachment<P> {
@@ -25,6 +26,7 @@ impl<P: ProtocolExtension> StoredAttachment<P> {
         mut view: StoredSessionView<P>,
         refusal: RequestRefusal,
         failure: Option<&crate::error::CliFailure>,
+        page: Option<Box<dyn super::PreparedViewport>>,
     ) -> Self {
         if let Some(failure) = failure.filter(|_| !view.archived) {
             view.mark_unavailable(failure);
@@ -36,7 +38,10 @@ impl<P: ProtocolExtension> StoredAttachment<P> {
             super::super::ATTACHMENT_CAPACITY,
         );
         for observation in view.observations {
-            service.observe(observation);
+            if page.is_none() || !matches!(observation, SessionObservation::PresentationSnapshot(_))
+            {
+                service.observe(observation);
+            }
         }
         Self {
             session: view.session,
@@ -44,6 +49,7 @@ impl<P: ProtocolExtension> StoredAttachment<P> {
             service,
             actions,
             mailbox,
+            page,
         }
     }
 }
@@ -93,6 +99,7 @@ where
 {
     pub(super) fn attach_stored(
         &mut self,
+        id: plakous_host_protocol::wire::RequestId,
         stored: StoredAttachment<P>,
         text: &str,
     ) -> CliResult<Forwarded<P>> {
@@ -102,6 +109,7 @@ where
             service,
             actions,
             mailbox,
+            page,
         } = stored;
         let sessions = Arc::clone(&self.host.sessions);
         let mut connection = WireConnection::on_service(
@@ -111,6 +119,7 @@ where
             super::super::Leave::Detach,
         )
         .face(self.face)
+        .with_frame_output(Some(self.frame_output()))
         .with_snapshot_output(self.snapshot_output.clone())
         .with_runner_labels(Arc::new(move |id| sessions.runner_label(id)))
         .session_baseline_follows(true);
@@ -122,7 +131,36 @@ where
                 .with_buffered_output(self.buffered_output)
                 .with_attachment_status(output);
         }
-        let reading = connection.frame(Ok(text.to_owned()))?;
+        let frame = self.dispatch_frame(text);
+        let reading = if let Some(page) = page
+            && let Ok(ClientFrame::Request { op, .. }) = frame
+        {
+            use plakous_host_protocol::wire::{Answer, Outcome};
+            match connection.request(id, op) {
+                Some(Outcome::Ok(Answer::Attached { attachment })) => {
+                    let super::ViewportMode::Page(revision) = page.mode() else {
+                        unreachable!("a stored attachment cannot replay a resident viewport");
+                    };
+                    let start = super::ViewportStart {
+                        attachment,
+                        revision: super::ViewportRevision {
+                            host_generation: self.host.generation,
+                            revision,
+                            token: uuid::Uuid::new_v4(),
+                        },
+                        patches: Vec::new(),
+                    };
+                    self.unlink();
+                    connection.history = Some(page.write(&mut connection.stdout, id, start)?);
+                    connection.record_baseline_sent(attachment, None);
+                }
+                Some(outcome) => self.write(&HostFrame::Response { id, outcome })?,
+                None => unreachable!("stored attach is answered synchronously"),
+            }
+            true
+        } else {
+            connection.frame_decoded(self.dispatch_frame(text))?
+        };
         if connection.holding() {
             self.unlink();
             self.readonly = Some(ReadOnlyLink {

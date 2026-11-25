@@ -342,6 +342,6 @@ class BuildInfoProbe(unittest.TestCase):
             for key, field in (("revision", "source_revision"), ("flavor", "flavor")):
                 self.assertEqual(probe[key], upgrade["runner_version"][field])
             wire = json.loads(run("wire", "schema").stdout)
-            del wire["binary_id"]
+            self.assertEqual(wire.pop("binary_id"), probe["binary_id"])
             pin = hashlib.sha256(manifests.canonical(wire).removesuffix(b"\n")).hexdigest()
             self.assertEqual(probe["wire"], {"number": wire["wire_version"], "schema_pin": pin})

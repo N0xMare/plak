@@ -90,15 +90,14 @@ fn trace_frame(frame: &Value) -> String {
         })
         .collect();
     let bytes = match event {
-        "assistant_delta" => body.as_str(),
-        "reasoning_delta" => body["text"].as_str(),
+        "transcript_stream" => body["text"].as_str(),
         _ => None,
     }
     .map_or(0, str::len);
     let presentation = match event {
         "snapshot" => format!(
             " rev={} page={} last={}",
-            frame["revision"], frame["page"], frame["last"]
+            frame["revision"]["revision"], frame["part"], frame["last"]
         ),
         "transcript_patch" => format!(
             " rev={}->{} deletes={}",
@@ -145,7 +144,7 @@ fn root_repair_preserves_a_streaming_prefix_on_the_web() {
                 repairing = false;
             }
         }
-        if event == "assistant_delta" && body == PREFIX {
+        if event == "transcript_stream" && body["text"] == PREFIX {
             repairing = true;
             send(
                 &mut socket,
@@ -162,7 +161,7 @@ fn root_repair_preserves_a_streaming_prefix_on_the_web() {
                 },
             );
         }
-        if event == "assistant_delta" && body == MIDDLE {
+        if event == "transcript_stream" && body["text"] == MIDDLE {
             std::fs::write(&finish, []).unwrap();
         }
         if event == "set_busy" && body == false && finish.exists() {
@@ -207,32 +206,23 @@ impl KeyedRoot {
             self.trace.join("\n")
         );
         if frame["frame"] == "snapshot" || frame["observation"]["kind"] == "transcript_patch" {
-            match serde_json::from_value::<HostFrame<Core>>(frame.clone()).unwrap() {
-                HostFrame::Snapshot(page) => {
+            match crate::protocol_13::decode(&frame.to_string()).unwrap() {
+                Some(HostFrame::Snapshot(page)) => {
                     if let Some(snapshot) = self.pages.push(page).unwrap() {
                         self.transcript.replace(snapshot).unwrap();
                     }
                 }
-                HostFrame::Event {
+                Some(HostFrame::Event {
                     observation: SessionObservation::TranscriptPatch(patch),
                     ..
-                } => self.transcript.apply(patch).unwrap(),
+                }) => self.transcript.apply(patch).unwrap(),
                 _ => unreachable!("only keyed frames are decoded"),
             }
         }
         frame
     }
 
-    fn assert_durable(&self, fixture: &Fixture) {
-        let session = self
-            .transcript
-            .items()
-            .values()
-            .find_map(|row| match row {
-                TranscriptRow::SessionHeader { session_id, .. } => Some(session_id),
-                _ => None,
-            })
-            .expect("the root baseline names its session");
+    fn assert_durable(&self, fixture: &Fixture, session: &str) {
         let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
         let stored =
             plakd::store::ProductStore::inspect_session_read_only(&paths, session).unwrap();
@@ -268,8 +258,9 @@ fn late_root_attach_gets_the_prefix_before_future_web_deltas() {
     loop {
         let frame = next_frame(&mut early);
         early_trace.push(trace_frame(&frame));
-        if frame["observation"]["kind"] == "assistant_delta" {
-            assert_eq!(frame["observation"]["body"], PREFIX);
+        if frame["observation"]["kind"] == "transcript_stream"
+            && frame["observation"]["body"]["text"] == PREFIX
+        {
             break;
         }
     }
@@ -284,28 +275,57 @@ fn late_root_attach_gets_the_prefix_before_future_web_deltas() {
         }),
     );
     assert_eq!(next_frame(&mut late)["frame"], "welcome");
-    attach(&mut late, &root, 1);
+    let late_attachment = attach(&mut late, &root, 1);
     let mut late_view = KeyedRoot::default();
     let mut released = false;
     loop {
         let frame = late_view.read(&mut late);
-        if frame["observation"]["kind"] == "assistant_delta" {
+        if frame["observation"]["kind"] == "transcript_stream"
+            && frame["observation"]["body"]["text"] == MIDDLE
+        {
             assert_eq!(
                 assistant_text(late_view.transcript.items().values()),
                 PREFIX,
-                "the first raw delta arrived before its keyed prefix\nearly:\n{}\nlate:\n{}",
+                "the first keyed append arrived before its prefix\nearly:\n{}\nlate:\n{}",
                 early_trace.join("\n"),
-                late_view.trace.join("\n")
-            );
-            assert_eq!(
-                frame["observation"]["body"],
-                MIDDLE,
-                "{}",
                 late_view.trace.join("\n")
             );
             break;
         }
-        if !released && late_view.transcript.revision() != 0 {
+        if !released && frame["frame"] == "snapshot" && frame["last"] == true {
+            send(
+                &mut late,
+                &ClientFrame::Request {
+                    id: 4,
+                    op: Op::Intent {
+                        attachment: late_attachment,
+                        client_id: None,
+                        intent: SessionIntent::ResyncTranscript {
+                            scope: TranscriptScope::Root,
+                        },
+                        blobs: Vec::new(),
+                    },
+                },
+            );
+            loop {
+                let repair = late_view.read(&mut late);
+                if repair["frame"] == "response" && repair["id"] == 4 {
+                    assert_eq!(repair["outcome"]["ok"]["answer"], "accepted");
+                }
+                if repair["frame"] == "snapshot" && repair["last"] == true {
+                    assert_eq!(repair["revision"]["token"], frame["revision"]["token"]);
+                    assert_eq!(
+                        repair["revision"]["host_generation"],
+                        frame["revision"]["host_generation"]
+                    );
+                    assert!(
+                        repair["revision"]["revision"].as_u64().unwrap()
+                            >= frame["revision"]["revision"].as_u64().unwrap()
+                    );
+                    assert_eq!(repair["live_rows"], frame["live_rows"]);
+                    break;
+                }
+            }
             std::fs::write(fixture.root.join("repair"), []).unwrap();
             released = true;
         }
@@ -318,8 +338,23 @@ fn late_root_attach_gets_the_prefix_before_future_web_deltas() {
         }
     }
     trace_through_settlement(&mut early, &mut early_trace);
+    send(
+        &mut late,
+        &ClientFrame::Request {
+            id: 3,
+            op: Op::ListSessions {
+                workspace: None,
+                runner: None,
+                include_archived: false,
+            },
+        },
+    );
+    let listed = response(&mut late, 3);
+    let sessions = listed["ok"]["rows"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    let session = sessions[0]["session"].as_str().unwrap();
     drop(late);
     drop(early);
     interrupt_and_wait(&mut web);
-    late_view.assert_durable(&fixture);
+    late_view.assert_durable(&fixture, session);
 }

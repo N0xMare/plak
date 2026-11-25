@@ -31,7 +31,7 @@ fn a_stdio_bridge_without_a_host_does_not_create_a_home_or_embed() {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"{\"frame\":\"hello\",\"proto\":12,\"binary_id\":\"fixture\",\"caps\":[]}\n")
+        .write_all(b"{\"frame\":\"hello\",\"proto\":13,\"binary_id\":\"fixture\",\"caps\":[]}\n")
         .unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(!output.status.success());
@@ -45,6 +45,60 @@ fn a_stdio_bridge_without_a_host_does_not_create_a_home_or_embed() {
     );
     assert!(!root.path().join("home").exists());
     assert!(!root.path().join("xdg").exists());
+}
+
+#[cfg(feature = "web")]
+#[test]
+fn a_stdio_bridge_refuses_protocol_twelve_before_discovery() {
+    let root = tempfile::tempdir().unwrap();
+    let mut child =
+        publication_command(root.path(), &["host", "connect", "--stdio", "--auto-start"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"{\"frame\":\"hello\",\"proto\":12,\"binary_id\":\"fixture\",\"caps\":[]}\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        output.stdout,
+        b"{\"frame\":\"refused\",\"kind\":\"version_mismatch\",\"host\":13,\"client\":12}\n",
+    );
+    assert!(!root.path().join("home").exists());
+}
+
+#[test]
+fn the_normal_schema_and_build_info_identify_the_serving_binary() {
+    let root = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = publication_command(root.path(), args).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let mut schema = run(&["wire", "schema"]);
+    let build = run(&["version", "--build-info"]);
+    assert_eq!(schema["wire_version"], 13);
+    assert_eq!(schema["binary_id"], build["binary_id"]);
+    assert_eq!(schema["binary_id"].as_str().unwrap().len(), 12);
+    schema.as_object_mut().unwrap().remove("binary_id");
+    schema.sort_all_objects();
+    let schema = serde_json::to_vec(&schema).unwrap();
+    assert_eq!(build["wire"]["number"], 13);
+    assert_eq!(
+        build["wire"]["schema_pin"],
+        plakous::model::sha256_hex(&[&schema])
+    );
+    let output = publication_command(root.path(), &["wire", "schema", "--protocol", "13"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert!(!root.path().join("home").exists());
 }
 
 #[cfg(not(feature = "web"))]

@@ -43,7 +43,7 @@ pub(crate) fn forward_lifecycle(
     let Some(transport) = discovery::connect(paths, Duration::from_secs(10))? else {
         return Ok(None);
     };
-    let (sender, receiver, _) = client::connect_directory::<PlakExtension>(
+    let (sender, receiver, _) = client::connect_directory_with::<PlakExtension>(
         transport,
         Hello {
             proto: WIRE_VERSION,
@@ -51,6 +51,7 @@ pub(crate) fn forward_lifecycle(
                 .unwrap_or_else(|| "unknown".to_owned()),
             caps: Vec::new(),
         },
+        decode_lifecycle_response,
     )
     .map_err(|error| {
         crate::CliFailure::new(format!(
@@ -73,6 +74,38 @@ pub(crate) fn forward_lifecycle(
         ));
     }
     Ok(Some(outcome))
+}
+
+fn decode_lifecycle_response(
+    line: &str,
+) -> Result<
+    Option<plakous_host_protocol::wire::HostFrame<PlakExtension>>,
+    plakous_host_protocol::wire::WireError,
+> {
+    use plakd_wire_types::v13::{self, HostFrameV13};
+    use plakous_host_protocol::wire::{self, HostFrame, Outcome};
+    Ok(match wire::decode_line::<v13::HostFrame>(line)? {
+        v13::HostFrame::Shared(frame) => Some(frame.into_inner()),
+        v13::HostFrame::Draft(frame) => match *frame {
+            HostFrameV13::Response { id, outcome } => match outcome {
+                v13::Outcome::Ok(answer) => match *answer {
+                    v13::Answer::Shared(answer) => Some(HostFrame::Response {
+                        id,
+                        outcome: Outcome::Ok(answer.into_inner()),
+                    }),
+                    v13::Answer::Draft(_) => None,
+                },
+                v13::Outcome::Refused(reason) => match *reason {
+                    v13::RequestRefusal::Shared(reason) => Some(HostFrame::Response {
+                        id,
+                        outcome: Outcome::Refused(reason.into_inner()),
+                    }),
+                    v13::RequestRefusal::Draft(_) => None,
+                },
+            },
+            _ => None,
+        },
+    })
 }
 
 /// Connects to the host socket at `path` after checking that the socket

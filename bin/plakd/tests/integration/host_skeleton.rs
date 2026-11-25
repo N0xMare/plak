@@ -282,6 +282,7 @@ fn fixture() -> Option<Fixture> {
 
 /// One connection to the host's socket.
 struct Client {
+    protocol: u32,
     socket: Option<PathBuf>,
     stream: UnixStream,
     reader: BufReader<UnixStream>,
@@ -297,8 +298,13 @@ impl Client {
 
     /// [`Self::connect`] to the socket at `socket`.
     fn connect_at(socket: &std::path::Path) -> Self {
+        Self::connect_at_version(socket, WIRE_VERSION)
+    }
+
+    fn connect_at_version(socket: &std::path::Path, protocol: u32) -> Self {
         let stream = UnixStream::connect(socket).unwrap();
         let mut client = Self {
+            protocol,
             socket: Some(socket.to_path_buf()),
             reader: BufReader::new(stream.try_clone().unwrap()),
             stream,
@@ -306,7 +312,7 @@ impl Client {
             read_deadline: None,
         };
         client.send(&ClientFrame::Hello(Hello {
-            proto: WIRE_VERSION,
+            proto: protocol,
             binary_id: "host-test".into(),
             caps: Vec::new(),
         }));
@@ -314,6 +320,7 @@ impl Client {
             panic!("not welcomed");
         };
         assert_eq!(welcome.session, None, "a host of many sessions names none");
+        assert_eq!(welcome.proto, protocol);
         client
     }
 
@@ -340,6 +347,24 @@ impl Client {
     }
 
     fn read_frame(&mut self) -> HostFrame<PlakExtension> {
+        loop {
+            if let Some(frame) = self.read_served_frame() {
+                return frame;
+            }
+        }
+    }
+
+    fn read_served_frame(&mut self) -> Option<HostFrame<PlakExtension>> {
+        let line = self.read_wire_line();
+        let frame = if self.protocol == WIRE_VERSION {
+            crate::protocol_13::decode(line.trim_end())
+        } else {
+            decode_line(line.trim_end()).map(Some)
+        };
+        frame.unwrap_or_else(|error| panic!("{error}: {line}"))
+    }
+
+    fn read_wire_line(&mut self) -> String {
         let mut line = String::new();
         let timeout = self.read_deadline.map_or(WAIT, |deadline| {
             deadline
@@ -357,7 +382,7 @@ impl Client {
             )
         });
         assert_ne!(read, 0, "the host closed");
-        decode_line(line.trim_end()).unwrap_or_else(|error| panic!("{error}: {line}"))
+        line
     }
 
     /// Sends request `id` and returns its outcome, skipping what comes
@@ -543,9 +568,12 @@ const REQUEST: &str = "00000000-0000-4000-8000-0000000000a1";
 
 #[test]
 fn prompt_refusals_fail_strict_callers_and_report_errors_to_retry_callers() {
+    use plakd_wire_types::v13::{HostFrameV13, Observation, ObservationV13, TranscriptStream};
+
     for (before_response, strict) in [(false, false), (true, false), (false, true), (true, true)] {
         let (stream, mut peer) = UnixStream::pair().unwrap();
         let mut client = Client {
+            protocol: WIRE_VERSION,
             socket: None,
             reader: BufReader::new(stream.try_clone().unwrap()),
             stream,
@@ -567,17 +595,25 @@ fn prompt_refusals_fail_strict_callers_and_report_errors_to_retry_callers() {
             id: 42,
             outcome: Outcome::Ok(Answer::Accepted { duplicate: false }),
         };
-        let stale_answer =
-            plakous_host_protocol::SessionObservation::<PlakExtension>::AssistantDelta(
-                "no answer will arrive".into(),
-            );
+        let stale_answer = Observation::Draft(ObservationV13::TranscriptStream(TranscriptStream {
+            row: plakous_host_protocol::views::transcript::RowKey::new(
+                1,
+                plakous_host_protocol::views::transcript::Lane::Runtime,
+                0,
+            ),
+            offset: 0,
+            end: 21,
+            text: "no answer will arrive".into(),
+        }));
         peer.write_all(
-            encode_line(&HostFrame::Event {
+            encode_line(&HostFrameV13::Event {
                 client_id: None,
                 attachment: 7,
                 seq: 1,
-                class: stale_answer.class(),
-                observation: stale_answer,
+                class: plakous_host_protocol::observation::ObservationClass::Event(
+                    plakous_host_protocol::observation::Delivery::Droppable,
+                ),
+                observation: Box::new(stale_answer),
                 blobs: Vec::new(),
             })
             .unwrap()

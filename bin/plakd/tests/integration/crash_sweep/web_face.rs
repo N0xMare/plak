@@ -386,8 +386,13 @@ fn connect(socket: &std::path::Path, session: &str) -> Result<Connection, String
         tree_id: session.to_owned(),
         agent_id: session.to_owned(),
     };
-    let (sender, receiver, welcome) = client::connect_to::<PlakExtension>(transport, hello, root)
-        .map_err(|error| error.to_string())?;
+    let (sender, receiver, welcome) = client::connect_to_with::<PlakExtension>(
+        transport,
+        hello,
+        root,
+        crate::protocol_13::decode,
+    )
+    .map_err(|error| error.to_string())?;
     if welcome.session.is_some() {
         return Err("a host of many sessions welcomed the connection to one".to_owned());
     }

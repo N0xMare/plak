@@ -342,12 +342,11 @@ async fn admit(
     drop(lines);
     let stop = served.stop;
     let principal = plakous_hosted::host_service::wire::HostPrincipal::Web(login.to_owned());
-    let admitted = handshake::<PlakExtension>(
-        &first,
-        served.host.welcome_for(&principal),
-        &mut outbox.clone(),
-        &move || stop.stopped(),
-    );
+    let welcome = served.host.welcome_for(&principal);
+    let generation = welcome.host_generation;
+    let admitted = handshake::<PlakExtension>(&first, welcome, &mut outbox.clone(), &move || {
+        stop.stopped()
+    });
     let progress = socket.get_ref().progress.clone();
     outbox
         .send_batch(
@@ -371,7 +370,12 @@ async fn admit(
             stop.stopped()
         })
         .buffered_output()
-        .with_snapshot_output(move |attachment, snapshot| snapshots.snapshot(attachment, snapshot)))
+        .with_blob_refusal_output(crate::draft_wire::write_blob_refusal)
+        .with_lifecycle_output(crate::draft_wire::write_lifecycle)
+        .with_attachment_status(crate::host::protocol_13::status)
+        .with_snapshot_output(move |attachment, snapshot, retained| {
+            snapshots.snapshot_v13(generation, attachment, snapshot, retained)
+        }))
 }
 
 fn handle_frame(

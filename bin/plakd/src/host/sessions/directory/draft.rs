@@ -1,14 +1,14 @@
-//! Protocol 13 directory projection; no listener selects it.
+//! Protocol 13 directory projection from cached product and resident facts.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
 
 use plakd_wire_types::v13;
 use plakous_host_protocol::wire::{SessionActivity, SessionEnvironment};
 use plakous_hosted::host_service::wire::{DirectorySlot, SessionHost};
 use plakous_hosted::runtime::operator_attention::AttentionReason as RuntimeReason;
 use plakous_hosted::runtime::{ResumeAfterLoss, RootStanding};
-use plakous_recursive_subagents_store::SqliteTreeStore;
+#[cfg(test)]
 use tokio::sync::watch;
 
 use crate::home::paths::PlakPaths;
@@ -215,14 +215,34 @@ fn publish_attention(
     output
 }
 
-// Transport activation replaces the v12 call sites with this shared projection.
-#[allow(dead_code, reason = "unserved until the coordinated protocol switch")]
 impl Directory {
-    pub(in crate::host) fn start_draft(
-        paths: &PlakPaths,
-        tree: Arc<SqliteTreeStore>,
-    ) -> plakous_hosted::error::CliResult<Self> {
-        Self::start_with_draft(paths, tree, true)
+    pub(in crate::host) fn project_served(
+        &self,
+        rows: &[plakous_host_protocol::wire::SessionRow],
+        runners: &[runner_views::RunnerRow],
+        host: &SessionHost<PlakExtension>,
+    ) -> Vec<v13::SessionRow> {
+        let slots = host.directory_slots();
+        let mut stamps = self
+            .draft_attention
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let directory = self.rows.read().unwrap_or_else(PoisonError::into_inner);
+        let projected = rows
+            .iter()
+            .filter_map(|row| {
+                let previous = stamps.entry(row.session.clone()).or_default();
+                draft_row(
+                    directory.get(&row.session)?,
+                    runners,
+                    slots.get(&row.session),
+                    previous,
+                )
+            })
+            .collect();
+        stamps.retain(|session, stamp| !stamp.is_empty() && directory.contains_key(session));
+        projected
     }
 
     pub(in crate::host) fn draft_rows(
@@ -240,10 +260,6 @@ impl Directory {
             runners,
             &host.directory_slots(),
         )
-    }
-
-    pub(in crate::host) fn watch_draft(&self, host: &SessionHost<PlakExtension>) -> Watch {
-        Watch::new(self.changes(), host.directory_slot_changes())
     }
 
     fn project_draft_rows(
@@ -269,14 +285,14 @@ impl Directory {
     }
 }
 
-/// Compare full draft rows, including changes that leave the old bool untouched.
-pub(in crate::host) struct Watch {
+#[cfg(test)]
+struct Watch {
     product: watch::Receiver<u64>,
     slots: watch::Receiver<u64>,
     previous: Option<Vec<v13::SessionRow>>,
 }
 
-#[allow(dead_code, reason = "unserved until the coordinated protocol switch")]
+#[cfg(test)]
 impl Watch {
     fn new(product: watch::Receiver<u64>, slots: watch::Receiver<u64>) -> Self {
         Self {
@@ -284,16 +300,6 @@ impl Watch {
             slots,
             previous: None,
         }
-    }
-
-    pub(in crate::host) fn snapshot(
-        &mut self,
-        directory: &Directory,
-        include_archived: bool,
-        runners: &[runner_views::RunnerRow],
-        host: &SessionHost<PlakExtension>,
-    ) -> Option<Vec<v13::SessionRow>> {
-        self.refresh(|| directory.draft_rows(None, None, include_archived, runners, host))
     }
 
     fn refresh(
@@ -427,7 +433,7 @@ pub(super) fn differences(
                 session: session.clone(),
                 profile: profile.clone(),
             }),
-            Old::RootFast { .. } => None,
+            Old::RootFast { .. } | Old::RootServiceTier { .. } => None,
             Old::WorkingSet => Some(New::WorkingSet),
             Old::Card(card) => Some(New::Card(card.clone())),
             Old::Roster => Some(New::Roster),

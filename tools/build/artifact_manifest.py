@@ -67,10 +67,11 @@ def versions(values, field):
 
 
 def validate_build_info(info):
-    fields(
-        info,
-        "export flavor gateway host_upgrade omitted_features product_version revision runner state_key test_hooks wire",
-    )
+    names = "export flavor gateway host_upgrade omitted_features product_version revision runner state_key test_hooks wire"
+    if isinstance(info, dict) and "binary_id" in info:
+        names += " binary_id"
+        matches(info["binary_id"], rf"{HEX}{{12}}", "binary id")
+    fields(info, names)
     require(info["flavor"] == "release", "expected plain release build")
     require(info["test_hooks"] is False, "shipping artifacts must not include test hooks")
     require(info["omitted_features"] == [], "shipping artifacts must not omit product features")
@@ -129,6 +130,11 @@ def validate_manifest(data):
         positive(facts["length"], f"{name} length")
         matches(facts["sha256"], SHA256, f"{name} digest")
         require(facts["display_id"] == facts["sha256"][:12], f"{name} display id differs")
+    if "binary_id" in data["build_info"]:
+        require(
+            data["build_info"]["binary_id"] == data["files"]["plakd"]["display_id"],
+            "build-info binary id differs",
+        )
     require(data["snapshot_id"] == snapshot_id(data["files"]), "snapshot id differs")
 
 

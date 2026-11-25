@@ -275,10 +275,25 @@ fn startup_retries_interrupted_inspection_and_continues_once_without_a_client() 
     // Only now attach to observe completion; the startup scan did the retry.
     let mut client = Client::connect(&host);
     client.attach(4, &node);
-    while !serde_json::to_string(&client.next())
-        .unwrap()
-        .contains(CONTINUED)
-    {}
+    loop {
+        let items = match client.next() {
+            HostFrame::Snapshot(page) => page.items,
+            HostFrame::Event {
+                observation: plakous_host_protocol::SessionObservation::TranscriptPatch(change),
+                ..
+            } => change.upserts,
+            _ => continue,
+        };
+        if items.iter().any(|item| {
+            matches!(
+                &item.row,
+                plakous_host_protocol::views::transcript::TranscriptRow::Assistant { text }
+                    if text.contains(CONTINUED)
+            )
+        }) {
+            break;
+        }
+    }
     assert_eq!(root_record(&fixture, &session).1, 1);
     assert_eq!(crash::dispatches(&fixture), before + 1);
     drop(client);

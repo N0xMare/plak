@@ -41,6 +41,7 @@ pub struct HostWorkerHandle {
     receipt: QuitReceipt,
     pub(crate) steps: Arc<super::step_hold::StepControl>,
     completion: Arc<WorkerCompletion>,
+    pub(crate) root_transcript: Option<super::RootTranscript>,
 }
 
 #[derive(Debug, Default)]
@@ -92,6 +93,7 @@ impl HostWorkerHandle {
             receipt,
             steps,
             completion,
+            root_transcript: None,
         }
     }
 

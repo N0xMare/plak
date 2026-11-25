@@ -596,13 +596,13 @@ async fn reconcile_remote(
     let registry = services.runners();
     registry.begin_reconcile(id, services.now_unix_seconds());
     if let Some(terminals) = services.terminal_registry() {
-        registry.record_probe_phase(id, ProbePhase::ReconcileTerminals);
+        registry.progress(id, ProbePhase::ReconcileTerminals);
         terminals
             .reconcile(id, client)
             .await
             .map_err(|_| unavailable(ProbePhase::ReconcileTerminals))?;
     }
-    registry.record_probe_phase(id, ProbePhase::ReconcileStore);
+    registry.progress(id, ProbePhase::ReconcileStore);
     let roots = services
         .state_roots()
         .map_err(|_| unavailable(ProbePhase::ReconcileStore))?
@@ -610,7 +610,7 @@ async fn reconcile_remote(
     let sessions = roots
         .runtime_sessions()
         .map_err(|_| unavailable(ProbePhase::ReconcileStore))?;
-    registry.record_probe_phase(id, ProbePhase::ReconcileJobs);
+    registry.progress(id, ProbePhase::ReconcileJobs);
     let (readopted, failures) =
         plakous_hosted::runner_adoption::readopt_lines(client, &roots, "plak:host:readopt")
             .await
@@ -620,11 +620,11 @@ async fn reconcile_remote(
         return Err(unavailable(ProbePhase::ReconcileJobs));
     }
     let _ = client.recover().await;
-    registry.record_probe_phase(id, ProbePhase::ReconcileStops);
+    registry.progress(id, ProbePhase::ReconcileStops);
     let pending = finish_stops(services, client, &sessions, &readopted)
         .await
         .map_err(|_| unavailable(ProbePhase::ReconcileStops))?;
-    registry.record_probe_phase(id, ProbePhase::ReconcileForeground);
+    registry.progress(id, ProbePhase::ReconcileForeground);
     client
         .reconcile_settled_foreground()
         .await

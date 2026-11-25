@@ -131,6 +131,14 @@ impl Presentations {
         })
     }
 
+    pub(in crate::runtime) fn advance_root_history(&mut self, session: &str, applied: FeedSeq) {
+        if let Some((owner, current)) = &mut self.root_applied
+            && owner == session
+        {
+            *current = (*current).max(applied);
+        }
+    }
+
     pub(in crate::runtime) fn root_row_slice(
         &self,
         key: RowKey,

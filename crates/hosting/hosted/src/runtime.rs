@@ -256,10 +256,10 @@ pub(crate) mod step_hold;
 mod worker;
 pub use startup::spawn_deferred_host;
 pub use startup::spawn_deferred_host_with_clear_publication;
-pub use startup::spawn_host_worker;
 pub use startup::{
     SeededSessionCreation, create_seeded_session, create_seeded_session_with_preflight,
 };
+pub use startup::{spawn_host_worker, spawn_keyed_host_worker};
 pub use surface::{
     AccountChoiceOutcome, AccountChoiceRefusal, AccountReadiness, AccountsRead, AlternativesRead,
     ProfileForkOutcome, ReadinessRead, ReadyAccount, Surface, SurfaceAccountChoice,

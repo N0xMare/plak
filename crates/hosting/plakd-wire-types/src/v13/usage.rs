@@ -19,7 +19,7 @@ use super::{ProfileDefinition, ProfileSummary, TemplateDefinition, TemplateSumma
 #[serde(untagged)]
 pub enum HostResponse {
     Draft(HostResponseV13),
-    Shared(SharedHostResponse),
+    Shared(Box<SharedHostResponse>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

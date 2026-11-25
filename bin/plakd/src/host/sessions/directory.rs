@@ -50,14 +50,6 @@ pub(super) struct Directory {
 
 impl Directory {
     pub(super) fn start(paths: &PlakPaths, tree: Arc<SqliteTreeStore>) -> CliResult<Self> {
-        Self::start_with_draft(paths, tree, false)
-    }
-
-    fn start_with_draft(
-        paths: &PlakPaths,
-        tree: Arc<SqliteTreeStore>,
-        draft: bool,
-    ) -> CliResult<Self> {
         let (inbox, events) = Inbox::register(paths);
         let (changes, _) = watch::channel(0_u64);
         let mut source = Source {
@@ -76,7 +68,7 @@ impl Directory {
             omitted: BTreeSet::new(),
             retry_rows: BTreeSet::new(),
             holders: BTreeMap::new(),
-            draft: draft.then(|| draft::Source::new(paths)),
+            draft: Some(draft::Source::new(paths)),
             #[cfg(test)]
             runtime_inspections: Arc::default(),
         };

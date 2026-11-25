@@ -1,4 +1,4 @@
-//! Product projections for the unserved protocol 13 boundary.
+//! Product projections for protocol 13.
 
 mod usage;
 pub use usage::{accounts_usage, usage_limits};
@@ -10,7 +10,7 @@ use plakous_hosted::host_service::wire::LifecycleState;
 mod lifecycle;
 pub use lifecycle::write_lifecycle;
 
-/// Writes a draft rejection only for the named blob, without an intent verdict.
+/// Writes a refusal only for the named blob, without an intent verdict.
 ///
 /// # Errors
 ///

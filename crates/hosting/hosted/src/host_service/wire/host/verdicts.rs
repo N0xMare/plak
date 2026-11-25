@@ -33,6 +33,7 @@ where
         write: impl Fn(
             plakous_host_protocol::wire::AttachmentId,
             plakous_host_protocol::views::presentation::PresentationSnapshot,
+            Option<uuid::Uuid>,
         ) -> CliResult<()>
         + Send
         + Sync

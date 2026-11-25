@@ -424,12 +424,6 @@ impl AgentTemplate {
         }
     }
 
-    /// The protocol-12 template read value that backs its Fast toggle.
-    #[must_use]
-    pub(crate) fn legacy_fast_extra(&self) -> Option<&'static str> {
-        self.service_tier().map(|_| "priority")
-    }
-
     #[must_use]
     pub fn composition_or_default(&self) -> ProductCompositionSelection {
         self.composition

@@ -1,4 +1,4 @@
-//! Draft transcript DTO projection. No listener selects this path.
+//! Protocol 13 projection at the host's framed boundary.
 
 use std::io::Write;
 
@@ -13,15 +13,26 @@ use plakous_host_protocol::views::transcript::{
 use plakous_host_protocol::wire::{self, AttachmentId, RequestId};
 use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::host_service::wire::{
-    AttachmentStatus, ViewportRead, ViewportRevision, ViewportStart, WireConnection,
+    AttachmentStatus, HistoryBinding, PreparedViewport, TranscriptRead, ViewportMode,
+    ViewportRevision, ViewportStart,
 };
+#[cfg(test)]
+use plakous_hosted::host_service::wire::{ViewportRead, WireConnection};
 use plakous_hosted::runtime::{LiveRowReadError, RootTranscript};
 
 use super::sessions::history::{self, AttachedHistory, BaselineTarget, HistoryAttachment};
 use crate::home::paths::PlakPaths;
+#[cfg(test)]
 use crate::surface_protocol::PlakExtension;
 
+mod frames;
+mod options;
+mod viewport;
+pub(super) use frames::{decode, encode};
+pub(super) use viewport::prepare;
+
 /// Replay preparation does no paging and holds no reader slot or connection.
+#[cfg(test)]
 pub(crate) fn prepare_replay(
     paths: &PlakPaths,
     session: &str,
@@ -47,6 +58,7 @@ pub(crate) fn prepare_replay(
 }
 
 /// Complete a replay on the writer. A miss goes to first-page preparation.
+#[cfg(test)]
 pub(crate) fn finish_replay(
     connection: &mut WireConnection<PlakExtension, impl Write>,
     stamp: &ViewportRead,
@@ -60,6 +72,13 @@ pub(crate) fn finish_replay(
         return Ok(None);
     };
     binding.bind(replay.attachment);
+    Ok(Some(AttachedHistory {
+        binding,
+        frames: replay_frames(id, replay),
+    }))
+}
+
+fn replay_frames(id: RequestId, replay: ViewportStart) -> Vec<HostFrameV13> {
     let from = retained_revision(&replay.revision);
     let mut to = from.clone();
     if let Some(last) = replay.patches.last() {
@@ -73,7 +92,7 @@ pub(crate) fn finish_replay(
         },
     )];
     frames.extend(patches(replay));
-    Ok(Some(AttachedHistory { binding, frames }))
+    frames
 }
 
 /// Page on a blocking worker. The driver's publication stamp owns no slot
@@ -83,7 +102,7 @@ pub(crate) fn prepare_first_page(
     session: &str,
     id: RequestId,
     generation: u64,
-    root: &RootTranscript,
+    root: Option<&RootTranscript>,
 ) -> Result<AttachedHistory, RequestRefusal> {
     history::attach(
         paths,
@@ -95,21 +114,22 @@ pub(crate) fn prepare_first_page(
             scope: TranscriptScope::Root,
             revision: RetainedRevision {
                 host_generation: generation,
-                revision: u64::MAX,
+                revision: root.map_or(0, |_| u64::MAX),
                 token: uuid::Uuid::nil().to_string(),
             },
         },
-        Some(root),
+        root,
     )
 }
 
 /// Install a page with any bounded catch-up chain published during its read.
 /// A reset or an unbridgeable change requires recapture, not a stale page.
+#[cfg(test)]
 pub(crate) fn finish_first_page(
     connection: &mut WireConnection<PlakExtension, impl Write>,
     stamp: &ViewportRead,
     id: RequestId,
-    mut page: AttachedHistory,
+    page: AttachedHistory,
 ) -> Result<Option<AttachedHistory>, RequestRefusal> {
     let Some(HostFrameV13::Snapshot(first)) = page.frames.get(1) else {
         return Err(wire_refusal(wire::RequestRefusal::Backpressure));
@@ -120,6 +140,14 @@ pub(crate) fn finish_first_page(
     else {
         return Ok(None);
     };
+    Ok(Some(first_page_frames(id, page, start)))
+}
+
+fn first_page_frames(
+    id: RequestId,
+    mut page: AttachedHistory,
+    start: ViewportStart,
+) -> AttachedHistory {
     page.binding.bind(start.attachment);
     page.frames[0] = history::answer(
         id,
@@ -135,7 +163,7 @@ pub(crate) fn finish_first_page(
         }
     }
     page.frames.extend(patches(start));
-    Ok(Some(page))
+    page
 }
 fn retained_revision(revision: &ViewportRevision) -> RetainedRevision {
     RetainedRevision {
@@ -160,6 +188,7 @@ fn patches(start: ViewportStart) -> impl Iterator<Item = HostFrameV13> {
         })
 }
 
+#[cfg(test)]
 fn wire_refusal(reason: wire::RequestRefusal) -> RequestRefusal {
     RequestRefusal::try_from(reason).unwrap_or_else(|_| {
         RequestRefusal::session_unavailable("the session could not admit the attachment".into())
@@ -172,6 +201,12 @@ pub(crate) fn status(
     request_id: Option<RequestId>,
     status: AttachmentStatus,
 ) -> CliResult<()> {
+    if let Some(id) = request_id {
+        write_frames(
+            out,
+            [history::answer(id, AnswerV13::AttachmentStatusRequested)],
+        )?;
+    }
     let frame = HostFrameV13::AttachmentStatus {
         attachment,
         request_id,
@@ -182,10 +217,20 @@ pub(crate) fn status(
         bytes_queued: status.bytes_queued,
         queue_len: status.queue_len,
     };
-    let line = wire::encode_line(&frame).map_err(|error| CliFailure::new(error.to_string()))?;
-    out.write_all(line.as_bytes())
-        .and_then(|()| out.flush())
-        .map_err(|_| CliFailure::new("attachment status output failed"))
+    write_frames(out, [frame])
+}
+
+fn write_frames(
+    out: &mut dyn Write,
+    frames: impl IntoIterator<Item = HostFrameV13>,
+) -> CliResult<()> {
+    for frame in frames {
+        let line = wire::encode_line(&frame).map_err(|error| CliFailure::new(error.to_string()))?;
+        out.write_all(line.as_bytes())
+            .map_err(|_| CliFailure::new("transcript output failed"))?;
+    }
+    out.flush()
+        .map_err(|_| CliFailure::new("transcript output failed"))
 }
 
 pub(crate) fn live_lengths(items: &[TranscriptItem]) -> Vec<LiveRowLength> {

@@ -1,12 +1,13 @@
-# Client protocol 13 draft
+# Client protocol 13
 
 Use [protocol-13-wire-schema.json](../../../bin/plakd/tests/fixtures/protocol-13-wire-schema.json),
-generated with `plakd wire schema --protocol 13`. It has both frame directions and the
-shared JSON Schema draft 2020-12 definitions. `binary_id` is null because this
-is a definitions artifact, not the schema of a serving build. For validation,
+for the checked-in build-independent contract. It has both frame directions and the
+shared JSON Schema draft 2020-12 definitions. Its `binary_id` is null;
+`plakd wire schema` prints the serving binary's actual identity. For validation,
 select `client_frame` or `host_frame` as the root and keep the document's
 `$defs` in scope. The normalized pin is SHA-256 of compact JSON with all
-object keys sorted, omitting only `binary_id` (the protocol-12 algorithm).
+object keys sorted, omitting only `binary_id`:
+`7fbb3e82a5b1162e69fdc42925d3a31550fdffb051bfe861a4ef386254fec3a4`.
 
 The [client frames](../../../crates/hosting/plakd-wire-types/tests/fixtures/protocol-13-client.jsonl)
 and [host frames](../../../crates/hosting/plakd-wire-types/tests/fixtures/protocol-13-host.jsonl)
@@ -78,10 +79,10 @@ Console and attached allowance views use the same provider amounts. The host
 converts reported cents exactly and rounds decimal credits to the nearest
 micro-unit, with ties away from zero. Amounts outside the signed range are
 refused, not saturated. Percentage readings are unchanged.
-The draft OpenRouter key-limit meter cannot distinguish a null cap (no cap)
+The OpenRouter key-limit meter cannot distinguish a null cap (no cap)
 from an unreported cap, and its money entries do not carry the reset cadence
-or whether BYOK spend counts against the limit. Account for that display gap
-at the switch rather than inferring any of these facts from the amounts.
+or whether BYOK spend counts against the limit. Leave those facts unknown
+rather than inferring them from the amounts.
 
 A known Changes version mismatch carries the observed Git version and its
 minimum requirement. If the selected execution authority cannot report its
@@ -101,16 +102,14 @@ Codex template writes use `{"field":"service_tier","value":"fast"}` or
 `"ultrafast"`; `null` removes the named tier for Standard. Template reads,
 template readiness and profile roles carry the same nullable `service_tier`
 instead of the legacy Fast projection. Profile differences name the exact
-session tier in `root_service_tier`. Protocol 12 keeps its existing Fast toggle.
+session tier in `root_service_tier`.
 
-This checkout still serves 12, and `plakd wire schema` without the draft
-flag still reports 12. After the host implementation is complete, the
-staging build will serve 13 only. Use that exact build's normal schema
-output and pair it with matching client artifacts before connecting. There
-is no negotiation or fallback. See the [host plan](host-plan.md) for the
-activation gate.
+The host serves only 13. Use the exact build's schema and pair it with
+matching client artifacts before connecting. A Hello for 12 receives
+`{"frame":"refused","kind":"version_mismatch","host":13,"client":12}` and no
+Welcome. There is no negotiation or fallback.
 
-The draft directory uses the latest retained assistant prose, or the latest
+The directory uses the latest retained assistant prose, or the latest
 retained user prompt if there is no assistant prose. The host redacts the
 preview, folds it to one plain-text line, and cuts at a UTF-8 boundary.
 Costs are measured USD micro-units: a root with unproven coverage is unknown,

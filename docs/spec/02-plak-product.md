@@ -650,7 +650,7 @@ an already resident session and its recorded node workspace; acquiring its
 `ResidencyHold` must not open an agent or admit a turn. Every live or unresolved
 terminal retains that hold and prevents dormancy and host idle exit, including
 when another principal requests release. The private residency outcome is
-`operator_terminal` on client protocol 12. Release never implicitly closes another
+`operator_terminal`. Release never implicitly closes another
 principal's shell; confirmed close of the requester's terminals precedes normal release.
 Completed unpinned rows
 are skipped, and ambiguous close dispatch reports `operation_outcome_unknown`.
@@ -4296,18 +4296,22 @@ latency, and nothing else. Prompt text never reaches a span.
 
 ### 4.4 Wire v2
 
-Current client protocol **12** requires `Welcome.state_key`, the serving host's
+The host serves client protocol **13** only.
+`Welcome.state_key` identifies the serving host's
 native state identity, alongside its binary id and process generation.
 `host_generation` is a wall-clock-nanosecond identity, not a monotonic counter.
 Compare generations for inequality only; numeric ordering confers no authority. An
-ephemeral extension-free session host uses an empty key. Protocol 11 adds the
+ephemeral extension-free session host uses an empty key. Protocol 13 serves the
 product advisory frame `host_lifecycle {host_generation, phase, reason,
-target?, retry_after_ms?}`. `phase` is `draining`, `restarting`, `stopping` or
-`running`; `reason` is `paired_upgrade`, `cross_key_upgrade` or `shutdown`.
+seconds_remaining, deadline_at?, target?, retry_after_ms?}`. `phase` is
+`starting`, `draining`, `restarting`, `stopping` or `running`; `reason` is
+`startup`, `paired_upgrade`, `cross_key_upgrade` or `shutdown`.
 `cross_key_upgrade` remains a wire variant but this build never emits it.
 A target has exactly `binary_id` and `state_key`. An optional
 retry hint is a u32 bounded to 30000 ms. These DTOs belong to `plakd-wire-types`;
 the neutral envelope carries the product's lifecycle extension.
+The countdown uses the current phase's monotonic deadline, rounded up; zero
+means elapsed or absent. It does not extend the bridge's readiness budget.
 
 A source announces `draining` only after admission of a planned upgrade and
 its admission pause, `restarting` after preparation commits, and `running`
@@ -4326,8 +4330,9 @@ admitted connections are seeded with the current phase, including a directory
 connection arriving mid-drain; registration cannot race publication and miss it. Failure without a
 notice remains possible. A destination serves ordinary Welcome; committed,
 ready carried-root aliases use the existing `RequestRefusal::Moved`, not a new
-successor field. Versions still match exactly: a wire-10 hello gets only
-`version_mismatch`, no Welcome or lifecycle frame.
+successor field. Versions match exactly, without negotiation. A protocol 12
+Hello gets only `{"frame":"refused","kind":"version_mismatch","host":13,"client":12}`.
+There is no Welcome or lifecycle frame after that refusal.
 
 During an admission pause, the host continues to answer Ping, directory reads
 and watches, and authorized read-only console requests. A client may detach or
@@ -4335,15 +4340,15 @@ attach to a resident session without opening a new runtime. A request that
 would open a dormant or still-loading session, start new work, or change
 product state is refused with `backpressure` before delivery, except for the
 exact Stop and Interrupt controls described in §4.6. Clients hold unsent
-drafts themselves; a pause drops blob frames without acknowledgement and
-never queues them for the next generation. Wire 12 has no response keyed
-by blob ID. An explicit, retryable blob refusal is a protocol 13 item.
+drafts themselves. A pause discards blob parts and never queues them for the
+next generation. An identified `blob_refused` is definitive only for that
+blob and does not establish the draft's admission or grant replay permission.
 
 The public stdio bridge reads exactly one bounded newline-terminated Hello,
 within the same ten-second handshake deadline and maximum line bound, before
 discovery or explicit auto-start. It forwards that Hello unchanged if discovery
-succeeds. A mismatch emits only `version_mismatch`, even if the host is absent,
-and no new frame is sent at wire 10. On a matching version, discovery failure
+succeeds. A mismatch emits only `version_mismatch`, even if the host is absent.
+On a matching version, discovery failure
 emits one `HandshakeRefusal::BridgeUnavailable` and closes (exit 1):
 `{"frame":"refused","kind":"bridge_unavailable","reason":"absent","retry_after_ms":500}`.
 The closed `BridgeUnavailableReason` vocabulary is `absent`, `starting`,
@@ -4519,24 +4524,18 @@ repositories using jj answer `vcs_unsupported`; colocated ones say git view.
 The fixed execution policy is chapter 04 §2.6.
 
 `config_patch`, `template_put` and `profile_put`, introduced in protocol 7
-(current client protocol 12), use the P6
+(current client protocol 13), use the P6
 attachment-free seam, typed allowlisted fields and mandatory if_match etags.
 Prepare/confirm binds the exact target/revision; conflict never auto-merges.
 Publication replies distinguish Saved from published/durability-uncertain
 (section 07 §§1, 3, 5). No persisted version, export encoding, binding input
 or runner protocol changes are introduced by these console operations.
 
-Protocol 12 projects both Fast and Ultrafast as Fast in template and profile
-reads: the template read's `extra` is `priority` and the profile role's `fast`
-is true; Standard reads as unset/false. In `template_put`, `fast_mode: true`
-preserves an already-authored Ultrafast tier and otherwise sets Fast.
-`fast_mode: false` removes `service_tier` for Standard. Choose Ultrafast in an
-agent template file and select that template through `root.agent` or a
-profile to configure its default. The separate session model picker and
-settings use the existing generic extras fields: they advertise and accept
-`ultrafast` only for a Codex account and model offering it. Session
-binding, shell and resume views can show that extra or its label; no named
-tier field is added to the protocol.
+Protocol 13 template writes and reads, template readiness and profile roles
+use nullable `service_tier`: `fast`, `ultrafast`, or null for Standard.
+Profile differences identify the exact session value in `root_service_tier`.
+The separate session model picker and settings still use the generic extras
+fields and only advertise a tier for an account and model offering it.
 
 Remote `SaveSettings`, `ApplyProfile {apply:default}` and the legacy
 `RefreshUsageCredential` are local-face-only: refusal is
@@ -4554,13 +4553,12 @@ protocol classification, over `plakous-host-protocol`. Product handlers,
 configuration and reload-file/probe authority stay
 outside that crate. Moving these types changes neither wire bytes nor schema.
 
-On protocol 5, directory attention is independent of activity:
-`needs_operator` means an unresolved approval or credential wait on any
-node, a pending context-capacity decision, or a running root turn whose own
-runner placement is unreachable, even while a turn runs.
-Clients use the busy activity to submit `follow_up` (Queue), never infer
-idle merely from attention. Child and held-child counts cover the whole tree.
-The directory rules below also specify when blocked pending work sets this flag.
+Directory attention is independent of activity. The protocol 13 directory
+reports typed reasons with occurrence timestamps, preview, measured or unknown
+cost, and running and held counts. Clients use busy activity to submit
+`follow_up` (Queue), never infer idle merely from attention. A runner
+reconciliation subphase has the same typed meaning in picker progress,
+directory rows and placement refusals.
 
 Every protocol-5 NodeView carries its own required runner `{name,runner_id}`.
 Local is explicitly `{name:"local",runner_id:"local"}`. The saved node id is
@@ -4569,7 +4567,7 @@ id when no alias remains. This does not expand JSONL v1 tree frames.
 
 Child spawn selects a currently paired placement through its model tool
 arguments or frozen template card (chapter 03 §2). The existing node
-placement record and NodeView carry the result; neither client wire 12 nor the
+placement record and NodeView carry the result; neither client wire nor the
 runner transport changes. The opaque topology tool arguments and result text
 in model calls and maintainer `invoke_tool` gain the runner vocabulary.
 A new child bind or exact reopen on its parent's runner also requires that
@@ -4583,25 +4581,21 @@ This is in-process chrome, not a persisted/exported field or a JSONL v1 event.
 
 Protocol 12 adds session account choice (§4.4.1), `DeleteSession.abandon_jobs`
 (default `false`) and the `running_jobs` lifecycle refusal (§2.5.2). The client
-protocol number is **12** and must match exactly; the runner transport has its
+protocol number is **13** and must match exactly; the runner transport has its
 own version. These wire additions change neither canonical history nor exported
 transcript rows. The separate JSONL v1 command changes are described in §4.3.
 Protocol 5 introduced explicit placement, bounded creation options, directory
 lifecycle and process-local draft identity.
 
-The protocol-12 schema pin is SHA-256
-`378712bb946ce471bb589fc05fa29f31764726c6e5581b87f89d5c1cb864b2ac`:
+The protocol 13 schema pin is SHA-256
+`7fbb3e82a5b1162e69fdc42925d3a31550fdffb051bfe861a4ef386254fec3a4`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
-checks this build-independent pin. The schema title is `plakd wire v2`;
-frame and protocol identifiers retain their exact protocol-12 spellings.
-
-On the protocol-13 definitions branch, `plakd wire schema --protocol 13`
-prints the [draft client contract](../protocol/13/README.md), not a schema
-the host serves. The draft's normalized SHA-256 pin is
-`57c64dba0df2ac898699e8d401e89240d820927957c2bb0101302d891b1e4f42`.
-Plain `plakd wire schema` and exact-match Hello admission remain on 12.
-The coordinated serving switch changes both together.
+checks this build-independent pin. `plakd wire schema` prints the serving
+contract and binary identity. The schema title remains `plakd wire v2`.
+The [protocol 13 contract](../protocol/13/README.md) describes newest-first
+history, exact retained replay, keyed root appends and addressed repair.
+These are product projections, not changes to persisted transcript rows.
 
 Protocol 7 adds process-local `operator_prepare {action}` and
 `operator_confirm {nonce}` through that same attachment-free seam. Prepare
@@ -5740,7 +5734,7 @@ the configured gateway's address.
 
 ### 4.5 The web endpoint
 
-Console operations introduced in protocol 7 (current client protocol 12)
+Console operations introduced in protocol 7 (current client protocol 13)
 have structured host audit evidence: time,
 verified login or socket uid, face, connection/request ID, action and safe
 target, outcome category and applicable revision. This is an ordinary bounded
@@ -6353,7 +6347,7 @@ observes the restored owner. A lost response or timeout without proof is
 starting a destination; do not infer rollback from a missing readiness
 response.
 
-Native login, introduced in protocol 7 (current client protocol 12), runs in
+Native login, introduced in protocol 7 (current client protocol 13), runs in
 a dedicated account-service worker, never the
 session intent mailbox or host action loop. Only the owning authenticated
 connection receives its challenge; poll returns sanitized phase, not a replay
@@ -8592,7 +8586,7 @@ compaction calls.
 
 ### 7.2 Usage and allowances
 
-`account_refresh`, introduced in protocol 7 (current client protocol 12), is
+`account_refresh`, introduced in protocol 7 (current client protocol 13), is
 a confirmed, explicit claimed refresh, not
 `accounts_status`/`accounts_usage` or automatic login. The exact account is
 selected throughout; an unaccepted/inactive integration refuses before provider
@@ -9004,7 +8998,7 @@ caller-supplied endpoint, discovered client id, or copied token can promote a
 profile's provenance.
 
 **Login, logout and API keys are explicit operator operations:** the CLI and
-authenticated host console (introduced in protocol 7; current client protocol 12)
+authenticated host console (introduced in protocol 7; current client protocol 13)
 share the account service. Integrator clients consume that wire contract;
 they do not own credential resolution or storage.
 

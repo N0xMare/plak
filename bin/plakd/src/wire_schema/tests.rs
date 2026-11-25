@@ -3,26 +3,17 @@ use serde_json::Value;
 use super::*;
 
 #[test]
-fn protocol_twelve_schema_has_an_exact_build_independent_pin() {
-    assert_eq!(
-        pin().unwrap(),
-        "378712bb946ce471bb589fc05fa29f31764726c6e5581b87f89d5c1cb864b2ac"
-    );
-}
-
-#[test]
 fn protocol_thirteen_schema_has_an_exact_build_independent_pin() {
-    let mut output = Vec::new();
-    print(&mut output, true).unwrap();
+    let document = schema(None);
+    let output = serde_json::to_string_pretty(&document).unwrap() + "\n";
     assert!(
-        output.as_slice()
+        output.as_bytes()
             == include_bytes!("../../tests/fixtures/protocol-13-wire-schema.json").as_slice(),
-        "regenerate the artifact with plakd wire schema --protocol 13",
+        "the served schema differs from the reviewed artifact",
     );
-    let document: Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(document["wire_version"], v13::WIRE_VERSION);
     assert_eq!(
-        normalized_pin(document).unwrap(),
+        pin().unwrap(),
         "7fbb3e82a5b1162e69fdc42925d3a31550fdffb051bfe861a4ef386254fec3a4",
     );
 }
@@ -47,7 +38,8 @@ fn refs<'a>(value: &'a Value, found: &mut Vec<&'a str>) {
 #[test]
 fn the_schema_is_versioned_and_self_contained() {
     let document = document();
-    assert_eq!(document["wire_version"], Value::from(WIRE_VERSION));
+    assert_eq!(document["wire_version"], Value::from(v13::WIRE_VERSION));
+    assert_eq!(document["binary_id"], crate::build_identity::binary_id());
     assert_self_contained(&document);
     let text = document.to_string();
     for frame in ["hello", "request", "welcome", "event", "snapshot", "blob"] {
@@ -67,8 +59,8 @@ fn assert_self_contained(document: &Value) {
 }
 
 #[test]
-fn the_draft_schema_is_self_contained_and_does_not_advertise_replaced_cases() {
-    let document = draft_schema();
+fn the_served_schema_does_not_advertise_replaced_cases() {
+    let document = schema(None);
     assert_self_contained(&document);
     let text = document.to_string();
     for absent in [

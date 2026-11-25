@@ -4,8 +4,20 @@ pub(super) use plakous::runner::RunnerRow;
 use plakous::runner::{PlacementFailure, ProbePhase, RunnerStatus as ProbeStatus};
 use plakous_host_protocol::wire;
 
-#[allow(dead_code, reason = "protocol 13 is not served yet")]
 pub(super) mod v13;
+
+pub(super) fn opening_barrier(phase: ProbePhase, row: Option<&RunnerRow>) -> bool {
+    phase == ProbePhase::Reconcile
+        && row.is_none_or(|row| {
+            matches!(
+                row.status,
+                ProbeStatus::Blocked(PlacementFailure::RunnerUnreachable {
+                    phase: ProbePhase::Reconcile,
+                    timed_out: false,
+                }),
+            )
+        })
+}
 
 pub(super) const fn phase(phase: ProbePhase) -> Option<wire::RunnerPhase> {
     Some(match phase {
@@ -15,13 +27,13 @@ pub(super) const fn phase(phase: ProbePhase) -> Option<wire::RunnerPhase> {
         ProbePhase::Bind => wire::RunnerPhase::Bind,
         ProbePhase::Options => wire::RunnerPhase::Options,
         ProbePhase::Discovery => wire::RunnerPhase::Discovery,
-        ProbePhase::Reconcile
-        | ProbePhase::ReconcileStore
-        | ProbePhase::ReconcileObsoleteLines
-        | ProbePhase::ReconcileTerminals
-        | ProbePhase::ReconcileJobs
-        | ProbePhase::ReconcileStops
-        | ProbePhase::ReconcileForeground => wire::RunnerPhase::Reconcile,
+        ProbePhase::Reconcile => wire::RunnerPhase::Reconcile,
+        ProbePhase::ReconcileStore => wire::RunnerPhase::ReconcileStore,
+        ProbePhase::ReconcileObsoleteLines => wire::RunnerPhase::ReconcileObsoleteLines,
+        ProbePhase::ReconcileTerminals => wire::RunnerPhase::ReconcileTerminals,
+        ProbePhase::ReconcileJobs => wire::RunnerPhase::ReconcileJobs,
+        ProbePhase::ReconcileStops => wire::RunnerPhase::ReconcileStops,
+        ProbePhase::ReconcileForeground => wire::RunnerPhase::ReconcileForeground,
         ProbePhase::LinkLost => wire::RunnerPhase::LinkLost,
     })
 }
@@ -220,11 +232,11 @@ mod tests {
             phase: failed,
             timed_out: false,
         };
-        assert_eq!(phase(failed), Some(wire::RunnerPhase::Reconcile));
+        assert_eq!(phase(failed), Some(wire::RunnerPhase::ReconcileJobs));
         assert_eq!(
             reason(failure.clone(), None, &[]),
             Ok(wire::PlacementReason::RunnerUnreachable {
-                phase: wire::RunnerPhase::Reconcile,
+                phase: wire::RunnerPhase::ReconcileJobs,
                 timed_out: false,
             })
         );

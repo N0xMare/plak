@@ -1,4 +1,4 @@
-//! Protocol 13 history requests, deliberately not installed in a listener.
+//! Protocol 13 history requests and bounded page framing.
 //! Call the handlers off the async reactor (for example, via `spawn_blocking`):
 //! SQLite snapshots, rendering, and frame sizing are synchronous.
 
@@ -170,6 +170,31 @@ pub(crate) fn older(
         Ok(parts) => prepend(answer(id, AnswerV13::HistoryStarted), parts),
         Err(error) => vec![bound_refusal(id, error)],
     }
+}
+
+pub(crate) fn repair(
+    paths: &PlakPaths,
+    binding: &HistoryAttachment,
+    target: BaselineTarget,
+    root: &RootTranscript,
+) -> Option<Vec<HostFrameV13>> {
+    let capture = root.capture(binding.line.session())?;
+    if capture.revision != target.revision.revision {
+        return None;
+    }
+    let page = binding
+        .reader
+        .read(paths, |history| {
+            if capture.applied != history.applied
+                || fence(&history.line, &history.prune)? != binding.fence
+            {
+                return Err(HistoryError::StaleCapture);
+            }
+            let turns = turns_at(&paths.runtime_database(), &history, None)?;
+            first(&history, &turns)
+        })
+        .ok()?;
+    framing::baseline(page, target, LiveTail::captured(capture)).ok()
 }
 
 pub(crate) fn read_row(

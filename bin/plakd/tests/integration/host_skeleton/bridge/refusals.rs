@@ -19,17 +19,17 @@ fn refusal(fixture: &Fixture, reason: &str) {
 }
 
 #[test]
-fn bridge_refusal_wire_ten_never_gets_a_wire_eleven_discovery_frame_or_starts_a_host() {
+fn bridge_refusal_of_protocol_twelve_does_not_discover_or_start_a_host() {
     let Some(fixture) = fixture() else { return };
     let result = output_after_hello(
         fixture
             .command()
             .args(["host", "connect", "--stdio", "--auto-start"]),
-        10,
+        12,
     );
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap(),
-        json!({"frame":"refused","kind":"version_mismatch","host":12,"client":10})
+        json!({"frame":"refused","kind":"version_mismatch","host":WIRE_VERSION,"client":12})
     );
     assert!(!fixture.home().join("host/host.lock").exists());
 }

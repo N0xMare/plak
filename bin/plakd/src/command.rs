@@ -458,9 +458,7 @@ pub(crate) enum Command {
         auto_start: bool,
     },
     /// Hidden `plakd wire schema`: this build's wire v2 JSON Schema.
-    WireSchema {
-        draft: bool,
-    },
+    WireSchema,
 }
 
 /// Operator-selected reasoning effort for subscription runs.
@@ -634,7 +632,7 @@ impl Command {
             | Self::HostConnect { .. }
             | Self::HostUpgrade { .. }
             | Self::HostUpgradeVerdict { .. } => "host",
-            Self::WireSchema { .. } => "wire",
+            Self::WireSchema => "wire",
         }
     }
 
@@ -685,7 +683,7 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
         Command::StatusAll
             | Command::StatusJson
             | Command::StoreBackup { .. }
-            | Command::WireSchema { .. }
+            | Command::WireSchema
             | Command::HostConnect { .. }
             | Command::HostUpgradeVerdict { acknowledge: None }
             | Command::AccountsList

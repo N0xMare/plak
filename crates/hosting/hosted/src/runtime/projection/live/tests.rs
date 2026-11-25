@@ -99,6 +99,7 @@ fn coalescing_a_b_a_during_a_pass_preserves_new_settled_rows() {
         product_id: id.clone(),
         followed: config.session.plakous_locator.unwrap(),
         tree_id: id.clone(),
+        publish_cursor: Arc::new(|_| {}),
         emit_settled: Arc::new(move |row| sink.lock().unwrap().push(row)),
     };
     let executor = plakous::application::ApplicationExecutor::new().unwrap();
@@ -183,6 +184,7 @@ fn a_failed_live_page_drops_its_views_and_the_next_pass_reloads() {
         product_id: id.clone(),
         followed: record.plakous_locator.unwrap(),
         tree_id: id,
+        publish_cursor: Arc::new(|_| {}),
         emit_settled: Arc::new(|_| {}),
     };
     let executor = plakous::application::ApplicationExecutor::new().unwrap();
@@ -290,6 +292,7 @@ fn a_facade_read_failure_on_page_two_reloads_the_last_committed_page() {
                 product_id: id.clone(),
                 followed,
                 tree_id: id.clone(),
+                publish_cursor: Arc::new(|_| {}),
                 emit_settled: Arc::new(|_| {}),
             };
             let reads = store.view_read_count();
@@ -476,6 +479,7 @@ fn recording_target(
         product_id: id.to_owned(),
         followed: record.plakous_locator.unwrap(),
         tree_id: id.to_owned(),
+        publish_cursor: Arc::new(|_| {}),
         emit_settled: Arc::new(move |row| {
             if let TranscriptRow::Tool(tool) = row {
                 sink.lock().unwrap().push(tool.call_id);
@@ -625,6 +629,7 @@ fn settling_keeps_the_task_and_resyncs_after_a_refused_pass() {
         product_id: id.clone(),
         followed: record.plakous_locator.unwrap(),
         tree_id: id.clone(),
+        publish_cursor: Arc::new(|_| {}),
         emit_settled: Arc::new(|_| {}),
     };
     let executor = plakous::application::ApplicationExecutor::new().unwrap();

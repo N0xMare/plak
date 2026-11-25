@@ -26,6 +26,12 @@ pub enum TemplateChange {
     FastMode {
         value: bool,
     },
+    /// Internal, after decoding the protocol 13 template operation.
+    #[serde(skip)]
+    #[schemars(skip)]
+    ServiceTier {
+        value: Option<crate::v13::ServiceTier>,
+    },
     Composition {
         value: Option<CompositionSelection>,
     },

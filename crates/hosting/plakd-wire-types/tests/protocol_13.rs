@@ -30,7 +30,7 @@ fn examples_round_trip_as_complete_frames() -> Result<(), Box<dyn std::error::Er
     let client = round_trip::<ClientFrame>(CLIENT)?;
     let host = round_trip::<HostFrame>(HOST)?;
     assert_eq!(client[0]["proto"], 13);
-    assert_eq!(wire::WIRE_VERSION, 12);
+    assert_eq!(wire::WIRE_VERSION, 13);
 
     let append = &host[5]["observation"]["body"];
     let first = &host[1];

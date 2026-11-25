@@ -32,6 +32,9 @@ mod offline_e2e;
 mod offline_support;
 mod product_config_fixtures;
 mod product_doctor_contract;
+#[cfg(all(feature = "test-support", feature = "web"))]
+#[path = "support/protocol_13.rs"]
+mod protocol_13;
 #[cfg(feature = "maintainer")]
 mod reload_rehearsal;
 #[cfg(unix)]

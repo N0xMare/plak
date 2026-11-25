@@ -79,6 +79,15 @@ fn field(
                 })
             }),
         ),
+        C::ServiceTier { value } => (
+            "service_tier",
+            value.map(|tier| {
+                Value::from(match tier {
+                    plakd_wire_types::v13::ServiceTier::Fast => "fast",
+                    plakd_wire_types::v13::ServiceTier::Ultrafast => "ultrafast",
+                })
+            }),
+        ),
         C::Composition { value } => (
             "composition",
             value.map(|value| Value::from(value.as_str())),

@@ -1,8 +1,11 @@
+#[cfg(test)]
+use plakd_wire_types::v13::{HostFrameV13, RequestRefusal, RequestRefusalV13, RunnerOptions};
 use plakd_wire_types::v13::{
-    HostFrameV13, PlacementReason, PlacementReasonV13, ReconcileSubphase, RequestRefusal,
-    RequestRefusalV13, RunnerOptions, RunnerPhase, RunnerStatus,
+    PlacementReason, PlacementReasonV13, ReconcileSubphase, RunnerPhase, RunnerStatus,
 };
-use plakous_host_protocol::wire::{self, RunnerLabel};
+#[cfg(test)]
+use plakous_host_protocol::wire;
+use plakous_host_protocol::wire::RunnerLabel;
 
 use super::{PlacementFailure, ProbePhase, ProbeStatus, RunnerRow};
 
@@ -60,11 +63,8 @@ fn placement_reason(
         .ok()
 }
 
-pub(in super::super) fn refusal(
-    runner: &RunnerLabel,
-    failure: PlacementFailure,
-    rows: &[RunnerRow],
-) -> RequestRefusal {
+#[cfg(test)]
+fn refusal(runner: &RunnerLabel, failure: PlacementFailure, rows: &[RunnerRow]) -> RequestRefusal {
     if let PlacementFailure::RunnerUnreachable {
         phase: ProbePhase::Reconcile,
         timed_out,
@@ -120,11 +120,8 @@ fn blocked(failure: PlacementFailure, rows: &[RunnerRow]) -> RunnerStatus {
     })
 }
 
-pub(in super::super) fn options(
-    shared: wire::RunnerOptions,
-    row: &RunnerRow,
-    rows: &[RunnerRow],
-) -> RunnerOptions {
+#[cfg(test)]
+fn options(shared: wire::RunnerOptions, row: &RunnerRow, rows: &[RunnerRow]) -> RunnerOptions {
     RunnerOptions {
         runner: shared.runner,
         aliases: shared.aliases,
@@ -139,7 +136,8 @@ pub(in super::super) fn options(
     }
 }
 
-pub(in super::super) fn options_progress(
+#[cfg(test)]
+fn options_progress(
     request_id: wire::RequestId,
     runner: RunnerLabel,
     probe: ProbePhase,

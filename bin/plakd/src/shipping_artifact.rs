@@ -63,6 +63,8 @@ struct Rustc {
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct BuildInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) binary_id: Option<String>,
     pub(crate) export: Export,
     pub(crate) flavor: String,
     pub(crate) gateway: Versions,
@@ -154,6 +156,14 @@ impl Manifest {
             facts.validate()?;
         }
         check(
+            info.binary_id.as_ref().is_none_or(|id| {
+                self.files
+                    .get("plakd")
+                    .is_some_and(|file| file.display_id == *id)
+            }),
+            "build-info binary id differs",
+        )?;
+        check(
             self.snapshot_id == snapshot_id(&self.files),
             "snapshot id differs",
         )
@@ -188,7 +198,8 @@ impl BuildInfo {
             "invalid state key",
         )?;
         check(
-            self.export.write > 0
+            self.binary_id.as_ref().is_none_or(|id| hex(id, 12))
+                && self.export.write > 0
                 && sorted_positive(&self.export.read)
                 && self.export.read.contains(&self.export.write)
                 && self.host_upgrade.coordinator > 0

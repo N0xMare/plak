@@ -6,8 +6,8 @@ use plakd_wire_types::{PlakExtension, console::HostRequest};
 use plakous_host_protocol::wire::{ClientFrame, HostFrame, WIRE_VERSION};
 
 #[test]
-fn protocol_twelve_terminals_have_separate_bytes_cursors_and_refusals() {
-    assert_eq!(WIRE_VERSION, 12);
+fn shared_terminals_have_separate_bytes_cursors_and_refusals() {
+    assert_eq!(WIRE_VERSION, 13);
     for line in include_str!("fixtures/terminal-v9.jsonl").lines() {
         let value: serde_json::Value = serde_json::from_str(line).unwrap();
         let encoded = if value["frame"] == "request" {

@@ -88,16 +88,22 @@ fn template(console: &Console, id: &str, changes: Vec<TemplateChange>) -> HostRe
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn protocol_twelve_fast_toggle_round_trips_without_downgrading_ultrafast() -> TestResult {
+async fn protocol_thirteen_round_trips_each_named_service_tier_and_standard() -> TestResult {
+    use plakd_wire_types::v13::ServiceTier;
+
     let (_root, console) = fixture();
     let id = "worker";
     let path = console.paths.user_agents_dir().join("worker.toml");
     std::fs::create_dir_all(console.paths.user_agents_dir())?;
     let standard = "account = \"codex\"\nmodel = \"gpt-6.2-sol\"\n";
-    for (starting, toggle, stored, extra) in [
-        (None, true, Some("fast"), Some("priority")),
-        (Some("ultrafast"), true, Some("ultrafast"), Some("priority")),
-        (Some("ultrafast"), false, None, None),
+    for (starting, tier, stored) in [
+        (None, Some(ServiceTier::Fast), Some("fast")),
+        (
+            Some("fast"),
+            Some(ServiceTier::Ultrafast),
+            Some("ultrafast"),
+        ),
+        (Some("ultrafast"), None, None),
     ] {
         let mut text = standard.to_owned();
         if let Some(tier) = starting {
@@ -107,12 +113,13 @@ async fn protocol_twelve_fast_toggle_round_trips_without_downgrading_ultrafast()
         let request = template(
             &console,
             id,
-            vec![TemplateChange::FastMode { value: toggle }],
+            vec![TemplateChange::ServiceTier { value: tier }],
         );
-        assert!(matches!(
-            console.request(owner(1), request).await,
-            Ok(HostResponse::Saved { .. })
-        ));
+        let outcome = console.request(owner(1), request).await;
+        assert!(
+            matches!(outcome, Ok(HostResponse::Saved { .. })),
+            "{outcome:?}"
+        );
         let file = std::fs::read_to_string(&path)?;
         let parsed = crate::product_config::parse_template(&file, id)?;
         assert_eq!(parsed.service_tier(), stored);
@@ -124,7 +131,7 @@ async fn protocol_twelve_fast_toggle_round_trips_without_downgrading_ultrafast()
         let HostResponse::TemplatesGet { template } = response else {
             return Err("template body".into());
         };
-        assert_eq!(template.body.extra.as_deref(), extra);
+        assert_eq!(template.body.extra.as_deref(), stored);
     }
     Ok(())
 }

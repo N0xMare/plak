@@ -16,6 +16,10 @@ pub struct ProfileRole {
     pub effort: String,
     /// Codex fast lane.
     pub fast: bool,
+    /// Exact named tier retained for the product's framed projection.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub service_tier: Option<String>,
     /// Nesting below the working set: 0 for a working-set card, 1 for a
     /// template one of those spawns, and so on.
     pub depth: usize,
@@ -77,6 +81,13 @@ pub enum ProfileDifference {
     RootFast {
         /// Frozen session fast-lane selection.
         session: bool,
+    },
+    /// Exact named tier for the product's framed projection.
+    #[serde(skip)]
+    #[schemars(skip)]
+    RootServiceTier {
+        /// The session's exact tier, if any.
+        session: Option<String>,
     },
     /// Working-set names or order differ.
     WorkingSet,

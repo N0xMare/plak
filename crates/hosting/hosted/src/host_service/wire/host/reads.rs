@@ -1,6 +1,6 @@
 use super::{
     Answer, CliResult, ClientFrame, DeserializeOwned, Forwarded, HostConnection, HostFrame,
-    Outcome, ProtocolExtension, RequestRefusal, Serialize, Write, write_frame,
+    Outcome, ProtocolExtension, RequestRefusal, Serialize, Write,
 };
 use plakous_host_protocol::wire::RequestId;
 use std::collections::BTreeSet;
@@ -126,13 +126,10 @@ where
         };
         if let Some(refusal) = refused {
             self.audit_host_refusal(id, &refusal);
-            write_frame(
-                &mut self.out,
-                &HostFrame::<P>::Response {
-                    id,
-                    outcome: Outcome::Refused(refusal),
-                },
-            )?;
+            self.write(&HostFrame::<P>::Response {
+                id,
+                outcome: Outcome::Refused(refusal),
+            })?;
             if oversized {
                 self.leave();
             }
@@ -247,7 +244,7 @@ where
                 }
             };
             let frame = HostFrame::<P>::Response { id, outcome };
-            write_frame(&mut self.out, &frame)?;
+            self.write(&frame)?;
             if let HostFrame::Response {
                 outcome: Outcome::Ok(Answer::Host { response }),
                 ..

@@ -1,4 +1,4 @@
-//! Protocol 13 client definitions. No serving path uses these types yet.
+//! Protocol 13 client frames and their product DTOs.
 
 use plakous_host_protocol::observation::ObservationClass;
 use plakous_host_protocol::views::transcript::{RowKey, TranscriptScope};
@@ -23,8 +23,8 @@ pub use transcript::*;
 mod usage;
 pub use usage::*;
 
-/// Draft client version; the served wire version is still protocol 12.
-pub const WIRE_VERSION: u32 = 13;
+/// The exact client and host handshake version.
+pub use plakous_host_protocol::wire::WIRE_VERSION;
 pub const PAGE_TARGET_BYTES: usize = 256 * 1024;
 pub const SESSION_PREVIEW_BYTES: usize = 160;
 pub const ATTACHMENT_STATUS_INTERVAL_SECONDS: u64 = 10;

@@ -76,13 +76,14 @@ pub(super) fn separate_stop_timestamp(fixture: &Fixture) {
 pub(super) fn review_rows(host: &Host) -> Vec<SessionRow> {
     let stream = UnixStream::connect(&host.socket).unwrap();
     stream.set_read_timeout(Some(WAIT)).unwrap();
-    let (send, receive, _) = client::connect_directory::<PlakExtension>(
+    let (send, receive, _) = client::connect_directory_with::<PlakExtension>(
         Transport::new(stream.try_clone().unwrap(), stream),
         Hello {
             proto: WIRE_VERSION,
             binary_id: "review".into(),
             caps: Vec::new(),
         },
+        crate::protocol_13::decode,
     )
     .unwrap();
     send.request_operation(Op::ListSessions {
@@ -100,13 +101,14 @@ pub(super) fn review_rows(host: &Host) -> Vec<SessionRow> {
 pub(super) fn create(host: &Host, fixture: &Fixture) -> Option<String> {
     let stream = UnixStream::connect(&host.socket).ok()?;
     stream.set_read_timeout(Some(WAIT)).unwrap();
-    let (send, receive, _) = client::connect_directory::<PlakExtension>(
+    let (send, receive, _) = client::connect_directory_with::<PlakExtension>(
         Transport::new(stream.try_clone().unwrap(), stream),
         Hello {
             proto: WIRE_VERSION,
             binary_id: "crash-terminal".into(),
             caps: Vec::new(),
         },
+        crate::protocol_13::decode,
     )
     .ok()?;
     send.request_operation(Op::NewSession {

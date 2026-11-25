@@ -8,6 +8,7 @@ use crate::{CliFailure, CliResult, ProcessOutcome, carry, commands::runner, home
 
 #[derive(Serialize)]
 struct BuildInfo<'a> {
+    binary_id: &'static str,
     export: Export,
     flavor: String,
     gateway: Versions<&'static [u16]>,
@@ -56,6 +57,7 @@ pub(crate) fn print(out: &mut dyn Write) -> CliResult<ProcessOutcome> {
     let retention = runner::retention_versions();
     let schema_pin = wire_schema::pin().map_err(|error| CliFailure::new(error.to_string()))?;
     let info = BuildInfo {
+        binary_id: super::binary_id(),
         export: Export {
             read: &carry::IMPORTABLE_VERSIONS,
             write: carry::VERSION,

@@ -143,13 +143,18 @@ fn production_predecessor_upgrade_preserves_live_work() {
     let mut local = start_local_runner(&fixture, &old);
     let runner_pids = (local.id(), paired.daemon.id());
     let mut host = start_host(&fixture, &old, &paired, &socket, &workspace);
-    runner::wait_local_runner_ready(&host);
     let pid = host.child.as_ref().unwrap().id();
     let inode = std::fs::symlink_metadata(&socket).unwrap().ino();
-    let mut client = Client::connect(&host);
+    let old_schema: Value = serde_json::from_str(&run(fixture
+        .base_command_from(&old)
+        .args(["wire", "schema"])))
+    .unwrap();
+    let old_wire = u32::try_from(old_schema["wire_version"].as_u64().unwrap()).unwrap();
+    let mut client = Client::connect_at_version(&host.socket, old_wire);
+    runner::wait_local_runner_ready_on(&mut client);
     paired.ready(&mut client);
     let login = crate::web_endpoint::handoff_cookie(&socket);
-    let mut web = Browser::connect(&socket, &login);
+    let mut web = Browser::connect(&socket, &login, old_wire);
     let mut upgrade = upgrade_command(&fixture, &candidate, &paired, new_id);
     if !same_key {
         let (_, node) = create_root(&mut client, &workspace);
@@ -194,7 +199,7 @@ fn production_predecessor_upgrade_preserves_live_work() {
     assert_host_reexec(&mut host, &socket, pid, inode);
     assert_private_backup(&fixture);
 
-    let mut web = Browser::connect(&socket, &login);
+    let mut web = Browser::connect(&socket, &login, WIRE_VERSION);
     assert_ne!(web.welcome.host_generation, old_generation);
     assert_eq!(web.welcome.binary_id, new_id);
     runner::wait_local_runner_ready(&host);
@@ -425,7 +430,7 @@ fn verify_resumed_root(
     original_job: (i32, i32),
 ) {
     web.attach(&root.node);
-    web.snapshot_contains(&[HISTORY[0], HISTORY[1]]);
+    web.history_contains(&[HISTORY[0], HISTORY[1]]);
     assert_eq!(custody_pid(fixture, &root.node.tree_id), Some(pid));
     let shells = std::fs::read_to_string(fixture.root.join("shell-invocations")).unwrap();
     let pid_text = pid.to_string();

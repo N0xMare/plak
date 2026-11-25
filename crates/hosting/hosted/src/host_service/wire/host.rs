@@ -25,7 +25,7 @@ use plakous_host_protocol::ProtocolExtension;
 use plakous_host_protocol::wire::{
     Answer, AttachmentId, ClientFrame, HostFrame, NodeAddress, Op, Outcome, RequestRefusal,
     ResidentReason, SessionActivity, SessionEnvironment, SessionResidency, SessionRow, Welcome,
-    WireError, decode_line,
+    WireError,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -33,7 +33,9 @@ use tokio::sync::watch;
 
 use super::super::ResidencyHold;
 use super::slot::{OpenedSession, SessionSlot, SlotView};
-use super::{BlobRefusalOutput, Face, WireConnection, WireSession, host_welcome, write_frame};
+use super::{
+    BlobRefusalOutput, Face, FrameOutput, WireConnection, WireSession, host_welcome, write_encoded,
+};
 use crate::error::{CliFailure, CliResult};
 
 use super::super::retained::ViewportBase;
@@ -238,11 +240,13 @@ pub struct Creation<'a> {
 mod attach;
 mod blobs;
 mod directory;
+mod history;
 mod lifecycle;
 mod product;
 mod upgrade_controls;
 mod verdicts;
-pub use directory::DirectorySlot;
+pub use directory::{DirectoryProjection, DirectorySlot};
+pub use history::{ClientInput, HistoryBinding, PreparedViewport, TranscriptRead, ViewportMode};
 pub use lifecycle::{LifecycleOutput, LifecycleState};
 pub use product::HostSessions;
 
@@ -656,7 +660,8 @@ struct ReadOnlyLink<P: ProtocolExtension, W: Write> {
 }
 
 /// A connection's host attachment: the rows it sent last.
-struct Watch {
+struct Watch<P: ProtocolExtension> {
+    projection: Option<Box<dyn DirectoryProjection<P>>>,
     include_archived: bool,
     attachment: AttachmentId,
     seq: u64,
@@ -693,7 +698,7 @@ pub struct HostConnection<P: ProtocolExtension, W: Write> {
     /// its session connection, and its hold on the session's residency,
     /// stay until the stop is answered.
     draining: Option<NodeLink<P, W>>,
-    watch: Option<Watch>,
+    watch: Option<Watch<P>>,
 }
 
 impl<P: ProtocolExtension, W: Write> Drop for HostConnection<P, W> {
@@ -768,26 +773,26 @@ where
             }
             return Ok(reading);
         }
-        let frame = match decode_line::<ClientFrame<P>>(&text) {
+        let (frame, retained) = match self.host.sessions.decode_frame(&text) {
             // A second hello, a bye, or a line that is not a frame: the
             // client left.
-            Ok(ClientFrame::Hello(_) | ClientFrame::Bye) | Err(_) => {
+            Ok(ClientInput::Frame(ClientFrame::Hello(_) | ClientFrame::Bye, _)) | Err(_) => {
                 self.leave();
                 return Ok(false);
             }
-            Ok(frame) => frame,
+            Ok(ClientInput::Frame(frame, retained)) => (frame, retained),
+            Ok(ClientInput::Transcript(id, attachment, request)) => {
+                return self.read_transcript(id, attachment, request);
+            }
         };
         if *paused && !self.allowed_during_pause(&frame) {
             match frame {
                 ClientFrame::Request { id, .. } => {
                     self.discard_blob_staging()?;
-                    write_frame(
-                        &mut self.out,
-                        &HostFrame::<P>::Response {
-                            id,
-                            outcome: Outcome::Refused(RequestRefusal::Backpressure),
-                        },
-                    )?;
+                    self.write(&HostFrame::<P>::Response {
+                        id,
+                        outcome: Outcome::Refused(RequestRefusal::Backpressure),
+                    })?;
                 }
                 ClientFrame::Blob(chunk) => self.discard_blob_part(chunk.id)?,
                 _ => {}
@@ -808,15 +813,12 @@ where
         };
         if self.attach_in_flight(id) {
             self.discard_blob_staging()?;
-            write_frame(
-                &mut self.out,
-                &HostFrame::<P>::Response {
-                    id,
-                    outcome: Outcome::Refused(RequestRefusal::Malformed {
-                        detail: "request id is already in flight".into(),
-                    }),
-                },
-            )?;
+            self.write(&HostFrame::<P>::Response {
+                id,
+                outcome: Outcome::Refused(RequestRefusal::Malformed {
+                    detail: "request id is already in flight".into(),
+                }),
+            })?;
             return Ok(true);
         }
         if !matches!(op, Op::Intent { .. }) {
@@ -832,10 +834,10 @@ where
         ) {
             self.flush_attachments(false)?;
         }
-        match self.request(id, op, &text, !*paused)? {
+        match self.request(id, op, &text, !*paused, retained)? {
             Forwarded::Answered(outcome) => {
                 self.discard_blob_staging()?;
-                write_frame(&mut self.out, &HostFrame::<P>::Response { id, outcome })?;
+                self.write(&HostFrame::<P>::Response { id, outcome })?;
                 Ok(true)
             }
             Forwarded::Reading(reading) => Ok(reading),
@@ -873,6 +875,7 @@ where
         op: Op<P>,
         text: &str,
         allow_open: bool,
+        retained: Option<ViewportRevision>,
     ) -> CliResult<Forwarded<P>> {
         let answered = |outcome| Ok(Forwarded::Answered(outcome));
         let refused = |refusal| Ok(Forwarded::Answered(Outcome::Refused(refusal)));
@@ -936,7 +939,7 @@ where
                 abandon_jobs,
             } => answered(self.delete_session(session, abandon_children, abandon_jobs)),
             Op::StopSession { session } => self.stop(&session, text),
-            Op::Attach { node } => self.start_attach(request_id, node, text, allow_open),
+            Op::Attach { node } => self.start_attach(request_id, node, text, allow_open, retained),
             Op::RetryAttach {
                 attachment,
                 request_id,
@@ -973,6 +976,7 @@ where
             .next_host_attachment
             .fetch_add(1, Ordering::Relaxed);
         self.watch = Some(Watch {
+            projection: Arc::clone(&self.host.sessions).directory_projection(),
             include_archived,
             attachment,
             seq: 0,
@@ -1164,15 +1168,19 @@ where
         workspace: Option<&plakous_host_protocol::wire::WorkspaceProbe>,
     ) -> Outcome<P> {
         let out = &mut self.out;
+        let host = &self.host;
         let mut progress = |progress: PickerProgress| {
-            write_frame::<P>(
+            write_encoded(
                 out,
-                &HostFrame::OptionsProgress {
-                    request_id,
-                    runner: progress.runner,
-                    phase: progress.phase,
-                    row: progress.row,
-                },
+                host.sessions.encode_frame(
+                    host,
+                    &HostFrame::OptionsProgress {
+                        request_id,
+                        runner: progress.runner,
+                        phase: progress.phase,
+                        row: progress.row,
+                    },
+                ),
             )
             .map_err(|failure| failure.message().to_owned())
         };
@@ -1247,41 +1255,19 @@ where
     }
     fn attach_resident(
         &mut self,
-        (session, hold, releases): super::slot::HeldSession<P>,
+        held: super::slot::HeldSession<P>,
         text: &str,
     ) -> CliResult<Forwarded<P>> {
         if self
             .node
             .as_ref()
-            .is_some_and(|link| Arc::ptr_eq(&session, &link.session) && link.releases == releases)
+            .is_some_and(|link| Arc::ptr_eq(&held.0, &link.session) && link.releases == held.2)
         {
             return self.forward(text.to_owned()).map(Forwarded::Reading);
         }
-        let stopped = Arc::clone(&self.stopped);
-        let sessions = Arc::clone(&self.host.sessions);
-        let mut connection = session
-            .connect(self.out.clone(), self.face, move || stopped())
-            .with_buffered_output(self.buffered_output)
-            .with_snapshot_output(self.snapshot_output.clone())
-            .with_blob_refusal_output(self.blob_refusal_output)
-            .with_drafts(self.host.drafts.clone())
-            .with_runner_labels(Arc::new(move |id| sessions.runner_label(id)));
-        if let Some(login) = &self.login {
-            connection = connection.identified(login.clone());
-        }
-        if let Some(output) = self.status_output {
-            connection = connection.with_attachment_status(output);
-        }
-        let mut link = NodeLink {
-            changes: session.changes(),
-            releases,
-            session,
-            connection,
-            _hold: hold,
-        };
-        // The connection's attachment moves only once the new one is made:
-        // a refused attach leaves it as it was.
-        if !link.connection.frame(Ok(text.to_owned()))? {
+        let mut link = self.resident_link(held);
+        // A refused attach leaves the previous link in place.
+        if !link.connection.frame_decoded(self.dispatch_frame(text))? {
             self.leave();
             return Ok(Forwarded::Reading(false));
         }
@@ -1292,6 +1278,35 @@ where
             link.connection.leave();
         }
         Ok(Forwarded::Reading(true))
+    }
+
+    fn resident_link(
+        &self,
+        (session, hold, releases): super::slot::HeldSession<P>,
+    ) -> NodeLink<P, W> {
+        let stopped = Arc::clone(&self.stopped);
+        let sessions = Arc::clone(&self.host.sessions);
+        let mut connection = session
+            .connect(self.out.clone(), self.face, move || stopped())
+            .with_buffered_output(self.buffered_output)
+            .with_frame_output(Some(self.frame_output()))
+            .with_snapshot_output(self.snapshot_output.clone())
+            .with_blob_refusal_output(self.blob_refusal_output)
+            .with_drafts(self.host.drafts.clone())
+            .with_runner_labels(Arc::new(move |id| sessions.runner_label(id)));
+        if let Some(login) = &self.login {
+            connection = connection.identified(login.clone());
+        }
+        if let Some(output) = self.status_output {
+            connection = connection.with_attachment_status(output);
+        }
+        NodeLink {
+            changes: session.changes(),
+            releases,
+            session,
+            connection,
+            _hold: hold,
+        }
     }
 
     /// Whether `session` is one of this host's: a slot holds it, or the
@@ -1413,7 +1428,7 @@ where
             .and_then(|link| link.connection.attachment());
         self.unlink();
         if let Some(attachment) = attachment {
-            write_frame(&mut self.out, &HostFrame::<P>::Detached { attachment })?;
+            self.write(&HostFrame::<P>::Detached { attachment })?;
         }
         Ok(())
     }
@@ -1422,8 +1437,9 @@ where
     /// client has left. A connection left holding nothing lets its session
     /// go.
     fn forward(&mut self, text: String) -> CliResult<bool> {
+        let frame = self.dispatch_frame(&zeroize::Zeroizing::new(text));
         if let Some(link) = &mut self.readonly {
-            let reading = link.connection.frame(Ok(text))?;
+            let reading = link.connection.frame_decoded(frame)?;
             if !reading || !link.connection.holding() {
                 self.readonly = None;
             }
@@ -1432,7 +1448,7 @@ where
         let Some(link) = &mut self.node else {
             return Ok(true);
         };
-        if !link.connection.frame(Ok(text))? {
+        if !link.connection.frame_decoded(frame)? {
             self.leave();
             return Ok(false);
         }
@@ -1440,6 +1456,25 @@ where
             self.unlink();
         }
         Ok(true)
+    }
+
+    fn frame_output(&self) -> FrameOutput<P> {
+        let host = Arc::clone(&self.host);
+        Arc::new(move |frame| host.sessions.encode_frame(&host, frame))
+    }
+
+    fn dispatch_frame(&self, text: &str) -> Result<ClientFrame<P>, WireError> {
+        match self.host.sessions.decode_frame(text)? {
+            ClientInput::Frame(frame, _) => Ok(frame),
+            ClientInput::Transcript(..) => {
+                Err(WireError::Malformed("not a dispatcher frame".into()))
+            }
+        }
+    }
+
+    fn write(&mut self, frame: &HostFrame<P>) -> CliResult<()> {
+        let line = self.host.sessions.encode_frame(&self.host, frame);
+        write_encoded(&mut self.out, line)
     }
 
     /// Writes what the node attachment and the host attachment owe: a
@@ -1474,7 +1509,7 @@ where
             let Some(frame) = self.host.sessions.host_stream(&context) else {
                 break;
             };
-            write_frame(&mut self.out, &frame)?;
+            self.write(&frame)?;
         }
         Ok(())
     }
@@ -1577,6 +1612,16 @@ where
         if !watch.dirty && !host_changed && !product_changed {
             return Ok(());
         }
+        if let Some(projection) = &mut watch.projection {
+            watch.dirty = false;
+            let seq = watch.seq + 1;
+            let update =
+                projection.update(&self.host, watch.attachment, seq, watch.include_archived);
+            if matches!(update, Ok(Some(_))) {
+                watch.seq = seq;
+            }
+            return write_encoded(&mut self.out, update);
+        }
         // A failed read is skipped; the next publication permits a retry.
         let Ok(rows) = self.host.directory_with_archived(watch.include_archived) else {
             return Ok(());
@@ -1616,7 +1661,7 @@ where
             snapshot,
             rows: out,
         };
-        write_frame(&mut self.out, &frame)
+        self.write(&frame)
     }
 
     /// Waits until the connection may have something to write: the node

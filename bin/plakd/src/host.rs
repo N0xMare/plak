@@ -20,7 +20,6 @@ mod idle;
 mod legacy_upgrade;
 pub(crate) mod lifecycle;
 mod lock;
-#[cfg(test)]
 pub(crate) mod protocol_13;
 pub(crate) mod reexec;
 pub(crate) use reexec::receive as receive_reexec;

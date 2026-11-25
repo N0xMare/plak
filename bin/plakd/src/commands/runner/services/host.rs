@@ -91,14 +91,14 @@ async fn bind_local(
     services.runners().progress("local", ProbePhase::Reconcile);
     services
         .runners()
-        .record_probe_phase("local", ProbePhase::ReconcileStore);
+        .progress("local", ProbePhase::ReconcileStore);
     let sessions = services
         .state_roots()
         .and_then(|roots| roots.runtime_sessions())
         .map_err(|_| super::reconcile_unavailable("local", ProbePhase::ReconcileStore))?;
     services
         .runners()
-        .record_probe_phase("local", ProbePhase::ReconcileObsoleteLines);
+        .progress("local", ProbePhase::ReconcileObsoleteLines);
     let obsolete = crate::commands::runner::local::older(paths)
         .await
         .map_err(|_| super::reconcile_unavailable("local", ProbePhase::ReconcileObsoleteLines))?;

@@ -1,9 +1,6 @@
 //! Advisory product notices share the sole connection writer, not admission.
 
-use super::{
-    ClientFrame, HostConnection, HostFrame, PoisonError, ProtocolExtension, SessionHost,
-    write_frame,
-};
+use super::{ClientFrame, HostConnection, HostFrame, PoisonError, ProtocolExtension, SessionHost};
 use crate::error::CliResult;
 use plakous_host_protocol::wire::HostLifecycle;
 use std::time::Instant;
@@ -188,7 +185,7 @@ where
     HostFrame<P>: serde::Serialize,
     ClientFrame<P>: serde::de::DeserializeOwned,
 {
-    /// Supplies the draft lifecycle projection after Welcome.
+    /// Supplies the product lifecycle projection after Welcome.
     #[must_use]
     pub const fn with_lifecycle_output(mut self, output: LifecycleOutput<P>) -> Self {
         self.lifecycle_output = Some(output);
@@ -222,7 +219,7 @@ where
                 let remaining = notice.remaining(now());
                 output(&mut self.out, notice.state, remaining)?;
             } else if let LifecycleState::Transition(legacy) = notice.state {
-                write_frame(&mut self.out, &HostFrame::<P>::from(legacy))?;
+                self.write(&HostFrame::<P>::from(legacy))?;
             }
         }
         if !self.buffered_output {

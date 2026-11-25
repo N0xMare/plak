@@ -7,7 +7,10 @@
 //! stale custody never reads as held, and a holder on another machine,
 //! which cannot be proven gone, always does.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex, PoisonError},
+};
 
 use plakous_host_protocol::wire::{
     HostedElsewhere, NodeAddress, RequestRefusal, SessionActivity, SessionEnvironment, SessionRow,
@@ -15,7 +18,7 @@ use plakous_host_protocol::wire::{
 use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::host_service::AttachmentCount;
 use plakous_hosted::host_service::wire::{Created, HostSessions, OpenedSession, session_root_of};
-use plakous_hosted::runtime::{IDLE_RELEASE, IdleRelease, RootStanding, spawn_host_worker};
+use plakous_hosted::runtime::{IDLE_RELEASE, IdleRelease, RootStanding, spawn_keyed_host_worker};
 use plakous_recursive_subagents::tree::{
     ContinuationCause, CustodyHost, LossContinuationState, ProductAgentTree, holder_elsewhere,
 };
@@ -27,9 +30,7 @@ use crate::surface_protocol::PlakExtension;
 
 mod archived;
 mod directory;
-#[allow(dead_code, reason = "protocol 13 is not served yet")]
 mod directory_work_v13;
-#[allow(dead_code, reason = "protocol 13 is not served yet")]
 pub(crate) mod history;
 mod lifecycle;
 mod options;
@@ -378,6 +379,54 @@ const fn environment_of(held_elsewhere: bool) -> SessionEnvironment {
 }
 
 impl HostSessions<PlakExtension> for ProductSessions {
+    fn directory_projection(
+        self: Arc<Self>,
+    ) -> Option<Box<dyn plakous_hosted::host_service::wire::DirectoryProjection<PlakExtension>>>
+    {
+        Some(Box::new(DirectoryProjection {
+            product: self,
+            sent: BTreeMap::new(),
+        }))
+    }
+
+    fn decode_frame(
+        &self,
+        line: &str,
+    ) -> Result<
+        plakous_hosted::host_service::wire::ClientInput<PlakExtension>,
+        plakous_host_protocol::wire::WireError,
+    > {
+        super::protocol_13::decode(line)
+    }
+
+    fn encode_frame(
+        &self,
+        host: &plakous_hosted::host_service::wire::SessionHost<PlakExtension>,
+        frame: &plakous_host_protocol::wire::HostFrame<PlakExtension>,
+    ) -> Result<Option<String>, plakous_host_protocol::wire::WireError> {
+        super::protocol_13::encode(frame.clone(), |rows| {
+            self.directory
+                .project_served(&rows, &self.services.runners().rows(), host)
+        })
+    }
+
+    fn prepare_viewport(
+        &self,
+        session: &str,
+        generation: u64,
+        root: Option<&plakous_hosted::runtime::RootTranscript>,
+        retained: Option<&plakous_hosted::host_service::wire::ViewportRevision>,
+    ) -> Result<Option<Box<dyn plakous_hosted::host_service::wire::PreparedViewport>>, RequestRefusal>
+    {
+        let paths =
+            self.services
+                .paths()
+                .map_err(|failure| RequestRefusal::SessionUnavailable {
+                    detail: failure.message().to_owned(),
+                })?;
+        super::protocol_13::prepare(paths, session, generation, root, retained).map(Some)
+    }
+
     fn host_request_during_pause(&self, request: &plakd_wire_types::console::HostRequest) -> bool {
         use plakd_wire_types::console::HostRequest as R;
         matches!(
@@ -806,6 +855,56 @@ impl HostSessions<PlakExtension> for ProductSessions {
     }
 }
 
+struct DirectoryProjection {
+    product: Arc<ProductSessions>,
+    sent: BTreeMap<String, plakd_wire_types::v13::SessionRow>,
+}
+
+impl plakous_hosted::host_service::wire::DirectoryProjection<PlakExtension>
+    for DirectoryProjection
+{
+    fn update(
+        &mut self,
+        host: &plakous_hosted::host_service::wire::SessionHost<PlakExtension>,
+        attachment: u64,
+        seq: u64,
+        include_archived: bool,
+    ) -> Result<Option<String>, plakous_host_protocol::wire::WireError> {
+        let rows = self.product.directory.draft_rows(
+            None,
+            None,
+            include_archived,
+            &self.product.services.runners().rows(),
+            host,
+        );
+        let next = rows
+            .iter()
+            .map(|row| (row.session.clone(), row.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let snapshot = seq == 1 || self.sent.keys().any(|session| !next.contains_key(session));
+        let rows = if snapshot {
+            rows
+        } else {
+            rows.into_iter()
+                .filter(|row| self.sent.get(&row.session) != Some(row))
+                .collect()
+        };
+        if !snapshot && rows.is_empty() {
+            return Ok(None);
+        }
+        let line = plakous_host_protocol::wire::encode_line(
+            &plakd_wire_types::v13::HostFrameV13::Directory {
+                attachment,
+                seq,
+                snapshot,
+                rows,
+            },
+        )?;
+        self.sent = next;
+        Ok(Some(line))
+    }
+}
+
 /// A committed create compares only stored facts, never today's configuration,
 /// filesystem or runner liveness. Requested profile ids are not persisted.
 fn replays(
@@ -1054,7 +1153,7 @@ fn open_session(
     let state_roots = host.state_roots.clone();
     let pending_roots = state_roots.clone();
     let pending_tree = host.session.node.tree_id.clone();
-    let (actions, events, worker) = spawn_host_worker(host)?;
+    let (actions, events, worker) = spawn_keyed_host_worker(host)?;
     eprintln!("plakd host: opened session {session}");
     Ok(OpenedSession {
         runner_pending: Some(Arc::new(move || {
@@ -1253,7 +1352,7 @@ mod tests {
                 roster: Some(tree.current_epoch().clone()),
                 live_children: false,
                 mcp: None,
-                account_choices: std::collections::BTreeMap::new(),
+                account_choices: BTreeMap::new(),
             },
         );
         let actual = product.rows(None, None, false).unwrap().remove(0);

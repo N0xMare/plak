@@ -4,6 +4,22 @@ use super::{
     BTreeMap, ClientFrame, DeserializeOwned, HostFrame, ProtocolExtension, Serialize, SessionHost,
     SessionResidency, SlotView, watch,
 };
+use plakous_host_protocol::wire::{AttachmentId, WireError};
+
+/// Stateful change detection for the exact rows a product sends on a watch.
+pub trait DirectoryProjection<P: ProtocolExtension>: Send {
+    /// Encode a new update, or return none when the projected rows did not change.
+    ///
+    /// # Errors
+    /// The resulting update exceeds the wire limit or could not be encoded.
+    fn update(
+        &mut self,
+        host: &SessionHost<P>,
+        attachment: AttachmentId,
+        seq: u64,
+        include_archived: bool,
+    ) -> Result<Option<String>, WireError>;
+}
 
 /// Host-owned overlay of one session, independent of a wire version.
 pub struct DirectorySlot {

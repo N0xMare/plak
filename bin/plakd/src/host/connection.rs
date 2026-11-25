@@ -247,6 +247,7 @@ impl Outbox {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn snapshot(
         &self,
         attachment: AttachmentId,
@@ -255,11 +256,40 @@ impl Outbox {
         self.snapshot_with(attachment, snapshot, &snapshot::ENCODERS)
     }
 
+    pub(crate) fn snapshot_v13(
+        &self,
+        generation: u64,
+        attachment: AttachmentId,
+        snapshot: PresentationSnapshot,
+        retained: Option<uuid::Uuid>,
+    ) -> CliResult<()> {
+        self.snapshot_projected(
+            attachment,
+            snapshot,
+            &snapshot::ENCODERS,
+            Some(snapshot::Projection {
+                generation,
+                token: retained.unwrap_or_else(uuid::Uuid::new_v4),
+            }),
+        )
+    }
+
+    #[cfg(test)]
     fn snapshot_with(
         &self,
         attachment: AttachmentId,
         snapshot: PresentationSnapshot,
         encoders: &'static tokio::sync::Semaphore,
+    ) -> CliResult<()> {
+        self.snapshot_projected(attachment, snapshot, encoders, None)
+    }
+
+    fn snapshot_projected(
+        &self,
+        attachment: AttachmentId,
+        snapshot: PresentationSnapshot,
+        encoders: &'static tokio::sync::Semaphore,
+        projection: Option<snapshot::Projection>,
     ) -> CliResult<()> {
         let mut queue = self.lock();
         if queue.snapshots >= MAX_PENDING_SNAPSHOTS {
@@ -269,7 +299,7 @@ impl Outbox {
             // The driver is the sole producer of ordered output. Let the
             // writer drain earlier frames while the driver encodes this one.
             drop(queue);
-            return self.snapshot_inline(attachment, snapshot);
+            return self.snapshot_inline(attachment, snapshot, projection);
         }
         self.reserve(&mut queue, 0, 1)
             .map_err(|error| CliFailure::new(error.to_string()))?;
@@ -283,6 +313,7 @@ impl Outbox {
                 encoders,
                 Arc::clone(&self.0.ready),
                 self.2.now(),
+                projection,
             )));
         // Preparation wakes the writer once this entry can be taken.
         Ok(())
@@ -292,10 +323,12 @@ impl Outbox {
         &self,
         attachment: AttachmentId,
         snapshot: PresentationSnapshot,
+        projection: Option<snapshot::Projection>,
     ) -> CliResult<()> {
-        let mut pages = snapshot::encode(attachment, snapshot, Stamp::off()).map_err(|_| {
-            CliFailure::new("the snapshot exceeded its wire bounds or could not be encoded")
-        })?;
+        let mut pages =
+            snapshot::encode(attachment, snapshot, Stamp::off(), projection).map_err(|_| {
+                CliFailure::new("the snapshot exceeded its wire bounds or could not be encoded")
+            })?;
         let mut queue = self.lock();
         self.reserve(&mut queue, 0, 1)
             .map_err(|error| CliFailure::new(error.to_string()))?;
@@ -512,6 +545,7 @@ fn independent_reply(line: &[u8]) -> bool {
         return false;
     };
     answer.starts_with(b"pong\"")
+        || answer.starts_with(b"attachment_status_requested\"")
         || answer.starts_with(b"accepted\"")
         || answer
             .strip_prefix(br#"host","response":{"response":""#)
@@ -546,7 +580,7 @@ mod tests {
 
     #[test]
     fn explicit_attachment_status_uses_only_bounded_control_output() {
-        use plakd_wire_types::v13::HostFrameV13;
+        use plakd_wire_types::v13::{Answer, AnswerV13, HostFrameV13, Outcome};
         use plakous_host_protocol::{intent_channel, wire::NodeAddress};
         use plakous_hosted::host_service::wire::WireConnection;
 
@@ -576,6 +610,15 @@ mod tests {
             None
         );
         assert!(outbox.ordered_drained());
+        let (frame, ordered) = outbox.pop().unwrap().unwrap();
+        let frame = frame.unwrap();
+        assert!(matches!(
+            serde_json::from_slice::<HostFrameV13>(&frame).unwrap(),
+            HostFrameV13::Response { id: 4, outcome: Outcome::Ok(answer) }
+                if matches!(*answer, Answer::Draft(AnswerV13::AttachmentStatusRequested))
+        ));
+        assert!(!ordered);
+        assert!(!outbox.sent(frame.len(), ordered));
         let (frame, ordered) = outbox.pop().unwrap().unwrap();
         let frame = frame.unwrap();
         assert!(

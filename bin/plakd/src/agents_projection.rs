@@ -37,11 +37,7 @@ fn template_rows_of(
             model: row.template.model.clone(),
             effort: row.template.effort.clone(),
             composition: row.template.composition_or_default().as_str().to_owned(),
-            tier: row
-                .template
-                .legacy_fast_extra()
-                .unwrap_or("standard")
-                .into(),
+            tier: row.template.service_tier().unwrap_or("standard").into(),
             unready_reason: row.readiness.reason().map(str::to_owned),
         })
         .collect()

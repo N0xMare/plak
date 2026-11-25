@@ -6,10 +6,13 @@ use plakous_hosted::test_support_runner::HostCut;
 /// Ready is published only after the ownership sweep, answered-key recovery,
 /// recorded stops and foreground cleanup have completed.
 pub(super) fn wait_local_runner_ready(host: &Host) {
-    let mut client = Client::connect(host);
+    wait_local_runner_ready_on(&mut Client::connect(host));
+}
+
+pub(super) fn wait_local_runner_ready_on(client: &mut Client) {
     let deadline = std::time::Instant::now() + WAIT;
     loop {
-        let status = local_runner_status(&mut client);
+        let status = local_runner_status(client);
         if status == plakous_host_protocol::wire::RunnerStatus::Ready {
             return;
         }

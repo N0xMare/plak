@@ -5,9 +5,56 @@ use super::{
     HostReadTask, HostRequestContext, NodeAddress, OpenedSession, PickerProgress,
     ProtocolExtension, RequestRefusal, SessionRow, StoredSessionView,
 };
+use super::{ClientInput, DirectoryProjection, PreparedViewport, SessionHost, ViewportRevision};
+use plakous_host_protocol::wire::{ClientFrame, WireError, decode_line, encode_line};
 
 /// What a host of many sessions needs of its product's stores.
 pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
+    /// Decode the product's exact client contract before dispatch.
+    ///
+    /// # Errors
+    /// The line is not a frame in the contract.
+    fn decode_frame(&self, line: &str) -> Result<ClientInput<P>, WireError>
+    where
+        ClientFrame<P>: serde::de::DeserializeOwned,
+    {
+        decode_line(line).map(|frame| ClientInput::Frame(frame, None))
+    }
+
+    /// Prepare exact replay or a read-only first page for an authorized root.
+    ///
+    /// # Errors
+    /// The transcript became unavailable or its capture raced publication.
+    fn prepare_viewport(
+        &self,
+        _session: &str,
+        _generation: u64,
+        _root: Option<&crate::runtime::RootTranscript>,
+        _retained: Option<&ViewportRevision>,
+    ) -> Result<Option<Box<dyn PreparedViewport>>, RequestRefusal> {
+        Ok(None)
+    }
+
+    /// Start change detection for the exact product directory projection.
+    fn directory_projection(self: Arc<Self>) -> Option<Box<dyn DirectoryProjection<P>>> {
+        None
+    }
+
+    /// Project an outgoing dispatcher frame into the product's exact contract.
+    ///
+    /// # Errors
+    /// The frame could not be encoded within the transport bound.
+    fn encode_frame(
+        &self,
+        _host: &SessionHost<P>,
+        frame: &HostFrame<P>,
+    ) -> Result<Option<String>, WireError>
+    where
+        HostFrame<P>: serde::Serialize,
+    {
+        encode_line(frame).map(Some)
+    }
+
     /// Native state identity; an ephemeral host has no persisted state key.
     fn state_key(&self) -> String {
         String::new()

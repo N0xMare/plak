@@ -88,8 +88,8 @@ fn host_extension_has_private_request_response_and_required_nullable_welcome() {
 }
 
 #[test]
-fn protocol_twelve_rejects_both_adjacent_versions_without_negotiation() {
-    assert_eq!(WIRE_VERSION, 12);
+fn protocol_thirteen_rejects_both_adjacent_versions_without_negotiation() {
+    assert_eq!(WIRE_VERSION, 13);
     for proto in [WIRE_VERSION - 1, WIRE_VERSION + 1] {
         let hello = Hello {
             proto,

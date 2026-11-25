@@ -45,8 +45,10 @@ fn notices_to_eof(mut reader: BufReader<UnixStream>, generation: u64) -> Vec<Hos
             reason,
             target,
             retry_after_ms,
-        } = decode_line::<HostFrame<PlakExtension>>(&line).unwrap()
-        {
+        } = match crate::protocol_13::decode(&line).unwrap() {
+            Some(frame) => frame,
+            None => continue,
+        } {
             let notice = HostLifecycle {
                 host_generation,
                 phase,
@@ -66,7 +68,7 @@ fn notices_to_eof(mut reader: BufReader<UnixStream>, generation: u64) -> Vec<Hos
 }
 
 #[test]
-fn host_lifecycle_wire_ten_gets_only_version_mismatch_even_at_planned_stop() {
+fn host_lifecycle_protocol_twelve_gets_only_version_mismatch_even_at_planned_stop() {
     let Some(fixture) = fixture() else { return };
     let mut host = start(&fixture);
     let mut stream = UnixStream::connect(&host.socket).unwrap();
@@ -74,8 +76,8 @@ fn host_lifecycle_wire_ten_gets_only_version_mismatch_even_at_planned_stop() {
     stream
         .write_all(
             encode_line(&ClientFrame::<PlakExtension>::Hello(Hello {
-                proto: 10,
-                binary_id: "wire-ten-test".into(),
+                proto: 12,
+                binary_id: "previous-protocol-test".into(),
                 caps: Vec::new(),
             }))
             .unwrap()
@@ -87,14 +89,14 @@ fn host_lifecycle_wire_ten_gets_only_version_mismatch_even_at_planned_stop() {
     reader.read_line(&mut line).unwrap();
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&line).unwrap(),
-        json!({"frame":"refused","kind":"version_mismatch","host":WIRE_VERSION,"client":10})
+        json!({"frame":"refused","kind":"version_mismatch","host":WIRE_VERSION,"client":12})
     );
     stop(&mut host);
     let mut remaining = String::new();
     reader.read_to_string(&mut remaining).unwrap();
     assert!(
         remaining.is_empty(),
-        "wire 10 received new frames: {remaining}"
+        "protocol 12 received new frames: {remaining}"
     );
 }
 

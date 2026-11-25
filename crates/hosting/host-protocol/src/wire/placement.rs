@@ -33,6 +33,18 @@ pub enum RunnerPhase {
     Discovery,
     /// First-bind or reconnect recovery barrier.
     Reconcile,
+    /// Reconcile the store.
+    ReconcileStore,
+    /// Retire obsolete lines.
+    ReconcileObsoleteLines,
+    /// Reconcile operator terminals.
+    ReconcileTerminals,
+    /// Reconcile jobs.
+    ReconcileJobs,
+    /// Reconcile pending stops.
+    ReconcileStops,
+    /// Reconcile foreground effects.
+    ReconcileForeground,
     /// Established transport lost.
     LinkLost,
 }

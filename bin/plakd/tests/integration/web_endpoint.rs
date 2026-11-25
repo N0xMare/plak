@@ -462,6 +462,27 @@ fn a_tailnet_client_attaches_prompts_and_reads_the_answer() {
 }
 
 #[test]
+fn the_web_socket_answers_a_protocol_twelve_hello_with_only_the_typed_refusal() {
+    let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
+    let mut web = start(&fixture);
+    let mut client = upgrade(&web, &cookie(&web));
+    send(
+        &mut client,
+        &ClientFrame::Hello(Hello {
+            proto: 12,
+            binary_id: "previous-protocol-test".into(),
+            caps: Vec::new(),
+        }),
+    );
+    assert_eq!(
+        next_frame(&mut client),
+        json!({"frame":"refused","kind":"version_mismatch","host":13,"client":12}),
+    );
+    assert!(matches!(client.read(), Ok(Message::Close(_))));
+    interrupt_and_wait(&mut web);
+}
+
+#[test]
 fn accounts_usage_keeps_recorded_totals_without_a_gateway_key() {
     let fixture = Fixture::new(&json!({
         "version": 1, "steps": [{"output": {"text": ANSWER}}]

@@ -60,11 +60,28 @@ pub mod test_draft_gate;
 pub mod test_open_observations;
 #[cfg(not(feature = "test-support"))]
 mod test_open_observations {
-    pub(super) fn before_pump<P: super::ProtocolExtension>(
-        _session: &str,
-        _service: &super::HostService<P>,
-    ) -> impl FnOnce() -> bool + Send + 'static {
-        || true
+    use super::{HostService, ProtocolExtension, fanout::Publication};
+
+    pub(super) enum OpeningRecovery {}
+
+    impl OpeningRecovery {
+        #[allow(
+            clippy::unnecessary_wraps,
+            reason = "the disabled hook keeps the enabled hook's optional selection"
+        )]
+        pub(super) fn selected<P: ProtocolExtension>(
+            _session: &str,
+            _service: &HostService<P>,
+        ) -> Option<Self> {
+            None
+        }
+
+        pub(super) fn interleave<P: ProtocolExtension>(
+            &mut self,
+            _batch: &mut Vec<Publication<P>>,
+        ) -> bool {
+            match *self {}
+        }
     }
 }
 #[cfg(not(feature = "test-support"))]

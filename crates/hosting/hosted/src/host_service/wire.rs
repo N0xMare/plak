@@ -61,8 +61,12 @@ pub const HELLO_DEADLINE: Duration = Duration::from_secs(10);
 /// peer: a failure's own text can name state paths, accounts and sessions.
 pub const UNAVAILABLE_UNAUTHENTICATED: &str = "the session could not be opened";
 
-type SnapshotOutput =
-    std::sync::Arc<dyn Fn(AttachmentId, PresentationSnapshot) -> CliResult<()> + Send + Sync>;
+type SnapshotOutput = std::sync::Arc<
+    dyn Fn(AttachmentId, PresentationSnapshot, Option<uuid::Uuid>) -> CliResult<()> + Send + Sync,
+>;
+
+type FrameOutput<P> =
+    std::sync::Arc<dyn Fn(&HostFrame<P>) -> Result<Option<String>, WireError> + Send + Sync>;
 
 /// Projection of an identified, definitely not-admitted blob through the sole writer.
 pub type BlobRefusalOutput = fn(&mut dyn Write, BlobRejection) -> CliResult<()>;
@@ -80,7 +84,13 @@ fn write_frame<P: ProtocolExtension>(stdout: &mut dyn Write, frame: &HostFrame<P
 where
     HostFrame<P>: Serialize,
 {
-    let line = encode_line(frame).map_err(|error| CliFailure::new(error.to_string()))?;
+    write_encoded(stdout, encode_line(frame).map(Some))
+}
+
+fn write_encoded(stdout: &mut dyn Write, line: Result<Option<String>, WireError>) -> CliResult<()> {
+    let Some(line) = line.map_err(|error| CliFailure::new(error.to_string()))? else {
+        return Ok(());
+    };
     stdout
         .write_all(line.as_bytes())
         .and_then(|()| stdout.flush())
@@ -287,6 +297,7 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     drafts: Option<super::drafts::DraftRegistry>,
     buffered_drafts: Option<Vec<super::drafts::DraftDelivery>>,
     snapshot_output: Option<SnapshotOutput>,
+    frame_output: Option<FrameOutput<P>>,
     status_output: Option<AttachmentStatusOutput>,
     status: paced::StatusWriter,
     stdout: paced::Counted<W>,
@@ -294,6 +305,7 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     service: HostService<P>,
     attachment: Option<AttachmentId>,
     viewport_prefix: Option<host::ViewportPrefix>,
+    history: Option<Box<dyn HistoryBinding>>,
     /// The attachment just answered `attached` that must resync at once.
     resync_after_attach: Option<AttachmentId>,
     /// The session this connection's service handle serves, when the
@@ -535,6 +547,7 @@ where
             drafts: None,
             buffered_drafts: None,
             snapshot_output: None,
+            frame_output: None,
             status_output: None,
             status: paced::StatusWriter::default(),
             stdout: paced::Counted::new(stdout),
@@ -542,6 +555,7 @@ where
             actions,
             attachment: None,
             viewport_prefix: None,
+            history: None,
             resync_after_attach: None,
             session: None,
             told,
@@ -855,7 +869,7 @@ where
             served::lock(served).end();
         }
         self.flush()?;
-        write_frame(&mut self.stdout, &HostFrame::<P>::Bye)
+        self.write(&HostFrame::<P>::Bye)
     }
 
     /// The client left: the session quits, or the connection detaches,
@@ -890,7 +904,11 @@ where
     ///
     /// A lost output.
     pub fn frame(&mut self, line: Result<String, WireError>) -> CliResult<bool> {
-        let frame = match line.and_then(|line| decode_line::<ClientFrame<P>>(&line)) {
+        self.frame_decoded(line.and_then(|line| decode_line::<ClientFrame<P>>(&line)))
+    }
+
+    fn frame_decoded(&mut self, frame: Result<ClientFrame<P>, WireError>) -> CliResult<bool> {
+        let frame = match frame {
             // A second hello, or a line that is not a frame, names no
             // request to refuse: the connection ends, as a client that
             // broke the protocol.
@@ -930,7 +948,7 @@ where
                     self.blobs.discard();
                 }
                 if let Some(outcome) = outcome {
-                    write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
+                    self.write(&HostFrame::<P>::Response { id, outcome })?;
                 }
                 if let Some(attachment) = self.resync_after_attach.take() {
                     let _ = self.service.detach(attachment);
@@ -938,10 +956,7 @@ where
                         self.attachment = None;
                         self.unanswered();
                     }
-                    write_frame(
-                        &mut self.stdout,
-                        &HostFrame::<P>::ResyncRequired { attachment },
-                    )?;
+                    self.write(&HostFrame::<P>::ResyncRequired { attachment })?;
                 }
                 Ok(true)
             }
@@ -1386,12 +1401,9 @@ where
                     self.attachment = None;
                     self.unanswered();
                     for (id, outcome) in std::mem::take(&mut self.settled) {
-                        write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
+                        self.write(&HostFrame::<P>::Response { id, outcome })?;
                     }
-                    write_frame(
-                        &mut self.stdout,
-                        &HostFrame::<P>::ResyncRequired { attachment },
-                    )?;
+                    self.write(&HostFrame::<P>::ResyncRequired { attachment })?;
                 }
                 Outbound::Moved { node, request } => {
                     self.service.wire_drafts_lost(attachment);
@@ -1418,16 +1430,13 @@ where
                     let request_id = request.map(|(_, id)| id);
                     self.unanswered();
                     for (id, outcome) in std::mem::take(&mut self.settled) {
-                        write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
+                        self.write(&HostFrame::<P>::Response { id, outcome })?;
                     }
-                    write_frame(
-                        &mut self.stdout,
-                        &HostFrame::<P>::Moved {
-                            attachment,
-                            node,
-                            request_id,
-                        },
-                    )?;
+                    self.write(&HostFrame::<P>::Moved {
+                        attachment,
+                        node,
+                        request_id,
+                    })?;
                     if let Some(served) = self.served.clone() {
                         self.follow(&served::lock(&served));
                     }
@@ -1450,7 +1459,7 @@ where
                     self.decorate_runners(&mut observation);
                     let taken = take_observation_images(&mut observation, &format!("e{seq}"));
                     for chunk in taken.chunks {
-                        write_frame(&mut self.stdout, &HostFrame::<P>::Blob(chunk))?;
+                        self.write(&HostFrame::<P>::Blob(chunk))?;
                     }
                     self.write_draft_event(
                         attachment,
@@ -1502,20 +1511,31 @@ where
         attachment: AttachmentId,
         snapshot: PresentationSnapshot,
     ) -> CliResult<()> {
+        if snapshot.scope == TranscriptScope::Root
+            && let Some(binding) = &self.history
+            && binding.repair(&mut self.stdout, &snapshot)?
+        {
+            return Ok(());
+        }
         if let Some(write) = &self.snapshot_output {
-            return write(attachment, snapshot);
+            let token = self
+                .history
+                .as_ref()
+                .filter(|_| snapshot.scope == TranscriptScope::Root)
+                .map(|binding| binding.retained_token());
+            return write(attachment, snapshot, token);
         }
         for page in page_snapshot(snapshot, attachment)
             .map_err(|error| CliFailure::new(error.to_string()))?
         {
-            write_frame(&mut self.stdout, &HostFrame::<P>::Snapshot(page))?;
+            self.write(&HostFrame::<P>::Snapshot(page))?;
         }
         Ok(())
     }
 
     fn flush_settled(&mut self) -> CliResult<()> {
         for (id, outcome) in std::mem::take(&mut self.settled) {
-            write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
+            self.write(&HostFrame::<P>::Response { id, outcome })?;
         }
         Ok(())
     }
@@ -1533,12 +1553,13 @@ where
                 ..
             } = &frame
         {
-            match encode_line(&frame) {
-                Ok(line) => self
+            match self.encode(&frame) {
+                Ok(Some(line)) => self
                     .stdout
                     .write_all(line.as_bytes())
                     .and_then(|()| self.stdout.flush())
                     .map_err(|_| CliFailure::new("stdout failed")),
+                Ok(None) => Ok(()),
                 Err(WireError::TooLarge) => {
                     skipped = true;
                     self.service.lose_wire_patch(attachment, &patch.scope);
@@ -1547,7 +1568,7 @@ where
                 Err(error) => Err(CliFailure::new(error.to_string())),
             }
         } else {
-            write_frame(&mut self.stdout, &frame)
+            self.write(&frame)
         };
         let delivery = self.service.take_draft_delivery(attachment, seq);
         if let Some(pending) = &mut self.buffered_drafts
@@ -1571,6 +1592,23 @@ where
         self
     }
 
+    fn with_frame_output(mut self, output: Option<FrameOutput<P>>) -> Self {
+        self.frame_output = output;
+        self
+    }
+
+    fn encode(&self, frame: &HostFrame<P>) -> Result<Option<String>, WireError> {
+        match &self.frame_output {
+            Some(output) => output(frame),
+            None => encode_line(frame).map(Some),
+        }
+    }
+
+    fn write(&mut self, frame: &HostFrame<P>) -> CliResult<()> {
+        let line = self.encode(frame);
+        write_encoded(&mut self.stdout, line)
+    }
+
     fn output_sent(&mut self) {
         if let Some(pending) = &mut self.buffered_drafts {
             pending.clear();
@@ -1588,9 +1626,11 @@ mod slot;
 pub use super::attachment::AttachmentStatus;
 pub use super::retained::{ViewportRead, ViewportRevision, ViewportStart};
 pub use host::{
-    AdmissionPause, Created, Creation, DirectorySlot, HostConnection, HostPrincipal,
-    HostReadLimits, HostReadTask, HostRequestContext, HostSessions, HostStepDrain, LifecycleOutput,
-    LifecycleState, PickerProgress, SessionHost, StepDrainMonitor, StoredSessionView,
+    AdmissionPause, ClientInput, Created, Creation, DirectoryProjection, DirectorySlot,
+    HistoryBinding, HostConnection, HostPrincipal, HostReadLimits, HostReadTask,
+    HostRequestContext, HostSessions, HostStepDrain, LifecycleOutput, LifecycleState,
+    PickerProgress, PreparedViewport, SessionHost, StepDrainMonitor, StoredSessionView,
+    TranscriptRead, ViewportMode,
 };
 pub use lines::{Line, LineSender, Lines, lines};
 pub use session::WireSession;

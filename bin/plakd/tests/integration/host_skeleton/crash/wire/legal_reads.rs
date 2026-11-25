@@ -114,7 +114,9 @@ fn every_legal_raw_read_is_acknowledged_without_session_queue_transcript_or_tree
         .iter()
         .find(|entry| entry["frame"]["frame"] == "hello")
         .unwrap();
-    connection.send(&hello["frame"]).unwrap();
+    let mut hello = hello["frame"].clone();
+    hello["proto"] = json!(WIRE_VERSION);
+    connection.send(&hello).unwrap();
     assert_eq!(connection.control().unwrap()["frame"], "welcome");
     let node = review_rows(&host)
         .into_iter()
