@@ -144,15 +144,29 @@ fn crash(flag: &str, cut: &str, lose_original: bool, paired: bool) {
         assert!(status.status.success(), "{status:?}");
         let verdict: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
         assert_eq!(verdict["state"], "pending");
-        let acknowledge = image_command(&fixture, &image)
-            .args([
-                "host",
-                "upgrade-verdict",
-                "--acknowledge",
-                verdict["id"].as_str().unwrap(),
-            ])
-            .output()
-            .unwrap();
+        let acknowledge = || {
+            image_command(&fixture, &image)
+                .args([
+                    "host",
+                    "upgrade-verdict",
+                    "--acknowledge",
+                    verdict["id"].as_str().unwrap(),
+                ])
+                .output()
+                .unwrap()
+        };
+        let db = plakd::home::paths::PlakPaths::explicit(fixture.home()).runtime_database();
+        let displaced = db.with_extension("displaced");
+        std::fs::rename(&db, &displaced).unwrap();
+        let refused = acknowledge();
+        std::fs::rename(&displaced, &db).unwrap();
+        assert!(
+            !refused.status.success()
+                && String::from_utf8_lossy(&refused.stderr)
+                    .contains("host_upgrade_acknowledge_wrong_state"),
+            "{refused:?}"
+        );
+        let acknowledge = acknowledge();
         assert!(acknowledge.status.success(), "{acknowledge:?}");
     }
     let mut replacement = await_serving_host(spawn_host(

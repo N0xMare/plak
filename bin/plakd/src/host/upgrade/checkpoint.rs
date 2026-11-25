@@ -26,12 +26,13 @@ pub(in crate::host) use verdict::operate;
 const LIMIT: u64 = 512 << 20;
 const FRAME: u64 = 1024;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub(in crate::host) struct Ticket {
     nonce: Uuid,
     source: String,
     destination: String,
     process_birth: String,
+    runtime_expected: Option<bool>,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -90,6 +91,7 @@ impl Ticket {
             source: identity.instance.clone(),
             destination: destination.to_owned(),
             process_birth: process_birth(source.pid())?,
+            runtime_expected: None,
         })
     }
 
@@ -99,8 +101,10 @@ impl Ticket {
         snapshot: &Snapshot,
         bindings: &bindings::Baseline,
     ) -> CliResult<tempfile::NamedTempFile> {
+        let mut ticket = self.clone();
+        ticket.runtime_expected = Some(snapshot.runtime_present());
         stage(&baseline(paths), LIMIT, |out| {
-            serde_json::to_writer(&mut *out, self).map_err(error)?;
+            serde_json::to_writer(&mut *out, &ticket).map_err(error)?;
             out.write_all(b"\n").map_err(error)?;
             serde_json::to_writer(out, &Payload { snapshot, bindings }).map_err(error)
         })
@@ -158,9 +162,10 @@ impl Ticket {
 
     fn record(&self, paths: &PlakPaths, outcome: Outcome) -> CliResult<()> {
         let path = verdict_path(paths);
+        let verdict =
+            verdict::WriteVerdict::new(paths, self.nonce, self.runtime_expected, outcome)?;
         stage(&path, FRAME, |out| {
-            serde_json::to_writer(out, &verdict::WriteVerdict::new(self.nonce, outcome))
-                .map_err(error)
+            serde_json::to_writer(out, &verdict).map_err(error)
         })
         .and_then(|file| {
             file.as_file().sync_all().map_err(error)?;

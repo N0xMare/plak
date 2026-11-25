@@ -31,6 +31,10 @@ pub(super) struct Snapshot {
 }
 
 impl Snapshot {
+    pub(super) const fn runtime_present(&self) -> bool {
+        self.runtime.is_some()
+    }
+
     pub(super) fn capture(
         paths: &PlakPaths,
         before: Option<&Self>,

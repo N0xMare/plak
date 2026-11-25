@@ -5963,8 +5963,10 @@ authorizes a start. The operator may inspect with
 `plakd host upgrade-verdict`, then acknowledge the exact verdict after
 repair. Acknowledgement requires the destination state key, no serving host
 for that home (including a predecessor), exclusion of stand-alone writers,
-and successful read-only integrity checks. It clears the fence, not store
-data, and does not start a host or assert preservation.
+and successful read-only integrity checks. An absent runtime store is
+allowed only if the verdict recorded that none was present. Acknowledgement
+clears the fence, not store data, and does not start a host or assert
+preservation.
 
 The host exposes `resolve_paused_drafts(pause, deadline)` for an upgrade
 coordinator to call before planned surrender. The pause must belong to that

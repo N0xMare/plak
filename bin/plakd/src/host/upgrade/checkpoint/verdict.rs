@@ -15,17 +15,32 @@ pub(super) struct WriteVerdict {
     version: u32,
     state_key: String,
     nonce: Uuid,
+    runtime_expected: Option<bool>,
     outcome: Outcome,
 }
 
 impl WriteVerdict {
-    pub(super) fn new(nonce: Uuid, outcome: Outcome) -> Self {
-        Self {
+    pub(super) fn new(
+        paths: &PlakPaths,
+        nonce: Uuid,
+        baseline_runtime: Option<bool>,
+        outcome: Outcome,
+    ) -> CliResult<Self> {
+        let previously_expected = read(paths)?
+            .filter(|prior| prior.nonce == nonce)
+            .is_some_and(|prior| prior.runtime_expected == Some(true));
+        let runtime_expected = if previously_expected || runtime_present(paths)? {
+            Some(true)
+        } else {
+            baseline_runtime
+        };
+        Ok(Self {
             version: 1,
             state_key: crate::home::state::state_key(),
             nonce,
+            runtime_expected,
             outcome,
-        }
+        })
     }
 }
 
@@ -35,7 +50,16 @@ struct ReadVerdict {
     version: u32,
     state_key: Option<String>,
     nonce: Uuid,
+    runtime_expected: Option<bool>,
     outcome: Value,
+}
+
+fn runtime_present(paths: &PlakPaths) -> CliResult<bool> {
+    match fs::symlink_metadata(paths.runtime_database()) {
+        Ok(_) => Ok(true),
+        Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(failure) => Err(error(failure)),
+    }
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -155,13 +179,9 @@ fn acknowledge_verdict(paths: &PlakPaths, id: Uuid) -> CliResult<Option<ReadVerd
         .state_key
         .as_ref()
         .is_some_and(|key| key != &crate::home::state::state_key())
-        || ![
-            paths.product_database(),
-            paths.subagents_database(),
-            paths.runtime_database(),
-        ]
-        .iter()
-        .all(|path| path.is_file())
+        || !paths.product_database().is_file()
+        || !paths.subagents_database().is_file()
+        || (verdict.runtime_expected != Some(false) && !runtime_present(paths)?)
     {
         return Err(CliFailure::new(
             "host_upgrade_acknowledge_wrong_state: use the destination build and check the original home stores before acknowledging",
@@ -194,7 +214,11 @@ mod tests {
             outcome: Outcome,
         }
         let id = Uuid::new_v4();
-        let written = serde_json::to_value(WriteVerdict::new(id, Outcome::Pending)).unwrap();
+        let (_root, paths) = PlakPaths::isolated_test_home();
+        let written = serde_json::to_value(
+            WriteVerdict::new(&paths, id, Some(false), Outcome::Pending).unwrap(),
+        )
+        .unwrap();
         let legacy: Legacy = serde_json::from_value(written).unwrap();
         assert_eq!(legacy.nonce, id);
         assert!(matches!(legacy.outcome, Outcome::Pending));

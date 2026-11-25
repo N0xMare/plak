@@ -171,7 +171,11 @@ fn a_serving_predecessor_blocks_upgrade_verdict_acknowledgement() {
     // unchanged service link. The old image cannot see the durable fence.
     let path = fixture.home().join("host/upgrade-checkpoint-verdict");
     let id = uuid::Uuid::new_v4().to_string();
-    let pending = json!({"nonce": id, "outcome": "Pending"}).to_string();
+    let pending = json!({
+        "version":1, "state_key": after["state_key"], "nonce": id,
+        "runtime_expected": false, "outcome": "Pending"
+    })
+    .to_string();
     write_private(&path, &pending);
     let mut recovery = fixture.base_command_from(&candidate);
     recovery.args(["host", "upgrade-verdict", "--acknowledge", &id]);
