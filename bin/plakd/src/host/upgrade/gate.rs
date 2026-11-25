@@ -30,6 +30,13 @@ pub(in crate::host) fn verify(
     stage: &mut Failure,
 ) -> (Vec<GateTiming>, CliResult<EvidenceLevel>) {
     let deadline = health::deadline();
+    // The first opener of a store may rebuild its WAL index. Open each store
+    // once here, so the concurrent checks never race that rebuild.
+    *stage = Failure::Health;
+    let _pinned = match health::pin(paths, deadline) {
+        Ok(pinned) => pinned,
+        Err(error) => return (Vec::new(), Err(error)),
+    };
     let phases = [
         GatePhase::StoreHealthProduct,
         GatePhase::StoreHealthTree,

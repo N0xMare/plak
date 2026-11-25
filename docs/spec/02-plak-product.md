@@ -5947,7 +5947,9 @@ source withdraws its pause and resumes admission. The destination compares
 under stand-alone writer exclusion after stopped-store revisions and before
 serving. Under that one exclusion it runs the read-only store integrity
 checks (one per store), the preservation comparison and its binding
-inspection concurrently, each within its own bound. It joins all of them,
+inspection concurrently, each within its own bound. It first opens each
+store once, waiting for a busy store within the store-health bound, so no
+check races another opener's WAL-index rebuild. It joins all of them,
 then reports the first failure in the fixed order product, tree and runtime
 store health, preservation, bindings, so the failure stage does not depend
 on which check finished first. The held comparison checks store

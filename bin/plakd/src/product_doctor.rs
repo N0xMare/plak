@@ -516,7 +516,7 @@ fn sqlite_integrity(
 #[cfg(feature = "web")]
 pub(crate) fn upgrade_database_healthy(path: &Path, deadline: std::time::Instant) -> bool {
     use rusqlite::{Connection, OpenFlags};
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
@@ -528,7 +528,9 @@ pub(crate) fn upgrade_database_healthy(path: &Path, deadline: std::time::Instant
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
-        connection.busy_timeout(Duration::from_millis(250))?;
+        // A concurrent opener may be rebuilding the WAL index; wait for it
+        // within the caller's bound rather than failing the check.
+        connection.busy_timeout(deadline.saturating_duration_since(Instant::now()))?;
         connection.progress_handler(4096, Some(move || Instant::now() >= deadline))?;
         Ok(sqlite_integrity(&connection, "PRAGMA quick_check(1)")?.is_none())
     };
