@@ -221,8 +221,7 @@ fn web_welcome_and_console_reads_do_not_wait_for_owed_sessions() {
                 "0",
             ])
             .env("PLAK_TEST_FORCE_HOST_UPGRADE", "1")
-            .stdout(Stdio::null())
-            .stderr(Stdio::inherit()),
+            .stdout(Stdio::null()),
     );
     let _notices = notices_until_close(&mut source, &old["host_generation"]);
     let mut socket = upgrade(&web, &login);

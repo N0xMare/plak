@@ -12,7 +12,11 @@ use rustix::fs::{Mode, OFlags};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
-use super::{Identity, preservation::Snapshot};
+pub(in crate::host) use super::preservation::Evidence as EvidenceLevel;
+use super::{
+    Identity, bindings,
+    preservation::{Evidence, Snapshot},
+};
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliFailureKind, CliResult};
 
@@ -24,6 +28,7 @@ pub(in crate::host) struct Ticket {
     nonce: Uuid,
     source: String,
     destination: String,
+    process_birth: String,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -57,7 +62,8 @@ struct Verdict {
 
 #[derive(Deserialize, Serialize)]
 pub(super) enum Outcome {
-    Ready(String),
+    Pending,
+    Ready(String, Evidence),
     Failed(Failure),
 }
 
@@ -80,23 +86,26 @@ pub(super) fn claim(paths: &PlakPaths) -> CliResult<File> {
 }
 
 impl Ticket {
-    pub(super) fn new(identity: &Identity, destination: &str) -> Self {
-        Self {
+    pub(super) fn new(identity: &Identity, destination: &str) -> CliResult<Self> {
+        let source = HostInstance::parse(&identity.instance).map_err(error)?;
+        Ok(Self {
             nonce: Uuid::new_v4(),
             source: identity.instance.clone(),
             destination: destination.to_owned(),
-        }
+            process_birth: process_birth(source.pid())?,
+        })
     }
 
     pub(super) fn stage(
         &self,
         paths: &PlakPaths,
         snapshot: &Snapshot,
+        bindings: &bindings::Baseline,
     ) -> CliResult<tempfile::NamedTempFile> {
         stage(&baseline(paths), LIMIT, |out| {
             serde_json::to_writer(&mut *out, self).map_err(error)?;
             out.write_all(b"\n").map_err(error)?;
-            serde_json::to_writer(out, snapshot).map_err(error)
+            serde_json::to_writer(out, &Payload { snapshot, bindings }).map_err(error)
         })
     }
 
@@ -107,6 +116,12 @@ impl Ticket {
     pub(super) fn clear(paths: &PlakPaths) {
         let _ = fs::remove_file(baseline(paths));
         let _ = fs::remove_file(verdict_path(paths));
+    }
+
+    pub(super) fn clear_stale(paths: &PlakPaths) -> CliResult<()> {
+        refuse_cold_start(paths)?;
+        Self::clear(paths);
+        Ok(())
     }
 
     pub(super) fn outcome(&self, paths: &PlakPaths) -> CliResult<Option<Outcome>> {
@@ -127,11 +142,19 @@ impl Ticket {
                     .map(HostInstance::pid)
     }
 
-    pub(in crate::host) fn record_ready(&self, paths: &PlakPaths) -> CliResult<()> {
+    pub(in crate::host) fn record_pending(&self, paths: &PlakPaths) -> CliResult<()> {
+        self.record(paths, Outcome::Pending)
+    }
+
+    pub(in crate::host) fn record_ready(
+        &self,
+        paths: &PlakPaths,
+        evidence: Evidence,
+    ) -> CliResult<()> {
         let instance = plakous_recursive_subagents::tree::custody_host()
             .instance
             .to_string();
-        self.record(paths, Outcome::Ready(instance))
+        self.record(paths, Outcome::Ready(instance, evidence))
     }
 
     pub(in crate::host) fn record_failure(&self, paths: &PlakPaths, failure: Failure) {
@@ -152,8 +175,32 @@ impl Ticket {
             )
             .map_err(error)
         })
-        .and_then(|file| publish(file, &path))
+        .and_then(|file| {
+            file.as_file().sync_all().map_err(error)?;
+            publish(file, &path)?;
+            File::open(root(paths))
+                .and_then(|dir| dir.sync_all())
+                .map_err(error)
+        })
     }
+}
+
+#[derive(Deserialize, Serialize)]
+struct Payload<S, B> {
+    snapshot: S,
+    bindings: B,
+}
+
+pub(in crate::host) fn refuse_cold_start(paths: &PlakPaths) -> CliResult<()> {
+    if let Some(file) = open(&verdict_path(paths), FRAME)?
+        && !matches!(decode::<Verdict>(file, FRAME)?.outcome, Outcome::Ready(..))
+    {
+        return Err(CliFailure::classified(
+            CliFailureKind::RecoveryRequired,
+            "host_upgrade_fix_forward_required: an inherited upgrade did not reach Ready; inspect the destination logs, repair the failure, then clear the stopped home's upgrade-checkpoint-verdict before restarting",
+        ));
+    }
+    Ok(())
 }
 
 pub(in crate::host) struct Checkpoint {
@@ -165,7 +212,7 @@ impl Checkpoint {
     fn load(
         paths: &PlakPaths,
         binary: &str,
-        matches: impl FnOnce(&str) -> bool,
+        matches: impl FnOnce(&Ticket) -> CliResult<bool>,
     ) -> CliResult<Option<Self>> {
         let Some(file) = open(&baseline(paths), LIMIT)? else {
             return Ok(None);
@@ -181,41 +228,78 @@ impl Checkpoint {
         }
         let ticket: Ticket = serde_json::from_slice(&header).map_err(error)?;
         Ok(
-            (ticket.destination == binary && matches(&ticket.source)).then_some(Self {
+            (ticket.destination == binary && matches(&ticket)?).then_some(Self {
                 ticket,
                 body: Some(body),
             }),
         )
     }
 
-    pub(super) fn held(paths: &PlakPaths, source: &str, binary: &str) -> CliResult<()> {
-        if let Some(mut checkpoint) = Self::load(paths, binary, |instance| instance == source)? {
-            let held = checkpoint.verify(paths)?;
-            Ticket::publish(paths, checkpoint.ticket.stage(paths, &held)?)?;
+    pub(super) fn held(
+        paths: &PlakPaths,
+        source: &str,
+        binary: &str,
+        bindings: &bindings::Baseline,
+    ) -> CliResult<()> {
+        if let Some(checkpoint) = Self::load(paths, binary, |ticket| Ok(ticket.source == source))? {
+            let held = Snapshot::capture(paths, None)?.0;
+            Ticket::publish(paths, checkpoint.ticket.stage(paths, &held, bindings)?)?;
         }
         Ok(())
     }
 
-    pub(in crate::host) fn inherited(paths: &PlakPaths, binary: &str) -> CliResult<Option<Self>> {
-        Self::load(paths, binary, |instance| {
-            HostInstance::parse(instance).is_ok_and(|source| source.pid() == std::process::id())
+    pub(in crate::host) fn inherited(
+        paths: &PlakPaths,
+        binary: &str,
+        source_instance: Option<&str>,
+    ) -> CliResult<Option<Self>> {
+        Self::load(paths, binary, |ticket| {
+            let pid = std::process::id();
+            let source = HostInstance::parse(&ticket.source).map_err(error)?;
+            // The previous descriptor speaker did not include the instance
+            // nonce. Its same-PID exec must still match the staged process birth.
+            Ok(source.pid() == pid
+                && source_instance.is_none_or(|instance| instance == ticket.source)
+                && process_birth(pid)? == ticket.process_birth)
         })
     }
 
-    pub(in crate::host) fn verify_destination(&mut self, paths: &PlakPaths) -> CliResult<()> {
-        self.verify(paths).map(drop)
-    }
-
-    fn verify(&mut self, paths: &PlakPaths) -> CliResult<Snapshot> {
+    pub(in crate::host) fn verify_destination(
+        &mut self,
+        paths: &PlakPaths,
+    ) -> CliResult<(Evidence, bindings::Baseline)> {
         let body = self
             .body
             .take()
             .ok_or_else(|| error("checkpoint already verified"))?;
-        let before: Snapshot = decode(body, LIMIT)?;
-        let (after, accepted) = Snapshot::capture(paths, Some(&before))?;
-        before.compare(&after, &accepted, paths)?;
-        Ok(after)
+        let before: Payload<Snapshot, bindings::Baseline> = decode(body, LIMIT)?;
+        let (after, accepted) = Snapshot::capture(paths, Some(&before.snapshot))?;
+        before.snapshot.compare(&after, &accepted, paths)?;
+        Ok((before.snapshot.evidence, before.bindings))
     }
+}
+
+#[cfg(target_os = "linux")]
+fn process_birth(pid: u32) -> CliResult<String> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).map_err(error)?;
+    stat.rsplit_once(')')
+        .and_then(|(_, fields)| fields.split_whitespace().nth(19))
+        .filter(|birth| birth.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(str::to_owned)
+        .ok_or_else(|| error("cannot read the source process birth"))
+}
+
+#[cfg(target_os = "macos")]
+fn process_birth(pid: u32) -> CliResult<String> {
+    let mut ps = std::process::Command::new("/bin/ps");
+    ps.args(["-p", &pid.to_string(), "-o", "lstart="])
+        .env("LC_ALL", "C");
+    let output = super::process::run(ps, super::PROBE_BOUND)?;
+    let birth = String::from_utf8(output.stdout).map_err(error)?;
+    if birth.trim().is_empty() {
+        return Err(error("cannot read the source process birth"));
+    }
+    Ok(birth.trim().to_owned())
 }
 
 fn root(paths: &PlakPaths) -> PathBuf {
@@ -299,8 +383,7 @@ impl std::io::Write for Capped<'_> {
 }
 
 fn publish(temp: tempfile::NamedTempFile, path: &Path) -> CliResult<()> {
-    // The checkpoint tracks a running process: after a machine crash no
-    // inherited upgrade exists. Only the optional backup requires fsync.
+    // Only the verdict and detached backup survive a machine crash.
     temp.persist(path).map_err(|failure| error(failure.error))?;
     Ok(())
 }

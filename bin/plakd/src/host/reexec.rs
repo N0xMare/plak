@@ -26,9 +26,15 @@ struct Envelope {
     binary: String,
     environment: HostEnvironment,
     web: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_instance: Option<String>,
+    #[serde(default)]
+    fallback: bool,
 }
 
 pub(crate) struct Inherited {
+    pub(super) source_instance: Option<String>,
+    pub(super) fallback: bool,
     pub(super) home_lock: OwnedFd,
     pub(super) state_lock: OwnedFd,
     pub(super) control: OwnedFd,
@@ -83,6 +89,8 @@ pub(crate) fn receive() -> CliResult<(String, Inherited)> {
         control,
         web: envelope.web.then_some(web).transpose().map_err(failed)?,
         environment: envelope.environment,
+        source_instance: envelope.source_instance,
+        fallback: envelope.fallback,
     };
     if fds.next().is_some() {
         return Err(failed("unexpected inherited descriptor"));
@@ -103,7 +111,7 @@ pub(super) fn replace(
     let target = ready.binary.clone();
     // Release store and session holds before the successor starts.
     drop(ready);
-    let replace = |command: Command, binary: &str| {
+    let replace = |command: Command, binary: &str, fallback| {
         let descriptors = [
             ownership.home.as_fd(),
             ownership.state.as_fd(),
@@ -118,12 +126,13 @@ pub(super) fn replace(
             environment,
             descriptors,
             web,
+            fallback,
         )
     };
     let failure = match destination {
         Ok(command) => {
             crate::carry::upgrade::crash_cut("after-source-release");
-            replace(command, &target)
+            replace(command, &target, false)
         }
         Err(failure) => failure,
     };
@@ -131,7 +140,7 @@ pub(super) fn replace(
     let source = std::env::current_exe().map_err(failed)?;
     let command =
         crate::carry::upgrade::process::command(&source, home, &crate::home::state::state_key());
-    Err(replace(command, crate::build_identity::binary_id()))
+    Err(replace(command, crate::build_identity::binary_id(), true))
 }
 
 fn exec(
@@ -142,6 +151,7 @@ fn exec(
     environment: &HostEnvironment,
     [home_lock, state_lock, control]: [BorrowedFd<'_>; 3],
     web: Option<BorrowedFd<'_>>,
+    fallback: bool,
 ) -> CliFailure {
     let result = (|| -> CliResult<CliFailure> {
         let saved_stdin = std::io::stdin()
@@ -167,6 +177,12 @@ fn exec(
                 binary: binary.to_owned(),
                 environment: environment.clone(),
                 web: web.is_some(),
+                source_instance: Some(
+                    plakous_recursive_subagents::tree::custody_host()
+                        .instance
+                        .to_string(),
+                ),
+                fallback,
             },
         )
         .map_err(failed)?;

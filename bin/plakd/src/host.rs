@@ -128,13 +128,20 @@ pub(crate) fn run_host_command(
         crate::command::HostStart::Foreground | crate::command::HostStart::Detached => {}
     }
     let paths = services.paths()?;
-    let checkpoint = if inherited.is_some() {
-        upgrade::checkpoint::Checkpoint::inherited(paths, crate::build_identity::binary_id())?
-    } else {
-        None
+    let checkpoint = match &inherited {
+        Some(transport) if !transport.fallback => upgrade::checkpoint::Checkpoint::inherited(
+            paths,
+            crate::build_identity::binary_id(),
+            transport.source_instance.as_deref(),
+        )?,
+        _ => None,
     };
+    if let Some(checkpoint) = &checkpoint {
+        checkpoint.ticket.record_pending(paths)?;
+    }
     let mut gate = UpgradeGate {
         checkpoint,
+        evidence: None,
         stage: upgrade::checkpoint::Failure::Startup,
     };
     let outcome = serve_host(services, command, inherited, &mut gate);
@@ -148,6 +155,7 @@ pub(crate) fn run_host_command(
 
 struct UpgradeGate {
     checkpoint: Option<upgrade::checkpoint::Checkpoint>,
+    evidence: Option<upgrade::checkpoint::EvidenceLevel>,
     stage: upgrade::checkpoint::Failure,
 }
 
@@ -156,15 +164,31 @@ impl UpgradeGate {
         let Some(checkpoint) = &mut self.checkpoint else {
             return Ok(());
         };
-        let _writers = crate::carry::upgrade::admission(paths, true)?;
         self.stage = upgrade::checkpoint::Failure::Health;
+        let _writers = crate::carry::upgrade::admission_until(
+            paths,
+            true,
+            std::time::Instant::now() + upgrade::health::ADMISSION_TIME,
+        )?;
         upgrade::health::stores(paths)?;
         self.stage = upgrade::checkpoint::Failure::Preservation;
-        checkpoint.verify_destination(paths)?;
+        let (evidence, baseline) = checkpoint.verify_destination(paths)?;
         self.stage = upgrade::checkpoint::Failure::Health;
-        upgrade::bindings::health(paths)?;
+        upgrade::bindings::health(paths, &baseline)?;
+        self.evidence = Some(evidence);
         crate::carry::upgrade::crash_cut("after-destination-verification");
         self.stage = upgrade::checkpoint::Failure::Startup;
+        Ok(())
+    }
+
+    fn ready(&mut self, paths: &crate::home::paths::PlakPaths) -> CliResult<()> {
+        if let Some(checkpoint) = &self.checkpoint {
+            let evidence = self
+                .evidence
+                .ok_or_else(|| CliFailure::new("missing preservation verdict"))?;
+            checkpoint.ticket.record_ready(paths, evidence)?;
+            self.checkpoint = None;
+        }
         Ok(())
     }
 }
@@ -237,6 +261,9 @@ fn serve_host(
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
     let (ownership, inherited) = HostOwnership::take(paths, &binary, inherited)?;
+    if inherited.is_none() {
+        upgrade::checkpoint::refuse_cold_start(paths)?;
+    }
     legacy_upgrade::refuse_unresolved(paths)?;
     let paired_start = inherited.is_some();
     let stores_pending = store_revisions::pending(paths)?;
@@ -416,9 +443,7 @@ impl RunningHost {
         let idle = (start == crate::command::HostStart::Detached).then(idle::IdleExit::default);
         ownership.state.running()?;
         ownership.home.running()?;
-        if let Some(checkpoint) = &gate.checkpoint {
-            checkpoint.ticket.record_ready(paths)?;
-        }
+        gate.ready(paths)?;
         // The web endpoint serves beside the control socket and stops with it.
         let web = web.map(|web| runtime.spawn(web.serve()));
         let upgrades = upgrade::Coordinator::start(
@@ -469,7 +494,6 @@ impl RunningHost {
         );
         shutdown_runtime(runtime);
         scan_result?;
-        gate.checkpoint = None;
         if paired {
             let ready = ready.ok_or_else(|| CliFailure::new("missing paired host upgrade"))?;
             if stop.stopped() {

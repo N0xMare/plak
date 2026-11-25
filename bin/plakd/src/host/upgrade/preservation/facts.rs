@@ -16,8 +16,9 @@ pub(super) type Map<T> = BTreeMap<Key, T>;
 
 // Counts rows, edges, and sequence elements, not payload bytes. One SQLite
 // row is borrowed at a time; a large or damaged store fails closed at the cap.
-const MAX_FACTS: usize = 1_000_000;
+const MAX_FACTS: usize = 3_000_000;
 const MAX_VALUE_BYTES: usize = 64 << 20;
+pub(in crate::host) const CAPTURE_TIME: Duration = Duration::from_secs(120);
 
 pub(super) fn configure_reader(db: &Connection) -> CliResult<()> {
     // Recursive reachability and ordered scans may need a temporary index.
@@ -35,7 +36,7 @@ impl Default for Budget {
     fn default() -> Self {
         Self {
             facts: 0,
-            deadline: Instant::now() + Duration::from_secs(60),
+            deadline: Instant::now() + CAPTURE_TIME,
         }
     }
 }
@@ -202,16 +203,20 @@ pub(super) struct Fact {
 }
 
 impl Fact {
-    pub(super) fn preserved_by(&self, after: &Self) -> bool {
-        self.stable == after.stable
-            && self.monotone.len() == after.monotone.len()
-            && self.once.len() == after.once.len()
-            && self.prefix.len() == after.prefix.len()
+    pub(super) fn revisions_preserved_by(&self, after: &Self) -> bool {
+        self.monotone.len() == after.monotone.len()
             && self
                 .monotone
                 .iter()
                 .zip(&after.monotone)
                 .all(|(old, new)| new >= old)
+    }
+
+    pub(super) fn preserved_by(&self, after: &Self) -> bool {
+        self.stable == after.stable
+            && self.revisions_preserved_by(after)
+            && self.once.len() == after.once.len()
+            && self.prefix.len() == after.prefix.len()
             && self
                 .once
                 .iter()

@@ -40,6 +40,14 @@ pub(crate) fn admission(
     paths: &crate::home::paths::PlakPaths,
     exclusive: bool,
 ) -> CliResult<std::fs::File> {
+    admission_until(paths, exclusive, std::time::Instant::now())
+}
+
+pub(crate) fn admission_until(
+    paths: &crate::home::paths::PlakPaths,
+    exclusive: bool,
+    deadline: std::time::Instant,
+) -> CliResult<std::fs::File> {
     use rustix::fs::{Mode, OFlags};
     use std::os::unix::fs::MetadataExt as _;
     crate::commands::runner::private_directory(&paths.home().join("run"))?;
@@ -61,13 +69,24 @@ pub(crate) fn admission(
             "host upgrade admission lock is not a private owned regular file",
         ));
     }
-    let result = if exclusive {
-        file.try_lock()
-    } else {
-        file.try_lock_shared()
-    };
-    result.map_err(|_| CliFailure::new("host_upgrade_admission_busy: an embedded writer or another upgrade owns this home; settle it first"))?;
-    Ok(file)
+    loop {
+        let result = if exclusive {
+            file.try_lock()
+        } else {
+            file.try_lock_shared()
+        };
+        match result {
+            Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(_) => {
+                return Err(CliFailure::new(
+                    "host_upgrade_admission_busy: an embedded writer or another upgrade owns this home; settle it first",
+                ));
+            }
+        }
+    }
 }
 pub(crate) fn print_probe(
     services: &Services,

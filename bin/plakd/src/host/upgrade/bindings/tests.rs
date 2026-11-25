@@ -22,6 +22,12 @@ fn differential_binding_preflight_refuses_only_new_live_regressions() {
         sessions: vec![
             row("changed"),
             row("unavailable"),
+            row("closed"),
+            Row {
+                closed: true,
+                child: true,
+                ..row("previously-closed")
+            },
             Row {
                 binding_change: Some("old refusal".into()),
                 ..row("already-refused")
@@ -60,21 +66,26 @@ fn differential_binding_preflight_refuses_only_new_live_regressions() {
                 ..row("closed")
             },
             Row {
+                child: true,
+                unavailable: Some("not comparable to the closed source".into()),
+                ..row("previously-closed")
+            },
+            Row {
                 unaffected: vec!["MCP external contract unaffected".into()],
                 ..row("external")
             },
         ],
     };
     assert_eq!(
-        regressions(Some(&source), &destination)
-            .iter()
+        regressions(&Baseline::from_report(Some(&source)), &destination)
+            .into_iter()
             .map(|r| r.session.as_str())
             .collect::<Vec<_>>(),
         ["changed", "unavailable"]
     );
     assert_eq!(
-        regressions(None, &destination)
-            .iter()
+        regressions(&Baseline::from_report(None), &destination)
+            .into_iter()
             .map(|r| r.session.as_str())
             .collect::<Vec<_>>(),
         ["changed", "already-refused"]
@@ -91,7 +102,9 @@ fn a_child_binding_regression_reports_the_count_and_change_without_exact_reopen(
             ..row("child")
         }],
     };
-    let failure = finish(None, &report).unwrap_err();
+    let Err(failure) = finish(None, &report) else {
+        panic!("binding regression was accepted");
+    };
     assert!(failure.message().contains(
         "host_upgrade_child_reopen_refused: 1 affected child session(s); binding change: provider configuration"
     ));

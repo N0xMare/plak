@@ -4,12 +4,17 @@ use crate::carry::ChildReopenRefusal;
 use crate::commands::session::check_binding::{Report, Row};
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliResult};
-use std::{collections::HashSet, path::Path, time::Duration};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 // The explicit 200-head / 28.5 MB retained-state measurement emits 49 KB in
 // about 14 seconds. Leave headroom without making a pre-surrender probe unbounded.
 const OUTPUT_BYTES: u64 = 8 * 1024 * 1024;
-const INSPECTION_TIME: Duration = Duration::from_secs(120);
+pub(in crate::host) const INSPECTION_TIME: Duration = Duration::from_secs(120);
 
 #[cfg(test)]
 mod tests;
@@ -28,7 +33,76 @@ fn probe(
     super::process::run_output(command, INSPECTION_TIME, OUTPUT_BYTES)
 }
 
-pub(in crate::host) fn health(paths: &PlakPaths) -> CliResult<()> {
+#[derive(Deserialize, Serialize)]
+pub(in crate::host) struct Baseline(Option<BTreeSet<String>>);
+
+fn comparable(row: &Row) -> bool {
+    !row.archived && !row.superseded && !row.closed
+}
+
+impl Baseline {
+    fn from_report(report: Option<&Report>) -> Self {
+        Self(report.map(|report| {
+            report
+                .sessions
+                .iter()
+                .filter(|row| {
+                    comparable(row) && row.binding_change.is_none() && row.unavailable.is_none()
+                })
+                .map(binding_key)
+                .collect()
+        }))
+    }
+}
+
+fn binding_key(row: &Row) -> String {
+    use sha2::{Digest as _, Sha256};
+    let mut digest = Sha256::new();
+    for field in [&row.session, &row.branch] {
+        digest.update((field.len() as u64).to_be_bytes());
+        digest.update(field.as_bytes());
+    }
+    crate::shipping_artifact::hex_digest(&digest.finalize())
+}
+
+pub(super) fn requester_baseline(
+    paths: &PlakPaths,
+    identity: &super::Identity,
+) -> CliResult<Baseline> {
+    let instance = plakous_recursive_subagents::tree::HostInstance::parse(&identity.instance)
+        .map_err(CliFailure::new)?;
+    let image = source_image(instance.pid())?;
+    let verified = super::process::verify_image(&image, &identity.binary)?;
+    let output = probe(&image, paths, &identity.key, None)?;
+    verified.recheck(&image)?;
+    let report = serde_json::from_slice::<Report>(&output.stdout).ok();
+    Ok(Baseline::from_report(report.as_ref()))
+}
+
+#[cfg(target_os = "linux")]
+fn source_image(pid: u32) -> CliResult<PathBuf> {
+    // The descriptor path resolves the running bytes even if the installed
+    // link has been switched ahead of the process.
+    Ok(PathBuf::from(format!("/proc/{pid}/exe")))
+}
+
+#[cfg(target_os = "macos")]
+fn source_image(pid: u32) -> CliResult<PathBuf> {
+    let mut command = std::process::Command::new("/bin/ps");
+    command.args(["-ww", "-p", &pid.to_string(), "-o", "comm="]);
+    let output = super::process::run(command, super::PROBE_BOUND)?;
+    let image = String::from_utf8(output.stdout)
+        .map_err(|_| CliFailure::new("invalid source image path"))?;
+    let path = PathBuf::from(image.trim_end_matches('\n'));
+    if !path.is_absolute() {
+        return Err(CliFailure::new(
+            "host upgrade source image path is unavailable",
+        ));
+    }
+    Ok(path)
+}
+
+pub(in crate::host) fn health(paths: &PlakPaths, baseline: &Baseline) -> CliResult<()> {
     let image = std::env::current_exe().map_err(super::io_failure)?;
     let output = probe(&image, paths, &crate::home::state::state_key(), None)?;
     let report = serde_json::from_slice::<Report>(&output.stdout).map_err(|_| {
@@ -39,27 +113,18 @@ pub(in crate::host) fn health(paths: &PlakPaths) -> CliResult<()> {
     // A working head can be unavailable until planned recovery. The paired
     // exact-reopen and preservation checks own that case, not a strict fleet
     // binding audit or a second attempt to open the live session.
-    if regressions(None, &report).is_empty() {
+    let refused = regressions(baseline, &report);
+    if refused.is_empty() {
         Ok(())
     } else {
-        Err(CliFailure::new(
-            "host_upgrade_health_refused: destination binding compatibility did not pass",
-        ))
+        Err(CliFailure::new(format!(
+            "host_upgrade_health_refused: destination binding compatibility did not pass{}",
+            child_refusal(&refused),
+        )))
     }
 }
 
-pub(super) fn regressions<'a>(source: Option<&Report>, destination: &'a Report) -> Vec<&'a Row> {
-    let comparable = |row: &Row| !row.archived && !row.superseded && !row.closed;
-    let source = source.map(|report| {
-        report
-            .sessions
-            .iter()
-            .filter(|row| {
-                comparable(row) && row.binding_change.is_none() && row.unavailable.is_none()
-            })
-            .map(|row| (row.session.as_str(), row.branch.as_str()))
-            .collect::<HashSet<_>>()
-    });
+fn regressions<'a>(baseline: &Baseline, destination: &'a Report) -> Vec<&'a Row> {
     destination
         .sessions
         .iter()
@@ -67,9 +132,9 @@ pub(super) fn regressions<'a>(source: Option<&Report>, destination: &'a Report) 
             if !comparable(row) || row.binding_change.is_none() && row.unavailable.is_none() {
                 return false;
             }
-            match &source {
+            match &baseline.0 {
                 None => row.binding_change.is_some(),
-                Some(source) => source.contains(&(row.session.as_str(), row.branch.as_str())),
+                Some(source) => source.contains(&binding_key(row)),
             }
         })
         .collect()
@@ -81,7 +146,7 @@ pub(super) fn preflight(
     key: &str,
     scratch: Option<&Path>,
     timing: &super::progress::Report<'_>,
-) -> CliResult<()> {
+) -> CliResult<Baseline> {
     let source = std::env::current_exe().map_err(|error| CliFailure::new(error.to_string()))?;
     let (baseline, output) = std::thread::scope(|scope| {
         let baseline = std::thread::Builder::new()
@@ -119,22 +184,27 @@ pub(super) fn preflight(
     finish(baseline.as_ref(), &destination)
 }
 
-fn finish(baseline: Option<&Report>, destination: &Report) -> CliResult<()> {
-    let refused = regressions(baseline, destination);
+fn finish(source: Option<&Report>, destination: &Report) -> CliResult<Baseline> {
+    let baseline = Baseline::from_report(source);
+    let refused = regressions(&baseline, destination);
     if refused.is_empty() {
-        return Ok(());
+        return Ok(baseline);
     }
-    refusal(baseline.is_some(), &refused)
+    refusal(source.is_some(), &refused)
 }
 
-fn refusal(baseline_available: bool, refused: &[&Row]) -> CliResult<()> {
+fn child_refusal(refused: &[&Row]) -> String {
     let mut children = ChildReopenRefusal::default();
     for row in refused.iter().filter(|row| row.child) {
         children.record(row.binding_change.as_deref(), row.unavailable.as_deref());
     }
-    let children = children
+    children
         .into_report()
-        .map_or_else(String::new, |refusal| format!("; {refusal}"));
+        .map_or_else(String::new, |refusal| format!("; {refusal}"))
+}
+
+fn refusal<T>(baseline_available: bool, refused: &[&Row]) -> CliResult<T> {
+    let children = child_refusal(refused);
     Err(CliFailure::new(format!(
         "host_upgrade_binding_preflight_refused: source remains running; baseline {}; offending rows: {}{children}",
         if baseline_available {

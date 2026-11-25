@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
@@ -9,7 +9,7 @@ use plakous_recursive_subagents_store::database::schema;
 use rusqlite::{Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 
-use super::check;
+use super::{Evidence, check};
 use crate::CliResult;
 use crate::home::paths::PlakPaths;
 use crate::shipping_artifact as shipping;
@@ -145,18 +145,23 @@ pub(super) struct Trees {
     tables: Map<Map<Fact>>,
 }
 
-pub(super) fn capture(paths: &PlakPaths, budget: &mut Budget) -> CliResult<Trees> {
+pub(super) fn capture(
+    paths: &PlakPaths,
+    evidence: Evidence,
+    budget: &mut Budget,
+) -> CliResult<Trees> {
     let path = paths.subagents_database();
     let registry = schema();
     registry
         .inspect_existing(&path, budget.deadline(), |db, status| {
             super::facts::configure_reader(db)?;
             let schema = identity(db, status)?;
-            let mut facts = tables(db, TABLES, budget)?;
-            if schema.version >= 12 {
+            let held = evidence == Evidence::Held;
+            let mut facts = tables(db, if held { TABLES } else { &TABLES[..1] }, budget)?;
+            if held && schema.version >= 12 {
                 facts.append(&mut tables(db, &[RETIRED], budget)?);
             }
-            if schema.version >= 13 {
+            if held && schema.version >= 13 {
                 facts.append(&mut tables(db, &[ARCHIVES], budget)?);
             }
             let mut fences = Map::new();
@@ -240,17 +245,42 @@ fn stamp_of(meta: &fs::Metadata) -> Stamp {
 }
 
 impl Trees {
-    pub(super) fn compare(&self, after: &Self, paths: &PlakPaths) -> CliResult<Option<String>> {
+    pub(super) fn compare(
+        &self,
+        after: &Self,
+        paths: &PlakPaths,
+        evidence: Evidence,
+        deleted: &BTreeSet<Key>,
+    ) -> CliResult<Option<String>> {
         let backup = if self.schema == after.schema {
             None
         } else {
             Some(self.verify_revision(after, paths)?)
         };
-        compare_tables(&self.tables, &after.tables, |_, _| false)?;
+        let recorded_delete =
+            |id: &str| evidence == Evidence::BaselinePredatesDrain && deleted.contains(id);
+        if evidence == Evidence::Held {
+            compare_tables(&self.tables, &after.tables, |_, _| false)?;
+        } else {
+            let prior = &self.tables["agent_trees"];
+            let current = &after.tables["agent_trees"];
+            check(
+                prior.iter().all(|(id, before)| {
+                    current.get(id).map_or_else(
+                        || recorded_delete(id),
+                        |after| before.revisions_preserved_by(after),
+                    )
+                }),
+                "preservation lost a tree without a recorded delete or regressed its revision",
+            )?;
+        }
         check(
-            self.fences
-                .iter()
-                .all(|(tree, old)| after.fences.get(tree).is_some_and(|new| new >= old)),
+            self.fences.iter().all(|(tree, old)| {
+                after
+                    .fences
+                    .get(tree)
+                    .map_or_else(|| recorded_delete(tree), |new| new >= old)
+            }),
             "preservation lost or regressed a tree fence",
         )?;
         Ok(backup)

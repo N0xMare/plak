@@ -9,7 +9,7 @@ use plakous_hosted::sessions::projector::SubmissionKind;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use super::{check, fail};
+use super::{Evidence, check, fail};
 use crate::CliResult;
 use crate::home::paths::PlakPaths;
 
@@ -27,8 +27,6 @@ const BOOKKEEPING: &[Table] = &[
     Table::stable("archive_receipts", &["session_id"]),
     Table::stable("delete_tombstones", &["session_id"]),
     Table::stable("pruned_checkpoints", &["checkpoint_id"]),
-    Table::stable("session_feed", &["session_id", "seq"]),
-    Table::stable("lines", &["line_id"]),
     Table::stable("line_job_terminals", &["line_id", "generation", "job"]),
     Table::stable("runtime_moves", &["operation"]),
     Table::stable("runtime_move_lines", &["line_id"]),
@@ -48,6 +46,7 @@ const BOOKKEEPING: &[Table] = &[
 
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
 struct Checkpoint {
+    session: Key,
     branch: Key,
     parent: Option<Key>,
     revision: u64,
@@ -57,9 +56,35 @@ struct Checkpoint {
 
 #[derive(Deserialize, Serialize)]
 struct Branch {
+    session: Key,
     head: Key,
     revision: u64,
     identity: Key,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Session {
+    identity: Key,
+    revision: u64,
+    archived: bool,
+    retained_from: u64,
+    tail: u64,
+    feed: BTreeMap<u64, Key>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Line {
+    session: Key,
+    head: Key,
+    generation: u64,
+    origin: Key,
+}
+
+#[derive(Deserialize, Eq, PartialEq, Serialize)]
+pub(super) struct Deleted {
+    identity: Key,
+    revision: u64,
+    seal: Key,
 }
 
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
@@ -73,7 +98,9 @@ struct Horizon {
 #[derive(Deserialize, Serialize)]
 pub(super) struct Runtime {
     instance: Key,
-    sessions: Map<Key>,
+    sessions: Map<Session>,
+    lines: Map<Line>,
+    deleted: Map<Deleted>,
     checkpoints: Map<Checkpoint>,
     branches: Map<Branch>,
     graph: Graph,
@@ -85,12 +112,13 @@ pub(super) struct Runtime {
 pub(super) fn capture(
     paths: &PlakPaths,
     candidates: Vec<Admission>,
+    evidence: Evidence,
     budget: &mut Budget,
 ) -> CliResult<(Option<Runtime>, BTreeSet<Key>)> {
     match PreservationReader::inspect(&paths.runtime_database(), budget.deadline(), |reader| {
         super::facts::configure_reader(reader.connection())?;
         let accepted = admissions(reader, candidates)?;
-        let runtime = capture_runtime(reader, budget)?;
+        let runtime = capture_runtime(reader, evidence, budget)?;
         Ok((Some(runtime), accepted))
     }) {
         Ok(result) => result,
@@ -106,7 +134,11 @@ pub(super) fn capture(
     }
 }
 
-fn capture_runtime(reader: &PreservationReader<'_>, budget: &mut Budget) -> CliResult<Runtime> {
+fn capture_runtime(
+    reader: &PreservationReader<'_>,
+    evidence: Evidence,
+    budget: &mut Budget,
+) -> CliResult<Runtime> {
     let db = reader.connection();
     let instance = db
         .query_row(
@@ -118,12 +150,99 @@ fn capture_runtime(reader: &PreservationReader<'_>, budget: &mut Budget) -> CliR
     let mut sessions = Map::new();
     scan(
         db,
-        "SELECT session_id,initial_branch,created_s,created_ns,durability,archived FROM sessions",
+        "SELECT session_id,initial_branch,created_s,created_ns,durability,archived,
+                revision,feed_retained_from,feed_tail FROM sessions",
         [],
         "runtime session",
         |row| {
             budget.take()?;
-            insert(&mut sessions, columns(row, [0])?, columns(row, 1..6)?)
+            let session = Session {
+                identity: columns(row, 1..5)?,
+                revision: revision(row, 6)?,
+                archived: get(row, 5)?,
+                retained_from: nonnegative(row, 7)?,
+                tail: nonnegative(row, 8)?,
+                feed: BTreeMap::new(),
+            };
+            check(
+                (1..=session.tail.saturating_add(1)).contains(&session.retained_from),
+                "preservation found an invalid runtime feed window",
+            )?;
+            insert(&mut sessions, columns(row, [0])?, session)
+        },
+    )?;
+    scan(
+        db,
+        "SELECT * FROM session_feed ORDER BY session_id,seq",
+        [],
+        "runtime feed",
+        |row| {
+            budget.take()?;
+            let session = sessions
+                .get_mut(&columns(row, [0])?)
+                .ok_or_else(|| unreadable("runtime feed owner"))?;
+            let seq = nonnegative(row, 1)?;
+            // The retained range must be gap-free; the hashes compare the overlap.
+            check(
+                seq == session.retained_from + session.feed.len() as u64 && seq <= session.tail,
+                "preservation found a gap in the retained runtime feed",
+            )?;
+            session.feed.insert(seq, columns(row, 2..7)?);
+            Ok(())
+        },
+    )?;
+    check(
+        sessions
+            .values()
+            .all(|session| session.retained_from + session.feed.len() as u64 == session.tail + 1),
+        "preservation found a truncated runtime feed",
+    )?;
+    let mut deleted = Map::new();
+    scan(
+        db,
+        "SELECT * FROM delete_tombstones",
+        [],
+        "runtime deletion receipts",
+        |row| {
+            budget.take()?;
+            let rev = revision(row, 5)?;
+            reader
+                .validate_delete(
+                    get::<String>(row, 0)?
+                        .parse()
+                        .map_err(|_| unreadable("runtime deletion identity"))?,
+                    rev,
+                )
+                .map_err(|_| unreadable("sealed runtime deletion receipt"))?;
+            insert(
+                &mut deleted,
+                columns(row, [0])?,
+                Deleted {
+                    identity: columns(row, 1..5)?,
+                    revision: rev,
+                    seal: columns(row, [7])?,
+                },
+            )
+        },
+    )?;
+    let mut lines = Map::new();
+    scan(
+        db,
+        "SELECT line_id,head_session,head_branch,generation,forked_from FROM lines",
+        [],
+        "runtime lines",
+        |row| {
+            budget.take()?;
+            insert(
+                &mut lines,
+                columns(row, [0])?,
+                Line {
+                    session: columns(row, [1])?,
+                    head: columns(row, [1, 2])?,
+                    generation: revision(row, 3)?,
+                    origin: columns(row, [4])?,
+                },
+            )
         },
     )?;
     let mut checkpoints = Map::new();
@@ -145,6 +264,7 @@ fn capture_runtime(reader: &PreservationReader<'_>, budget: &mut Budget) -> CliR
                 &mut checkpoints,
                 columns(row, [0])?,
                 Checkpoint {
+                    session: columns(row, [1])?,
                     branch: columns(row, [1, 2])?,
                     parent,
                     revision: revision(row, 4)?,
@@ -160,10 +280,16 @@ fn capture_runtime(reader: &PreservationReader<'_>, budget: &mut Budget) -> CliR
         graph.validate_history(&checkpoints[&branch.head].root)?;
     }
     let (horizons, pruned) = read_retention(reader, &checkpoints, budget)?;
-    let bookkeeping = tables(db, BOOKKEEPING, budget)?;
+    let bookkeeping = if evidence == Evidence::Held {
+        tables(db, BOOKKEEPING, budget)?
+    } else {
+        Map::new()
+    };
     Ok(Runtime {
         instance: crate::shipping_artifact::digest(&instance),
         sessions,
+        lines,
+        deleted,
         checkpoints,
         branches,
         graph,
@@ -202,6 +328,7 @@ fn read_branches(
                 &mut branches,
                 key,
                 Branch {
+                    session: columns(row, [0])?,
                     head,
                     revision,
                     identity: columns(row, 4..10)?,
@@ -355,13 +482,74 @@ fn admissions(
 }
 
 impl Runtime {
-    pub(super) fn compare(&self, after: &Self) -> CliResult<()> {
+    pub(super) fn deleted(&self) -> &Map<Deleted> {
+        &self.deleted
+    }
+
+    pub(super) fn compare(&self, after: &Self, evidence: Evidence) -> CliResult<()> {
         check(
             self.instance == after.instance,
             "preservation changed the runtime store identity",
         )?;
-        subset(&self.sessions, &after.sessions, "runtime sessions")?;
+        subset(&self.deleted, &after.deleted, "runtime tombstones")?;
+        let deleted = |id: &str| {
+            evidence == Evidence::BaselinePredatesDrain
+                && self.sessions.get(id).is_some_and(|before| {
+                    after.deleted.get(id).is_some_and(|record| {
+                        record.identity == before.identity && record.revision >= before.revision
+                    })
+                })
+        };
+        for (id, before) in &self.sessions {
+            let Some(current) = after.sessions.get(id) else {
+                check(
+                    deleted(id),
+                    "preservation lost a runtime session without a sealed delete",
+                )?;
+                continue;
+            };
+            check(
+                before.identity == current.identity
+                    && before.revision <= current.revision
+                    && if evidence == Evidence::Held {
+                        before.archived == current.archived
+                            && before.retained_from == current.retained_from
+                    } else {
+                        (!before.archived || current.archived)
+                            && before.retained_from <= current.retained_from
+                    },
+                "preservation changed a runtime session or regressed retention",
+            )?;
+            check(
+                before.tail <= current.tail
+                    && before
+                        .feed
+                        .range(current.retained_from..)
+                        .all(|(seq, hash)| current.feed.get(seq) == Some(hash)),
+                "preservation lost or changed an admitted runtime feed prefix",
+            )?;
+        }
+        for (id, before) in &self.lines {
+            let Some(current) = after.lines.get(id) else {
+                check(deleted(&before.session), "preservation lost a runtime line")?;
+                continue;
+            };
+            check(
+                current.origin == before.origin
+                    && (current.generation == before.generation && current.head == before.head
+                        || evidence == Evidence::BaselinePredatesDrain
+                            && current.generation > before.generation),
+                "preservation changed or regressed a runtime line",
+            )?;
+        }
         for (branch, before) in &self.horizons {
+            if self
+                .branches
+                .get(branch)
+                .is_some_and(|branch| deleted(&branch.session))
+            {
+                continue;
+            }
             check(
                 after.horizons.get(branch).is_some_and(|new| {
                     new == before || (new.revision > before.revision && new.count > before.count)
@@ -378,6 +566,10 @@ impl Runtime {
         };
         let mut pruned = BTreeSet::new();
         for (key, before) in &self.checkpoints {
+            if deleted(&before.session) {
+                pruned.insert(key);
+                continue;
+            }
             if let Some(current) = after.checkpoints.get(key) {
                 check(
                     current == before,
@@ -413,6 +605,9 @@ impl Runtime {
                 })
         })?;
         for (key, before) in &self.branches {
+            if deleted(&before.session) {
+                continue;
+            }
             let current = after
                 .branches
                 .get(key)

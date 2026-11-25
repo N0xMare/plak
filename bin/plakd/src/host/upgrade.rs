@@ -29,6 +29,14 @@ use crate::surface_protocol::PlakExtension;
 use crate::{CliFailure, CliResult, ProcessOutcome};
 
 const PROBE_BOUND: Duration = Duration::from_secs(30);
+// Includes destination startup, stopped revisions, and verification.
+const SUCCESSOR_BOUND: Duration = Duration::from_secs(
+    health::ADMISSION_TIME.as_secs()
+        + health::STORE_TIME.as_secs()
+        + preservation::CAPTURE_TIME.as_secs()
+        + bindings::INSPECTION_TIME.as_secs()
+        + 300,
+);
 
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
 struct Identity {
@@ -315,8 +323,13 @@ pub(super) fn request(
             "host_upgrade_unsupported_source: coordinator protocol differs; settle and drain using the retained source build before starting this destination",
         ));
     }
+    if identity.deploy_idle == Some(false) {
+        return Err(CliFailure::classified(
+            crate::CliFailureKind::Retryable,
+            "host_upgrade_deploy_busy: a prepared or committed deploy receipt is present",
+        ));
+    }
     if identity.key != source.key
-        || identity.deploy_idle == Some(false)
         || !crate::carry::upgrade::binary_id_valid(&identity.binary)
         || plakous_recursive_subagents::tree::HostInstance::parse(&identity.instance).is_err()
         || inspection
@@ -336,13 +349,19 @@ pub(super) fn request(
     let destination =
         std::fs::canonicalize(std::env::current_exe().map_err(io_failure)?).map_err(io_failure)?;
     process::verify_image(&destination, expected)?;
-    let ticket = checkpoint::Ticket::new(&identity, expected);
+    checkpoint::Ticket::clear_stale(paths)?;
+    let ticket = checkpoint::Ticket::new(&identity, expected)?;
     if backup_store {
         let backup = backup::create(paths)?;
         eprintln!("host upgrade: store backup saved at {}", backup.display());
     }
-    let (baseline, _) = preservation::Snapshot::capture(paths, None)?;
-    let staged = ticket.stage(paths, &baseline)?;
+    let bindings = bindings::requester_baseline(paths, &identity)?;
+    let (baseline, _) = preservation::Snapshot::capture_at(
+        paths,
+        None,
+        preservation::Evidence::BaselinePredatesDrain,
+    )?;
+    let staged = ticket.stage(paths, &baseline, &bindings)?;
     let mut stream = connect(paths, Some(PROBE_BOUND))?;
     if read::<Identity>(&stream)? != identity {
         return Err(CliFailure::new(
@@ -437,7 +456,7 @@ fn wait_host(
     source_binary: &str,
     ticket: &checkpoint::Ticket,
 ) -> CliResult<()> {
-    let deadline = Instant::now() + Duration::from_secs(180);
+    let deadline = Instant::now() + SUCCESSOR_BOUND;
     let mut absent_since = None::<Instant>;
     while Instant::now() < deadline {
         let verdict = ticket.outcome(paths)?;
@@ -454,11 +473,18 @@ fn wait_host(
                 && ticket.successor(&identity)
             {
                 if identity.binary == binary
-                    && matches!(&verdict, Some(checkpoint::Outcome::Ready(instance)) if instance == &identity.instance)
+                    && let Some(checkpoint::Outcome::Ready(instance, evidence)) = verdict
+                    && instance == identity.instance
                 {
+                    if evidence == preservation::Evidence::BaselinePredatesDrain {
+                        eprintln!(
+                            "host upgrade: host_upgrade_baseline_predates_drain: only durable preservation invariants were verified"
+                        );
+                    }
                     return Ok(());
                 }
                 if identity.binary == source_binary && source_binary != binary {
+                    checkpoint::Ticket::clear(paths);
                     return Err(CliFailure::classified(
                         crate::CliFailureKind::Retryable,
                         "host_upgrade_source_restored: destination exec did not take ownership; source is serving again",
@@ -743,7 +769,7 @@ fn prepare(
     let progress = |detail: &str| report(progress::Event::Waiting(detail));
     let paths = services.paths()?;
     check_cancel(cancelled)?;
-    let (destination, image, reopen) =
+    let (destination, image, reopen, bindings) =
         qualification::qualify_destination(services, &request, arguments, report)?;
     let inspect_runner = runner_carry::before_drain(
         &request,
@@ -769,7 +795,12 @@ fn prepare(
     if inspect_runner {
         runner_carry::held(&request, services, runtime)?;
     }
-    checkpoint::Checkpoint::held(paths, &request.source_instance, &request.expected_binary)?;
+    checkpoint::Checkpoint::held(
+        paths,
+        &request.source_instance,
+        &request.expected_binary,
+        &bindings,
+    )?;
     image.recheck(&request.destination)?;
     check_cancel(cancelled)?;
     Ok(Ready {

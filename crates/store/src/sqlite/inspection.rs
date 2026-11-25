@@ -51,6 +51,22 @@ impl PreservationReader<'_> {
         Ok(())
     }
 
+    /// Validate a deleted session's native receipt in this snapshot.
+    ///
+    /// # Errors
+    /// Refuses a missing, malformed or unsealed receipt.
+    pub fn validate_delete(
+        &self,
+        session: super::SessionId,
+        revision: u64,
+    ) -> Result<(), SessionStoreError> {
+        super::ops::load_delete(
+            self.0,
+            super::DeleteSession::new(session, super::SessionRevision::from_store(revision)),
+        )?;
+        Ok(())
+    }
+
     /// Visit sealed Advanced records on the exact branch beyond the anchor.
     /// Retention never substitutes for evidence of acceptance.
     ///

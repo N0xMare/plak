@@ -6,22 +6,26 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::check;
+use super::{Evidence, check};
 use crate::CliResult;
 use crate::home::paths::PlakPaths;
 use crate::store::{queue_tombstone_digest, revisions::databases};
 
 use super::facts::{
     Budget, Key, Map, branch_key, columns, finish, get, insert, locator_branch, nonnegative, scan,
-    subset, texts,
+    texts,
 };
 use super::unreadable;
 
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
 struct Root {
     stable: Key,
+    identity: Key,
+    revision: u64,
     archived: bool,
     branch: Option<Key>,
+    runtime: Option<Key>,
+    tree: Key,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -36,6 +40,7 @@ pub(super) struct Product {
     instance: Key,
     roots: Map<Root>,
     queues: Map<Vec<Draft>>,
+    pub(super) deleted_trees: BTreeSet<Key>,
 }
 
 pub(super) struct Admission {
@@ -48,25 +53,32 @@ pub(super) struct Admission {
 }
 
 impl Product {
-    pub(super) fn compare(&self, after: &Self, accepted: &BTreeSet<Key>) -> CliResult<()> {
+    pub(super) fn compare(
+        &self,
+        after: &Self,
+        accepted: &BTreeSet<Key>,
+        evidence: Evidence,
+        runtime_deleted: impl Fn(&str) -> bool,
+    ) -> CliResult<()> {
         check(
             self.instance == after.instance,
             "preservation changed the product store identity",
         )?;
-        for predicate in [(|root: &Root| root.archived) as fn(&Root) -> bool, |root| {
-            !root.archived && root.branch.is_none()
-        }] {
-            let select = |(_, root): &(&Key, &Root)| predicate(root);
-            check(
-                self.roots.iter().filter(select).map(|(id, _)| id).eq(after
-                    .roots
-                    .iter()
-                    .filter(select)
-                    .map(|(id, _)| id)),
-                "preservation changed the archived or unstarted root head set",
-            )?;
+        for (id, before) in &self.roots {
+            let preserved = if let Some(current) = after.roots.get(id) {
+                current.identity == before.identity
+                    && current.revision >= before.revision
+                    && (evidence == Evidence::BaselinePredatesDrain
+                        || (current.stable == before.stable
+                            && current.archived == before.archived
+                            && current.branch == before.branch))
+            } else {
+                evidence == Evidence::BaselinePredatesDrain
+                    && (before.runtime.as_deref().is_some_and(&runtime_deleted)
+                        || after.deleted_trees.contains(&before.tree))
+            };
+            check(preserved, "preservation lost or changed a product session")?;
         }
-        subset(&self.roots, &after.roots, "product roots")?;
         for (root, before) in &self.queues {
             let current = after.queues.get(root).map_or(&[][..], Vec::as_slice);
             let surviving = ids(current);
@@ -98,19 +110,27 @@ fn ids(queue: &[Draft]) -> BTreeSet<&str> {
 pub(super) fn capture(
     paths: &PlakPaths,
     before: Option<&Product>,
+    evidence: Evidence,
     budget: &mut Budget,
 ) -> CliResult<(Product, Vec<Admission>)> {
     let [(schema, path), _] = databases(paths);
     schema
         .inspect_existing(&path, budget.deadline(), |db, _| {
-            capture_product(db, before, budget)
+            capture_product(db, before, evidence, budget)
         })
         .map_err(|_| unreadable("product store"))?
+        .and_then(|(mut product, admissions)| {
+            if evidence == Evidence::BaselinePredatesDrain {
+                product.deleted_trees = deleted_trees(paths, budget)?;
+            }
+            Ok((product, admissions))
+        })
 }
 
 fn capture_product(
     db: &Connection,
     before: Option<&Product>,
+    evidence: Evidence,
     budget: &mut Budget,
 ) -> CliResult<(Product, Vec<Admission>)> {
     super::facts::configure_reader(db)?;
@@ -124,51 +144,97 @@ fn capture_product(
     let mut roots = Map::new();
     let mut queues = Map::new();
     let mut admissions = Vec::new();
-    scan(db, "
-        WITH heads AS (
-          SELECT id, row_number() OVER (PARTITION BY node_tree_id ORDER BY updated_at DESC,id) AS pos
-          FROM sessions s WHERE NOT EXISTS (
-            SELECT 1 FROM sessions next WHERE next.source_session_id=s.id
-              AND next.node_tree_id=s.node_tree_id AND next.node_agent_id=s.node_agent_id)
-        )
-        SELECT s.id,archived,locator,node_tree_id,node_agent_id,account,model,effort,composition,
+    scan(
+        db,
+        "
+        SELECT id,archived,locator,node_tree_id,node_agent_id,account,model,effort,composition,
                workspace_root,workspace_identity,root_profile,runner_display,target_selection,
-               frozen_tools,created_at,create_operation_id,source_session_id,source_operation_id
-        FROM heads JOIN sessions s ON s.id=heads.id WHERE pos=1 ORDER BY s.id
-    ", [], "product root", |row| {
-        budget.take()?;
-        let id: String = get(row, 0)?;
-        let key = texts([id.as_str()]);
-        let locator = get::<Option<String>>(row, 2)?.as_deref().map(locator_branch).transpose()?;
-        let root = Root {
-            stable: columns(row, 3..19)?,
-            archived: get(row, 1)?,
-            branch: locator.map(branch_key),
-        };
-        let queue = queue(db, &id, budget)?;
-        if let Some(locator) = locator
-            && let Some(prior) = before.and_then(|snapshot| snapshot.queues.get(&key))
-        {
-            let surviving = ids(&queue);
-            let wanted = prior.iter().filter_map(|item| {
-                let witness = item.witness.as_ref()?;
-                (!surviving.contains(item.id.as_str())).then_some((item.id.clone(), witness))
-            }).collect();
-            read_admissions(db, &id, locator, &wanted, &mut admissions, budget)?;
-        }
-        if !queue.is_empty() {
-            insert(&mut queues, key.clone(), queue)?;
-        }
-        insert(&mut roots, key, root)
-    })?;
+               frozen_tools,created_at,create_operation_id,source_session_id,source_operation_id,
+               revision
+        FROM sessions ORDER BY id
+    ",
+        [],
+        "product session",
+        |row| {
+            budget.take()?;
+            let id: String = get(row, 0)?;
+            let key = texts([id.as_str()]);
+            let locator = get::<Option<String>>(row, 2)?
+                .as_deref()
+                .map(locator_branch)
+                .transpose()?;
+            let root = Root {
+                stable: if evidence == Evidence::Held {
+                    columns(row, (5..15).chain([17, 18]))?
+                } else {
+                    Key::new()
+                },
+                identity: columns(row, [3, 4, 15, 16])?,
+                revision: nonnegative(row, 19)?,
+                archived: get(row, 1)?,
+                branch: locator.map(branch_key),
+                runtime: locator.map(|id| texts([id.session_id().to_string().as_str()])),
+                tree: columns(row, [3])?,
+            };
+            // Pending drafts can be edited and withdrawn while the predecessor
+            // serves. Its durable admissions are checked in the runtime feed.
+            if evidence == Evidence::BaselinePredatesDrain {
+                return insert(&mut roots, key, root);
+            }
+            let queue = queue(db, &id, budget)?;
+            if let Some(locator) = locator
+                && let Some(prior) = before.and_then(|snapshot| snapshot.queues.get(&key))
+            {
+                let surviving = ids(&queue);
+                let wanted = prior
+                    .iter()
+                    .filter_map(|item| {
+                        let witness = item.witness.as_ref()?;
+                        (!surviving.contains(item.id.as_str()))
+                            .then_some((item.id.clone(), witness))
+                    })
+                    .collect();
+                read_admissions(db, &id, locator, &wanted, &mut admissions, budget)?;
+            }
+            if !queue.is_empty() {
+                insert(&mut queues, key.clone(), queue)?;
+            }
+            insert(&mut roots, key, root)
+        },
+    )?;
     Ok((
         Product {
             instance: texts([instance.as_str()]),
             roots,
             queues,
+            deleted_trees: BTreeSet::new(),
         },
         admissions,
     ))
+}
+
+fn deleted_trees(paths: &PlakPaths, budget: &mut Budget) -> CliResult<BTreeSet<Key>> {
+    let dir = paths.state_dir().join("deleted-artifacts");
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
+        Err(_) => return Err(unreadable("deleted tree inventory")),
+    };
+    let mut deleted = BTreeSet::new();
+    for entry in entries {
+        budget.take()?;
+        let entry = entry.map_err(|_| unreadable("deleted tree inventory"))?;
+        let name = entry.file_name();
+        let Some(id) = name.to_str().and_then(|name| name.strip_suffix(".json")) else {
+            continue;
+        };
+        if uuid::Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == id)
+            && entry.file_type().is_ok_and(|kind| kind.is_file())
+        {
+            deleted.insert(texts([id]));
+        }
+    }
+    Ok(deleted)
 }
 
 fn queue(db: &Connection, root: &str, budget: &mut Budget) -> CliResult<Vec<Draft>> {

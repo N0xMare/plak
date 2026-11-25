@@ -14,10 +14,18 @@ use serde::{Deserialize, Serialize};
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliResult};
 
+pub(super) use self::facts::CAPTURE_TIME;
 use self::facts::{Budget, Key};
+
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+pub(in crate::host) enum Evidence {
+    Held,
+    BaselinePredatesDrain,
+}
 
 #[derive(Deserialize, Serialize)]
 pub(super) struct Snapshot {
+    pub(super) evidence: Evidence,
     product: product::Product,
     runtime: Option<runtime::Runtime>,
     trees: trees::Trees,
@@ -28,21 +36,34 @@ impl Snapshot {
         paths: &PlakPaths,
         before: Option<&Self>,
     ) -> CliResult<(Self, BTreeSet<Key>)> {
+        Self::capture_at(paths, before, before.map_or(Evidence::Held, |s| s.evidence))
+    }
+
+    pub(super) fn capture_at(
+        paths: &PlakPaths,
+        before: Option<&Self>,
+        evidence: Evidence,
+    ) -> CliResult<(Self, BTreeSet<Key>)> {
         let config =
             crate::product_config::ProductConfig::load_home_file(paths).map_err(CliFailure::new)?;
         check(
-            !config.retire_finished_children,
+            evidence == Evidence::BaselinePredatesDrain || !config.retire_finished_children,
             "cannot verify intentional retirement while retire_finished_children is enabled",
         )?;
         let mut budget = Budget::default();
         // Read the runtime after the queue: a visible removal must have
         // prior durable admission, not merely a delivery view.
-        let (product, candidates) =
-            product::capture(paths, before.map(|before| &before.product), &mut budget)?;
-        let (runtime, accepted) = runtime::capture(paths, candidates, &mut budget)?;
-        let trees = trees::capture(paths, &mut budget)?;
+        let (product, candidates) = product::capture(
+            paths,
+            before.map(|before| &before.product),
+            evidence,
+            &mut budget,
+        )?;
+        let (runtime, accepted) = runtime::capture(paths, candidates, evidence, &mut budget)?;
+        let trees = trees::capture(paths, evidence, &mut budget)?;
         Ok((
             Self {
+                evidence,
                 product,
                 runtime,
                 trees,
@@ -57,16 +78,26 @@ impl Snapshot {
         accepted: &BTreeSet<Key>,
         paths: &PlakPaths,
     ) -> CliResult<Option<String>> {
-        self.product.compare(&after.product, accepted)?;
+        let recorded_deletes = after.runtime.as_ref().map(runtime::Runtime::deleted);
+        self.product
+            .compare(&after.product, accepted, self.evidence, |id| {
+                recorded_deletes.is_some_and(|deleted| deleted.contains_key(id))
+            })?;
         if let Some(before) = &self.runtime {
             before.compare(
                 after
                     .runtime
                     .as_ref()
                     .ok_or_else(|| unreadable("runtime store"))?,
+                self.evidence,
             )?;
         }
-        self.trees.compare(&after.trees, paths)
+        self.trees.compare(
+            &after.trees,
+            paths,
+            self.evidence,
+            &after.product.deleted_trees,
+        )
     }
 }
 

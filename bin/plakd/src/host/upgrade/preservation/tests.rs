@@ -185,6 +185,13 @@ impl Fixture {
                 ],
             )
             .unwrap();
+        self.runtime
+            .execute(
+                "UPDATE sessions SET feed_retained_from=(SELECT min(seq) FROM session_feed),
+                                 feed_tail=(SELECT max(seq) FROM session_feed) WHERE session_id=?1",
+                [SESSION],
+            )
+            .unwrap();
     }
 
     fn refuses(&self, before: &Snapshot, reason: &str) {

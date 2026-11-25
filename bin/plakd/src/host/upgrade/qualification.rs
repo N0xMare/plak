@@ -13,7 +13,15 @@ pub(super) fn qualify_destination(
     request: &Request,
     arguments: &[String],
     report: &progress::Report<'_>,
-) -> Result<(DestinationProbe, process::VerifiedImage, reopen::Preflight), Refusal> {
+) -> Result<
+    (
+        DestinationProbe,
+        process::VerifiedImage,
+        reopen::Preflight,
+        bindings::Baseline,
+    ),
+    Refusal,
+> {
     let paths = services.paths()?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     if request.source_instance != identity.instance.to_string()
@@ -46,7 +54,7 @@ pub(super) fn qualify_destination(
     }
     let stores = scratch.stores();
     let stores = stores.is_dir().then_some(stores.as_path());
-    bindings::preflight(
+    let bindings = bindings::preflight(
         paths,
         &request.destination,
         &request.destination_key,
@@ -56,7 +64,7 @@ pub(super) fn qualify_destination(
     let reopen = progress::timed(report, progress::Phase::ExactReopen, || {
         reopen::preflight(paths, request, stores, before_rehearsal)
     })?;
-    Ok((probe, image, reopen))
+    Ok((probe, image, reopen, bindings))
 }
 
 pub(super) fn recheck_held(
