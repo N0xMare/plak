@@ -1588,7 +1588,7 @@ pub(crate) mod suite {
         ),
         (
             "anthropic-api.py-sdk.root.single-agent",
-            "cf218e001ab5c808f1017801f725072c8589d0086e93d102a05a395de0b68973",
+            "7b1f0a6ebdca22a40ff3d0570a77826cdf01fb12b7c0c1aaecb2c29edfdecb5a",
         ),
         (
             "codex.direct.root.single-agent",
@@ -1924,15 +1924,15 @@ pub(crate) mod suite {
         ),
         (
             "anthropic-api.direct.root.single-agent",
-            "91e33da9e9e855b6d21ecd7c6988269d9a4b7a24c712c438156f008ced7d113c",
+            "bb19313832c53fb590d40b63b6cd4dfc6a9050af25156015e445eae8d1d97a24",
         ),
         (
             "anthropic-api.js-ptc.root.single-agent",
-            "9ca7c2aa7dbfe970e20bd957840549e7c667a76e1111f226023236497762c27e",
+            "34eb41d9743e5890738152a3d671e8c356a6a7717ccf2370c45d4b3911ecfbad",
         ),
         (
             "anthropic-api.py-ptc.root.single-agent",
-            "fd5d6d41f02c80e80d48a4e048bf2f56b337167c98b1a9511af71c5877e0cf97",
+            "4fe1df8234128a215523e448794dbe5ea910d939f1ceb984a3ca2a52f0cffe45",
         ),
     ];
 

@@ -546,7 +546,12 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         || "info,plak.capture=warn".to_owned(),
         |filter| format!("{filter},plak.capture=warn"),
     ));
-    let wants_diagnostics = !command_is_read_only(&command) && filter.is_some();
+    let version_has_existing_home = !matches!(command, Command::Version)
+        || services.home().paths_if_resolved().is_some_and(|paths| {
+            std::fs::symlink_metadata(paths.home()).is_ok_and(|metadata| metadata.is_dir())
+        });
+    let wants_diagnostics =
+        !command_is_read_only(&command) && filter.is_some() && version_has_existing_home;
     let diagnostics = if wants_diagnostics {
         match services
             .home()

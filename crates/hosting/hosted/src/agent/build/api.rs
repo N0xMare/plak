@@ -403,7 +403,12 @@ pub(crate) fn api_product_profile(
         })
         .preferred_reasoning_effort(effort)
         .continuation_strategy(ContinuationPreferenceStrategy::CanonicalReplayOnly)
-        .cache_strategy(CachePreferenceStrategy::Disabled)
+        .cache_strategy(match wire {
+            ResolvedProtocol::Messages => CachePreferenceStrategy::PreferStablePrefix,
+            ResolvedProtocol::Chat | ResolvedProtocol::Responses => {
+                CachePreferenceStrategy::Disabled
+            }
+        })
         .build()
         .map_err(|error| CliFailure::new(format!("API product profile is invalid: {error}")))
 }

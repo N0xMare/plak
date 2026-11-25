@@ -182,7 +182,11 @@ pub(crate) mod suite {
 
     fn cache_for(spec: &prompts::RouteSpec) -> CachePolicy {
         match spec.provider {
-            prompts::ProviderKind::Claude => CachePolicy::Enabled {
+            prompts::ProviderKind::Claude
+            | prompts::ProviderKind::Platform(PlatformProvider::Anthropic)
+            | prompts::ProviderKind::OpenRouter {
+                wire: ProductResolvedProtocol::Messages,
+            } => CachePolicy::Enabled {
                 requirement: CapabilityRequirement::Required,
             },
             _ => CachePolicy::Disabled,
@@ -537,7 +541,7 @@ pub(crate) mod suite {
                     })
                     .with_prompt_cache(true)
                     .with_top_level_prompt_cache(false)
-                    .with_prompt_cache_ttl(Some("1h"));
+                    .with_prompt_cache_ttl(None);
                 let lowered =
                     plakous_messages::lower_request(&plan, &policy, ToolOwnership::default())
                         .unwrap_or_else(|error| {
@@ -554,7 +558,7 @@ pub(crate) mod suite {
                     spec.model,
                     "openrouter.messages.dynamic-custom-v1",
                     family,
-                    false,
+                    true,
                 );
                 let plan = descriptor
                     .validate_request(request, ValidationMode::Strict)
@@ -1014,7 +1018,7 @@ pub(crate) mod suite {
         ),
         (
             "anthropic-api.direct.root.single-agent",
-            "ff5d01897540ec01cbc597b142c1305bed9bdd3084b8208c928369aea83109e6",
+            "b6befc33a78a723ad2ccd50867509ec93a70ae4297a2e95baa1b28ae70fd71bc",
         ),
     ];
 

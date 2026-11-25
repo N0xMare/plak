@@ -9,12 +9,12 @@ use std::{num::NonZeroU32, path::PathBuf, sync::Arc};
 
 use plakous::agent::ReasoningEffort;
 use plakous::model::{
-    CachePolicy, ConfiguredLanguageModel, ContextAdmissionRequirement, LocalDurabilityDisposition,
-    ModelAdapterProfileId, OutputBoundDisposition, OutputPolicy, ParallelToolDisposition,
-    ProcessingTierDisposition, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
-    ProviderStorageDisposition, ReasoningEffortDisposition, ReasoningIncludeDisposition,
-    ReasoningSummaryDisposition, ReplayDisposition, ResponseStateDisposition, RetentionDisposition,
-    ToolChoice, ToolPresentationMode,
+    CachePolicy, CapabilityRequirement, ConfiguredLanguageModel, ContextAdmissionRequirement,
+    LocalDurabilityDisposition, ModelAdapterProfileId, OutputBoundDisposition, OutputPolicy,
+    ParallelToolDisposition, ProcessingTierDisposition, ProviderBehaviorConfiguration,
+    ProviderProfileRevisionId, ProviderStorageDisposition, ReasoningEffortDisposition,
+    ReasoningIncludeDisposition, ReasoningSummaryDisposition, ReplayDisposition,
+    ResponseStateDisposition, RetentionDisposition, ToolChoice, ToolPresentationMode,
 };
 use plakous::openrouter::{
     OpenRouterChatClient, OpenRouterChatDiscoveryError, OpenRouterChatEndpointCandidate,
@@ -528,7 +528,12 @@ fn openrouter_behavior_from_tools(
             }
             ResolvedProtocol::Messages => ReplayDisposition::Disabled,
         },
-        cache: CachePolicy::Disabled,
+        cache: match wire {
+            ResolvedProtocol::Messages => CachePolicy::Enabled {
+                requirement: CapabilityRequirement::Required,
+            },
+            ResolvedProtocol::Chat | ResolvedProtocol::Responses => CachePolicy::Disabled,
+        },
         tools,
         hosted_tools: Vec::new(),
         tool_choice: ToolChoice::Auto,

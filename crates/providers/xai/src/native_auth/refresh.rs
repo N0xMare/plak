@@ -593,10 +593,11 @@ impl Drop for XaiRefreshCancelGuard {
         let store = Arc::clone(&self.store);
         let observer = self.observer.clone();
         let started = self.started;
-        let restore = move || {
-            let Ok(Some(_)) = store.try_restore_unknown_to_ready(&claimed) else {
+        let generation = claimed.generation().get();
+        let finish_restore = move |restored: bool| {
+            if !restored {
                 return;
-            };
+            }
             if let Some(observer) = observer {
                 observer.observe(CredentialRefreshEvent {
                     phase: CredentialRefreshPhase::Restored,
@@ -604,14 +605,19 @@ impl Drop for XaiRefreshCancelGuard {
                     transport_phase: None,
                     http_status: None,
                     elapsed: started.elapsed(),
-                    generation: claimed.generation().get(),
+                    generation,
                     detail: CredentialRefreshDetail::default(),
                 });
             }
         };
         match tokio::runtime::Handle::try_current() {
-            Ok(handle) => drop(handle.spawn_blocking(restore)),
-            Err(_) => restore(),
+            Ok(handle) => drop(handle.spawn_blocking(move || {
+                finish_restore(store.restore_unknown_to_ready(&claimed).is_ok());
+            })),
+            Err(_) => finish_restore(matches!(
+                store.try_restore_unknown_to_ready(&claimed),
+                Ok(Some(_))
+            )),
         }
     }
 }

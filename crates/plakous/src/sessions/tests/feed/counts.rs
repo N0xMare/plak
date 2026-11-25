@@ -200,9 +200,22 @@ async fn facade_placeholder_suffix_is_refused_before_any_receipt_read() -> TestR
 impl SessionStore for CountingReads {
     plakous_test_support::session_store_methods! {
         forward store_api, inner;
-        lease_now, recover_create, acquire, release, commit, fork, recover_fork, list,
+        lease_now, recover_create, release, commit, fork, recover_fork, list,
         usage, archive, delete, prune, recover_delete, read_feed, feed_tail, branch_line,
         load_line, line_job_terminals, record_line_job_terminals, flush, shutdown,
+    }
+
+    fn acquire(
+        &self,
+        request: AcquireBranch,
+    ) -> store_api::StoreFuture<'_, store_api::BranchLease> {
+        Box::pin(async move {
+            let result = self.inner.acquire(request).await;
+            if let Ok(lease) = &result {
+                *test_lock(&self.lease) = Some(lease.clone());
+            }
+            result
+        })
     }
 
     fn create(
