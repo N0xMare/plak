@@ -470,7 +470,7 @@ impl Write for Outbox {
         if !line.ends_with(b"\n") {
             return Err(io::Error::other("incomplete wire frame"));
         }
-        if independent_reply(line) {
+        if line.starts_with(br#"{"frame":"attachment_status","#) || independent_reply(line) {
             plakous_hosted::host_service::wire::test_timing::writer("enqueue", line);
             self.control(Some(line.to_vec()))?;
         } else {
@@ -543,6 +543,62 @@ mod tests {
     use plakous_host_protocol::views::transcript::TranscriptScope;
     use plakous_host_protocol::wire::{Answer, HostFrame, Outcome, RequestRefusal, encode_line};
     use std::time::Duration;
+
+    #[test]
+    fn explicit_attachment_status_uses_only_bounded_control_output() {
+        use plakd_wire_types::v13::HostFrameV13;
+        use plakous_host_protocol::{intent_channel, wire::NodeAddress};
+        use plakous_hosted::host_service::wire::WireConnection;
+
+        let outbox = Outbox::default();
+        let (actions, _intents) = intent_channel();
+        let root = NodeAddress {
+            tree_id: "tree".into(),
+            agent_id: "root".into(),
+        };
+        let mut wire =
+            WireConnection::<PlakExtension, _>::new(root.clone(), outbox.clone(), actions)
+                .with_attachment_status(super::super::protocol_13::status);
+        wire.publisher().publish(
+            plakous_host_protocol::SessionObservation::PresentationSnapshot(
+                PresentationSnapshot::empty(1),
+            ),
+        );
+        let read = wire.begin_viewport(&root, 3).unwrap();
+        let first = wire
+            .install_viewport_page(&read, "line".into(), 1)
+            .unwrap()
+            .unwrap();
+        wire.write_viewport_prefix(first.attachment, |_| Ok(()))
+            .unwrap();
+        assert_eq!(
+            wire.reply_attachment_status(4, first.attachment).unwrap(),
+            None
+        );
+        assert!(outbox.ordered_drained());
+        let (frame, ordered) = outbox.pop().unwrap().unwrap();
+        let frame = frame.unwrap();
+        assert!(
+            matches!(serde_json::from_slice::<HostFrameV13>(&frame).unwrap(),
+            HostFrameV13::AttachmentStatus {
+                attachment, request_id: Some(4), baselines_sent: 1, seq_gaps: 0,
+                bytes_queued: 0, queue_len: 0, ..
+            } if attachment == first.attachment)
+        );
+        assert!(!ordered);
+        assert!(!outbox.sent(frame.len(), ordered));
+        assert!(outbox.pop().unwrap().is_none());
+        assert_eq!(
+            wire.reply_attachment_status(5, first.attachment + 1)
+                .unwrap(),
+            Some(RequestRefusal::NotAttached)
+        );
+        for _ in 0..MAX_PENDING_FRAMES {
+            outbox.control(None).unwrap();
+        }
+        assert!(wire.reply_attachment_status(6, first.attachment).is_err());
+        assert!(matches!(outbox.pop(), Err(SendError::Full)));
+    }
 
     #[test]
     fn control_overtakes_bulk_without_crossing_ordered_attachment_boundaries() {

@@ -49,6 +49,9 @@ where
         for link in [&mut self.node, &mut self.draining].into_iter().flatten() {
             link.connection.output_sent();
         }
+        if let Some(link) = &mut self.readonly {
+            link.connection.output_sent();
+        }
     }
 }
 

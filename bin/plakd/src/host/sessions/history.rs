@@ -10,6 +10,7 @@ use plakd_wire_types::v13::{
 use plakous_host_protocol::views::transcript::{RowKey, TranscriptItem};
 use plakous_host_protocol::wire::{self, AttachmentId, RequestId};
 use plakous_hosted::runtime::RootTranscript;
+use std::sync::Arc;
 
 use crate::home::paths::PlakPaths;
 use crate::store::transcript_history::{
@@ -31,8 +32,45 @@ struct Page {
 
 pub(crate) struct HistoryAttachment {
     line: Line,
+    fence: Arc<str>,
     attachment: AttachmentId,
     reader: HistoryReader,
+}
+
+impl HistoryAttachment {
+    pub(crate) fn fence(&self) -> Arc<str> {
+        Arc::clone(&self.fence)
+    }
+
+    pub(crate) fn bind(&mut self, attachment: AttachmentId) {
+        self.attachment = attachment;
+    }
+}
+
+fn fence(line: &Line, prune: &Prune) -> Result<Arc<str>, HistoryError> {
+    serde_json::to_string(&(line, prune))
+        .map(Arc::from)
+        .map_err(|_| HistoryError::Unavailable)
+}
+
+/// Checks the replay authority without rendering or paging any history.
+pub(crate) fn replay_binding(
+    paths: &PlakPaths,
+    session: &str,
+) -> Result<HistoryAttachment, RequestRefusal> {
+    let reader = HistoryReader::open(paths, session).map_err(refusal)?;
+    let (line, fence) = reader
+        .read(paths, |history| {
+            let fence = fence(&history.line, &history.prune)?;
+            Ok((history.line, fence))
+        })
+        .map_err(refusal)?;
+    Ok(HistoryAttachment {
+        line,
+        fence,
+        attachment: 0,
+        reader,
+    })
 }
 
 pub(crate) struct AttachedHistory {
@@ -64,7 +102,7 @@ pub(crate) fn attach(
         }
     };
     let reader = HistoryReader::open(paths, session).map_err(refusal)?;
-    let (captured_line, page) = reader
+    let (captured_line, fence, page) = reader
         .read(paths, |history| {
             if live
                 .applied
@@ -74,7 +112,8 @@ pub(crate) fn attach(
             }
             let turns = turns_at(&paths.runtime_database(), &history, None)?;
             let page = first(&history, &turns)?;
-            Ok((history.line, page))
+            let fence = fence(&history.line, &history.prune)?;
+            Ok((history.line, fence, page))
         })
         .map_err(refusal)?;
     let attachment = target.attachment;
@@ -92,6 +131,7 @@ pub(crate) fn attach(
     Ok(AttachedHistory {
         binding: HistoryAttachment {
             line: captured_line,
+            fence,
             attachment,
             reader,
         },
@@ -260,7 +300,7 @@ fn decode_cursor(cursor: &HistoryCursor) -> Result<(Line, Prune, u64, u64), Hist
     serde_json::from_slice(&bytes).map_err(|_| HistoryError::CursorExpired)
 }
 
-fn answer(id: RequestId, answer: AnswerV13) -> HostFrameV13 {
+pub(crate) fn answer(id: RequestId, answer: AnswerV13) -> HostFrameV13 {
     HostFrameV13::Response {
         id,
         outcome: Outcome::Ok(Box::new(Answer::Draft(answer))),

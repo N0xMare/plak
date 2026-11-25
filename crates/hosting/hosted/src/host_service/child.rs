@@ -264,6 +264,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 node: Some(agent.to_owned()),
                 queue: Queue::default(),
                 seq: 0,
+                meter: None,
                 scopes: Scopes::Held(BTreeSet::from([scope])),
                 gapped: BTreeSet::new(),
                 fresh: BTreeSet::new(),

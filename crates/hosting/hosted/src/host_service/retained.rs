@@ -1,9 +1,12 @@
 //! The attach cache is a complete, bounded replay from one root baseline.
 
+use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::sync::Arc;
 
 use plakous_host_protocol::views::{PresentationSnapshot, transcript::TranscriptPatch};
+use plakous_host_protocol::wire::{AttachmentId, NodeAddress};
+use uuid::Uuid;
 
 use super::queue::MAX_QUEUE_BYTES;
 use super::{
@@ -14,7 +17,185 @@ use super::{
 const MAX_PATCHES: usize = 64;
 // Keep small incremental replays, but spend at most half a wire line on the
 // whole chain rather than sending many large deltas instead of a fresh view.
-const MAX_PATCH_BYTES: usize = 8 * 1024 * 1024;
+pub(super) const MAX_PATCH_BYTES: usize = 8 * 1024 * 1024;
+const MAX_VIEWPORTS: usize = 16;
+
+/// A point the client holds in a process-local viewport.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ViewportRevision {
+    /// The serving process's generation, compared for equality only.
+    pub host_generation: u64,
+    /// An exact baseline or patch boundary.
+    pub revision: u64,
+    /// Opaque identity of the viewport opened by the first page.
+    pub token: Uuid,
+}
+
+/// Publication fence sampled before reading history, without retaining a lock.
+pub struct ViewportRead {
+    pub(super) node: NodeAddress,
+    pub(super) generation: u64,
+    epoch: Uuid,
+}
+
+/// An admitted viewport and its immutable ordered prefix. Patches are numbered
+/// from 1, before anything the new attachment can take from its live queue.
+pub struct ViewportStart {
+    /// The newly admitted attachment.
+    pub attachment: AttachmentId,
+    /// The starting revision of the prefix, not its endpoint.
+    pub revision: ViewportRevision,
+    /// The gap-free chain from that revision to the frozen live endpoint.
+    /// Shares up to 8 MiB of encoded patch payload with the journal; a writer
+    /// that materializes owned frames may copy that much per attach.
+    pub patches: Vec<Arc<TranscriptPatch>>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ViewportBase<'a> {
+    Replay(&'a ViewportRevision),
+    FirstPage(u64),
+}
+
+struct Viewport {
+    first: ViewportRevision,
+    // Opaque line-head and prune fence from the product's read snapshot.
+    line: Arc<str>,
+}
+
+#[derive(Default)]
+pub(super) struct Viewports {
+    epoch: Option<Uuid>,
+    tip: Option<u64>,
+    points: VecDeque<Viewport>,
+    patches: VecDeque<(Arc<TranscriptPatch>, usize)>,
+    bytes: usize,
+}
+
+impl Viewports {
+    pub(super) fn read(
+        &mut self,
+        node: NodeAddress,
+        generation: u64,
+        revision: Option<u64>,
+    ) -> ViewportRead {
+        let epoch = *self.epoch.get_or_insert_with(|| {
+            self.tip = revision;
+            Uuid::new_v4()
+        });
+        ViewportRead {
+            node,
+            generation,
+            epoch,
+        }
+    }
+
+    pub(super) fn reset(&mut self, tip: Option<u64>) {
+        if self.epoch.is_some() {
+            *self = Self {
+                epoch: Some(Uuid::new_v4()),
+                tip,
+                ..Self::default()
+            };
+        }
+    }
+
+    fn observe<P: ProtocolExtension>(&mut self, payload: &Payload<P>, bytes: usize) {
+        if self.epoch.is_none() {
+            return;
+        }
+        match payload {
+            Payload::Snapshot(snapshot)
+                if snapshot.scope == TranscriptScope::Root
+                    && self.tip != Some(snapshot.revision) =>
+            {
+                self.reset(Some(snapshot.revision));
+            }
+            Payload::Patch(patch) if patch.scope == TranscriptScope::Root => {
+                if self.tip != Some(patch.from_revision)
+                    || patch.to_revision <= patch.from_revision
+                    || bytes > MAX_PATCH_BYTES
+                {
+                    self.reset(Some(patch.to_revision));
+                    return;
+                }
+                self.tip = Some(patch.to_revision);
+                self.bytes += bytes;
+                self.patches.push_back((Arc::clone(patch), bytes));
+                while self.patches.len() > MAX_PATCHES || self.bytes > MAX_PATCH_BYTES {
+                    if let Some((_, bytes)) = self.patches.pop_front() {
+                        self.bytes -= bytes;
+                    }
+                }
+            }
+            Payload::Other(
+                SessionObservation::SessionOpening
+                | SessionObservation::SessionOpened { .. }
+                | SessionObservation::ClearView,
+            ) => self.reset(None),
+            _ => {}
+        }
+    }
+
+    pub(super) fn contains_read(&self, read: &ViewportRead) -> bool {
+        self.epoch == Some(read.epoch)
+    }
+
+    pub(super) fn plan(
+        &self,
+        read: &ViewportRead,
+        line: &str,
+        base: ViewportBase<'_>,
+    ) -> Option<(ViewportRevision, Vec<Arc<TranscriptPatch>>)> {
+        if !self.contains_read(read) {
+            return None;
+        }
+        let tip = self.tip?;
+        let start = match base {
+            ViewportBase::Replay(start) => {
+                if start.host_generation != read.generation
+                    || !self.points.iter().any(|point| {
+                        point.first.token == start.token
+                            && point.first.host_generation == start.host_generation
+                            && point.first.revision <= start.revision
+                            && *point.line == *line
+                    })
+                {
+                    return None;
+                }
+                start.clone()
+            }
+            ViewportBase::FirstPage(revision) => ViewportRevision {
+                host_generation: read.generation,
+                revision,
+                token: Uuid::new_v4(),
+            },
+        };
+        let mut at = start.revision;
+        let mut patches = Vec::new();
+        if at != tip {
+            let first = self
+                .patches
+                .iter()
+                .position(|(patch, _)| patch.from_revision == at)?;
+            for (patch, _) in self.patches.iter().skip(first) {
+                if patch.from_revision != at {
+                    return None;
+                }
+                at = patch.to_revision;
+                patches.push(Arc::clone(patch));
+            }
+        }
+        (at == tip).then_some((start, patches))
+    }
+
+    pub(super) fn remember(&mut self, first: ViewportRevision, line: Arc<str>) {
+        if self.points.len() == MAX_VIEWPORTS {
+            self.points.pop_front();
+        }
+        self.points.push_back(Viewport { first, line });
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(
@@ -154,6 +335,7 @@ impl Write for Budget {
 
 impl<P: ProtocolExtension> Snapshot<P> {
     pub(super) fn remember(&mut self, payload: &Payload<P>, class: ObservationClass, size: usize) {
+        self.viewports.observe(payload, size);
         self.root_preview_pending |= payload.is_root_preview();
         let observation = match payload {
             Payload::Snapshot(baseline) => {

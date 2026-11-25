@@ -15,6 +15,7 @@ use plakous_host_protocol::{ProtocolExtension, SessionObservation};
 
 use super::super::{
     ChildNodes, HostService, MovedRequester, TreeNodes, fanout::Publication, kept_for_attach,
+    retained::ViewportRead,
 };
 use super::ATTACHMENT_CAPACITY;
 
@@ -94,6 +95,21 @@ impl<P: ProtocolExtension> ServedSession<P> {
 
     pub(super) fn service(&self) -> HostService<P> {
         self.service.clone()
+    }
+
+    pub(super) fn viewport_read(
+        &self,
+        node: &NodeAddress,
+        host_generation: u64,
+    ) -> Option<ViewportRead> {
+        if !self.viewport_ready() {
+            return None;
+        }
+        self.service.viewport_read(node, host_generation)
+    }
+
+    pub(super) const fn viewport_ready(&self) -> bool {
+        self.held.is_none() && !self.unresolved
     }
 
     /// Takes one observation, moving the service to the session it switched

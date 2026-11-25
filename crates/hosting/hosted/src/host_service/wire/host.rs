@@ -36,6 +36,147 @@ use super::slot::{OpenedSession, SessionSlot, SlotView};
 use super::{BlobRefusalOutput, Face, WireConnection, WireSession, host_welcome, write_frame};
 use crate::error::{CliFailure, CliResult};
 
+use super::super::retained::ViewportBase;
+use super::{AttachmentStatusOutput, ViewportRead, ViewportRevision, ViewportStart, served};
+
+pub(super) struct ViewportPrefix {
+    attachment: AttachmentId,
+    baseline: bool,
+    patches: usize,
+}
+
+impl<P: ProtocolExtension, W: Write> WireConnection<P, W>
+where
+    HostFrame<P>: Serialize,
+    ClientFrame<P>: DeserializeOwned,
+{
+    /// Sample a root's publication fence. The returned value holds no slot or
+    /// service lock; the history worker may page before the writer installs it.
+    #[must_use]
+    pub fn begin_viewport(&self, node: &NodeAddress, host_generation: u64) -> Option<ViewportRead> {
+        match &self.served {
+            Some(shared) => served::lock(shared).viewport_read(node, host_generation),
+            None => self.service.viewport_read(node, host_generation),
+        }
+    }
+
+    /// Try the exact retained revision against the currently read line and
+    /// prune fence. A miss must use history paging, not the legacy snapshot.
+    ///
+    /// # Errors
+    /// The session released or the new attachment could not be admitted.
+    pub fn replay_viewport(
+        &mut self,
+        read: &ViewportRead,
+        line: Arc<str>,
+        start: &ViewportRevision,
+    ) -> Result<Option<ViewportStart>, RequestRefusal> {
+        self.attach_viewport(read, line, ViewportBase::Replay(start))
+    }
+
+    /// Admit an exact history page and freeze any patches since its capture.
+    /// A miss means the capture raced a reset or could not be bridged; retry
+    /// history rather than writing the stale page.
+    ///
+    /// # Errors
+    /// The session released or the new attachment could not be admitted.
+    pub fn install_viewport_page(
+        &mut self,
+        read: &ViewportRead,
+        line: Arc<str>,
+        revision: u64,
+    ) -> Result<Option<ViewportStart>, RequestRefusal> {
+        self.attach_viewport(read, line, ViewportBase::FirstPage(revision))
+    }
+
+    fn attach_viewport(
+        &mut self,
+        read: &ViewportRead,
+        line: Arc<str>,
+        base: ViewportBase<'_>,
+    ) -> Result<Option<ViewportStart>, RequestRefusal> {
+        let served = self.served.clone();
+        let mut guard = served.as_ref().map(served::lock);
+        if guard
+            .as_ref()
+            .is_some_and(|served| !served.viewport_ready())
+        {
+            return Ok(None);
+        }
+        let target = guard
+            .as_ref()
+            .map_or_else(|| self.service.clone(), |served| served.service());
+        let Some(start) = target.install_viewport(read, line, base, self.face)? else {
+            return Ok(None);
+        };
+        if let Some(old) = self.attachment.replace(start.attachment) {
+            let _ = self.service.detach(old);
+            self.unanswered();
+            if let Some(guard) = guard.as_mut()
+                && guard.owes(old)
+                && let Some(previous) = self.moved.replace(old)
+                && previous != old
+            {
+                guard.forget(previous);
+            }
+        }
+        if let Some(guard) = &guard {
+            self.follow(guard);
+        }
+        self.enable_status(start.attachment);
+        self.viewport_prefix = Some(ViewportPrefix {
+            attachment: start.attachment,
+            baseline: matches!(base, ViewportBase::FirstPage(_)),
+            patches: start.patches.len(),
+        });
+        if let Some(guard) = guard.as_mut()
+            && let Some(moved) = self.moved.take()
+            && guard.attached(moved, start.attachment)
+        {
+            // This boundary belongs to ordered attachment output, behind its
+            // prefix. An unrelated request may arrive before that prefix.
+            self.service.resync_viewport(start.attachment);
+        }
+        Ok(Some(start))
+    }
+
+    pub(super) fn viewport_prefix_pending(&self) -> bool {
+        self.viewport_prefix
+            .as_ref()
+            .is_some_and(|prefix| self.attachment == Some(prefix.attachment))
+    }
+
+    /// Queue the attached answer and its complete baseline or replay in
+    /// ordered output. No live observation can drain before this boundary.
+    ///
+    /// # Errors
+    /// The prefix was replaced, or the writer could not take the output.
+    pub fn write_viewport_prefix(
+        &mut self,
+        attachment: AttachmentId,
+        write: impl FnOnce(&mut W) -> CliResult<()>,
+    ) -> CliResult<()> {
+        let Some(prefix) = self.viewport_prefix.as_ref().filter(|prefix| {
+            self.attachment == Some(attachment) && prefix.attachment == attachment
+        }) else {
+            return Err(CliFailure::new("viewport attach was replaced"));
+        };
+        let ViewportPrefix {
+            baseline, patches, ..
+        } = *prefix;
+        write(&mut self.stdout.inner)?;
+        self.viewport_prefix = None;
+        if baseline {
+            self.record_baseline_sent(attachment, None);
+        }
+        for seq in 1..=patches as u64 {
+            self.record_event_sent(attachment, seq);
+        }
+        self.status_prefix_queued(attachment);
+        Ok(())
+    }
+}
+
 /// How long `release_session` waits for its session to begin releasing.
 pub const RELEASE_WAIT: Duration = Duration::from_secs(10);
 
@@ -324,6 +465,7 @@ where
             out,
             buffered_output: false,
             snapshot_output: None,
+            status_output: None,
             blob_refusal_output: None,
             lifecycle_output: None,
             face,
@@ -526,6 +668,7 @@ struct Watch {
 pub struct HostConnection<P: ProtocolExtension, W: Write> {
     buffered_output: bool,
     snapshot_output: Option<super::SnapshotOutput>,
+    status_output: Option<AttachmentStatusOutput>,
     blob_refusal_output: Option<BlobRefusalOutput>,
     lifecycle_output: Option<LifecycleOutput<P>>,
     connection_id: u64,
@@ -577,6 +720,31 @@ where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
+    /// Installs status projection for a future serving protocol, before attach.
+    #[must_use]
+    pub const fn with_attachment_status(mut self, output: AttachmentStatusOutput) -> Self {
+        self.status_output = Some(output);
+        self
+    }
+
+    /// Answer a status request for this connection's current node attachment.
+    ///
+    /// # Errors
+    /// Bounded control output could not take the frame.
+    pub fn reply_attachment_status(
+        &mut self,
+        id: plakous_host_protocol::wire::RequestId,
+        attachment: AttachmentId,
+    ) -> CliResult<Option<RequestRefusal>> {
+        if let Some(link) = &mut self.node {
+            return link.connection.reply_attachment_status(id, attachment);
+        }
+        if let Some(link) = &mut self.readonly {
+            return link.connection.reply_attachment_status(id, attachment);
+        }
+        Ok(Some(RequestRefusal::NotAttached))
+    }
+
     /// Answers one client line; `false` once the client has left.
     ///
     /// Buffered transports complete an attach in a later flush.
@@ -1101,6 +1269,9 @@ where
         if let Some(login) = &self.login {
             connection = connection.identified(login.clone());
         }
+        if let Some(output) = self.status_output {
+            connection = connection.with_attachment_status(output);
+        }
         let mut link = NodeLink {
             changes: session.changes(),
             releases,
@@ -1457,9 +1628,23 @@ where
             .as_mut()
             .filter(|_| self.watch.is_some());
         let host = &mut self.host_changes;
+        let status = self
+            .node
+            .as_ref()
+            .and_then(|link| link.connection.status_deadline())
+            .or_else(|| {
+                self.readonly
+                    .as_ref()
+                    .and_then(|link| link.connection.status_deadline())
+            });
         let session = self.node.as_mut().map(|link| &mut link.changes);
         let draining = self.draining.as_mut().map(|link| &mut link.changes);
-        let deadline = self.host_reads.values().map(|read| read.deadline).min();
+        let deadline = self
+            .host_reads
+            .values()
+            .map(|read| read.deadline)
+            .chain(status)
+            .min();
         let host_changed = tokio::select! {
             () = async { match stream { Some(notify) => notify.notified().await, None => std::future::pending::<()>().await } } => false,
             () = self.read_ready.notify.notified() => false,

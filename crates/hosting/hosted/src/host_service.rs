@@ -194,6 +194,7 @@ struct Attachment<P: ProtocolExtension> {
     node: Option<String>,
     queue: Queue<P>,
     seq: u64,
+    meter: Option<attachment::AttachmentMeter>,
     /// The transcripts this attachment holds; a face of a service with no
     /// session mailbox holds every one, since its intents pass through no
     /// service.
@@ -252,6 +253,7 @@ struct Snapshot<P: ProtocolExtension> {
     /// The latest root snapshot and the root patches after it, or `None`
     /// when a new attachment must ask for a fresh one.
     baseline: Option<RetainedBaseline>,
+    viewports: retained::Viewports,
     // A raw preview has arrived since the last keyed root publication.
     root_preview_pending: bool,
     /// Approvals asked and not yet resolved, in the order asked.
@@ -645,6 +647,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 snapshot: Snapshot {
                     states: Vec::new(),
                     baseline: None,
+                    viewports: retained::Viewports::default(),
                     root_preview_pending: false,
                     approvals: Vec::new(),
                     credential_wait: None,
@@ -672,6 +675,7 @@ impl<P: ProtocolExtension> HostService<P> {
         let mut state = self.lock();
         state.requester = None;
         state.root_revision = None;
+        state.snapshot.viewports.reset(None);
         state.resync_wait.clear();
     }
 
@@ -769,6 +773,7 @@ impl<P: ProtocolExtension> HostService<P> {
         let mut state = self.lock();
         if state.holding && !holding {
             state.snapshot.baseline = None;
+            state.snapshot.viewports.reset(None);
         }
         state.holding = holding;
     }
@@ -784,6 +789,7 @@ impl<P: ProtocolExtension> HostService<P> {
         let mut state = self.lock();
         if lost(&TranscriptScope::Root) {
             state.snapshot.baseline = None;
+            state.snapshot.viewports.reset(None);
             state.root_revision = None;
         }
         for held in state.attachments.values_mut() {
@@ -958,7 +964,7 @@ impl<P: ProtocolExtension> HostService<P> {
             let mut state = self.lock();
             let now = std::time::Instant::now();
             let (id, mut attachment, asked) =
-                self.admission(&mut state, Some(mailbox), face, keyed_root);
+                self.admission(&mut state, Some(mailbox), face, keyed_root, None);
             if asked.is_some() {
                 attachment.await_baseline(&TranscriptScope::Root, now);
             }
@@ -993,6 +999,7 @@ impl<P: ProtocolExtension> HostService<P> {
         mailbox: Option<IntentSender<P>>,
         face: Face,
         keyed_root: bool,
+        viewport_prefix: Option<usize>,
     ) -> (AttachmentId, Attachment<P>, Option<IntentSender<P>>) {
         let id = state.next_attachment;
         state.next_attachment += 1;
@@ -1004,10 +1011,17 @@ impl<P: ProtocolExtension> HostService<P> {
             .cloned()
             .map(|(event, size)| (Payload::Other(event), size))
             .collect();
-        let fence_root_preview =
-            mailbox.is_some() && !waiting && (keyed_root || snapshot.root_preview_pending);
-        let needs_baseline = !waiting && (snapshot.baseline.is_none() || fence_root_preview);
-        if !needs_baseline && let Some(baseline) = &snapshot.baseline {
+        let fence_root_preview = viewport_prefix.is_none()
+            && mailbox.is_some()
+            && !waiting
+            && (keyed_root || snapshot.root_preview_pending);
+        let needs_baseline = viewport_prefix.is_none()
+            && !waiting
+            && (snapshot.baseline.is_none() || fence_root_preview);
+        if viewport_prefix.is_none()
+            && !needs_baseline
+            && let Some(baseline) = &snapshot.baseline
+        {
             items.extend(baseline.observations());
         }
         items.extend(
@@ -1039,13 +1053,15 @@ impl<P: ProtocolExtension> HostService<P> {
             sender,
             node: None,
             queue: Queue::default(),
-            seq: 0,
+            seq: viewport_prefix.unwrap_or_default() as u64,
+            meter: None,
             scopes,
             gapped: BTreeSet::new(),
             fresh: BTreeSet::new(),
             repairing: BTreeMap::new(),
             retained_after: None,
-            keyed: BTreeSet::new(),
+            keyed: viewport_prefix
+                .map_or_else(BTreeSet::new, |_| BTreeSet::from([TranscriptScope::Root])),
             fence_root_preview,
             dropped: false,
             waiting,
@@ -1221,6 +1237,7 @@ impl<P: ProtocolExtension> HostService<P> {
 
     fn lose_wire_patch(&self, attachment: AttachmentId, scope: &TranscriptScope) {
         if let Some(held) = self.lock().attachments.get_mut(&attachment) {
+            held.note_patch_skipped();
             held.miss_patch(scope);
         }
         self.repair_gaps();

@@ -123,8 +123,11 @@ impl<P: ProtocolExtension> Queue<P> {
         self.initial = 0;
     }
 
-    #[cfg(test)]
     pub(super) const fn bytes(&self) -> usize {
         self.bytes
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.items.len()
     }
 }

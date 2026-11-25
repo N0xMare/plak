@@ -1418,6 +1418,160 @@ fn a_replay_past_the_capacity_ends_in_a_resync() {
     );
 }
 
+#[test]
+fn a_lost_moved_replay_resyncs_after_the_viewport_prefix_not_a_ping() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut connection = WireConnection::new(root(), Vec::new(), actions)
+        .serving("s1", |id| Some(root_named(&format!("tree-{id}"))));
+    connection.request(1, Op::Attach { node: root() });
+    let old = connection.attachment().unwrap();
+    let shared = connection.served.clone().unwrap();
+    {
+        // Publish a switch without draining this connection's Moved boundary.
+        let mut served = served::lock(&shared);
+        assert!(served.observe(Publication::prepare(binding("s2"))));
+        for _ in 0..=ATTACHMENT_CAPACITY {
+            assert!(served.observe(Publication::prepare(SessionObservation::Row(
+                TranscriptRow::info(NoticeScope::Host, "opening event"),
+            ))));
+        }
+        assert!(served.owes(old));
+        assert!(served.observe(Publication::prepare(
+            SessionObservation::PresentationSnapshot(PresentationSnapshot::empty(1),)
+        )));
+    }
+    let stamp = connection
+        .begin_viewport(&root_named("tree-s2"), 3)
+        .unwrap();
+    let start = connection
+        .install_viewport_page(&stamp, "line".into(), 1)
+        .unwrap()
+        .unwrap();
+    assert!(!served::lock(&shared).owes(old));
+    assert!(
+        connection
+            .frame(Ok(encode_line(&ClientFrame::<Core>::Request {
+                id: 3,
+                op: Op::Ping,
+            })
+            .unwrap()))
+            .unwrap()
+    );
+    connection.flush().unwrap();
+    assert!(matches!(
+        &host_frames(&connection.stdout.inner)[..],
+        [HostFrame::Response {
+            id: 3,
+            outcome: Outcome::Ok(Answer::Pong)
+        }]
+    ));
+    connection
+        .write_viewport_prefix(start.attachment, |out| {
+            write_frame(
+                out,
+                &HostFrame::<Core>::Response {
+                    id: 2,
+                    outcome: Outcome::Ok(Answer::Attached {
+                        attachment: start.attachment,
+                    }),
+                },
+            )
+        })
+        .unwrap();
+    connection.flush().unwrap();
+    assert!(matches!(&host_frames(&connection.stdout.inner)[1..], [
+        HostFrame::Response { id: 2, outcome: Outcome::Ok(Answer::Attached { attachment }) },
+        HostFrame::ResyncRequired { attachment: resync },
+    ] if *attachment == start.attachment && resync == attachment));
+    assert_eq!(connection.attachment(), None);
+}
+
+fn test_status_output(
+    out: &mut dyn Write,
+    _: AttachmentId,
+    request: Option<RequestId>,
+    status: AttachmentStatus,
+) -> CliResult<()> {
+    writeln!(out, "status {request:?}: {}", status.seq_gaps)
+        .map_err(|error| CliFailure::new(error.to_string()))
+}
+
+#[test]
+fn status_waits_until_the_ordered_prefix_is_sent() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut connection = WireConnection::new(root(), Vec::new(), actions)
+        .with_buffered_output(true)
+        .with_attachment_status(test_status_output);
+    connection
+        .service
+        .observe(SessionObservation::PresentationSnapshot(
+            PresentationSnapshot::empty(1),
+        ));
+    let read = connection.begin_viewport(&root(), 3).unwrap();
+    let start = connection
+        .install_viewport_page(&read, "line".into(), 1)
+        .unwrap()
+        .unwrap();
+    let id = start.attachment;
+    assert_eq!(connection.reply_attachment_status(1, id).unwrap(), None);
+    connection
+        .write_viewport_prefix(id, |out| {
+            out.extend_from_slice(b"prefix\n");
+            Ok(())
+        })
+        .unwrap();
+    connection
+        .service
+        .observe(SessionObservation::SetBusy(true));
+    assert_eq!(connection.status_deadline(), None);
+    for request in 2..=4 {
+        assert_eq!(
+            connection.reply_attachment_status(request, id).unwrap(),
+            None
+        );
+    }
+    assert_eq!(
+        connection.reply_attachment_status(5, id).unwrap(),
+        Some(RequestRefusal::Backpressure)
+    );
+    connection.flush_attachment_status().unwrap();
+    assert_eq!(connection.stdout.inner.as_slice(), b"prefix\n");
+    connection.output_sent();
+    assert!(connection.status_deadline().is_some());
+    connection.flush_attachment_status().unwrap();
+    assert_eq!(
+        connection.stdout.inner.as_slice(),
+        b"prefix\nstatus Some(1): 0\nstatus Some(2): 0\nstatus Some(3): 0\nstatus Some(4): 0\n"
+    );
+}
+
+#[test]
+fn enabling_status_on_an_existing_attachment_does_not_count_a_gap() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut connection = WireConnection::new(root(), Vec::new(), actions);
+    connection
+        .service
+        .observe(SessionObservation::PresentationSnapshot(
+            PresentationSnapshot::empty(1),
+        ));
+    connection.request(1, Op::Attach { node: root() });
+    connection.flush().unwrap();
+    let before = connection.stdout.inner.len();
+    let id = connection.attachment().unwrap();
+    let mut connection = connection.with_attachment_status(test_status_output);
+    connection
+        .service
+        .observe(SessionObservation::SetBusy(true));
+    connection.flush().unwrap();
+    assert!(connection.stdout.inner.len() > before);
+    assert_eq!(connection.reply_attachment_status(2, id).unwrap(), None);
+    assert!(connection.stdout.inner.ends_with(b"status Some(2): 0\n"));
+}
+
 /// A replay given up after one switch does not outlive it: after another
 /// switch, the moved connection's next attachment gets that switch's
 /// replay and no resync.

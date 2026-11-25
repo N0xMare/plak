@@ -117,6 +117,11 @@ where
         if let Some(login) = &self.login {
             connection = connection.identified(login.clone());
         }
+        if let Some(output) = self.status_output {
+            connection = connection
+                .with_buffered_output(self.buffered_output)
+                .with_attachment_status(output);
+        }
         let reading = connection.frame(Ok(text.to_owned()))?;
         if connection.holding() {
             self.unlink();

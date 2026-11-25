@@ -67,6 +67,10 @@ type SnapshotOutput =
 /// Projection of an identified, definitely not-admitted blob through the sole writer.
 pub type BlobRefusalOutput = fn(&mut dyn Write, BlobRejection) -> CliResult<()>;
 
+/// Product projection of an unsequenced status frame into bounded control output.
+pub type AttachmentStatusOutput =
+    fn(&mut dyn Write, AttachmentId, Option<RequestId>, AttachmentStatus) -> CliResult<()>;
+
 /// Writes `frame` as one line and flushes it.
 ///
 /// # Errors
@@ -283,10 +287,13 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     drafts: Option<super::drafts::DraftRegistry>,
     buffered_drafts: Option<Vec<super::drafts::DraftDelivery>>,
     snapshot_output: Option<SnapshotOutput>,
+    status_output: Option<AttachmentStatusOutput>,
+    status: paced::StatusWriter,
     stdout: paced::Counted<W>,
     actions: IntentSender<P>,
     service: HostService<P>,
     attachment: Option<AttachmentId>,
+    viewport_prefix: Option<host::ViewportPrefix>,
     /// The attachment just answered `attached` that must resync at once.
     resync_after_attach: Option<AttachmentId>,
     /// The session this connection's service handle serves, when the
@@ -528,10 +535,13 @@ where
             drafts: None,
             buffered_drafts: None,
             snapshot_output: None,
+            status_output: None,
+            status: paced::StatusWriter::default(),
             stdout: paced::Counted::new(stdout),
             service,
             actions,
             attachment: None,
+            viewport_prefix: None,
             resync_after_attach: None,
             session: None,
             told,
@@ -822,7 +832,10 @@ where
                 lines.woken(wait);
                 continue;
             }
-            match lines.next(wait) {
+            let status_wait = self
+                .status_deadline()
+                .map(|at| at.saturating_duration_since(Instant::now()));
+            match lines.next(wait.into_iter().chain(status_wait).min()) {
                 Next::Line(line) => {
                     reading = self.frame(line)?;
                     self.flush()?;
@@ -992,6 +1005,7 @@ where
                 match self.service.attach_asking(&node, self.face, ask) {
                     Ok(attachment) => {
                         self.attachment = Some(attachment);
+                        self.enable_status(attachment);
                         // A child attach leaves the replay owed to the next
                         // root attach.
                         if node == *self.service.root()
@@ -1118,7 +1132,12 @@ where
     fn unanswered(&mut self) {
         self.window = None;
         let session = self.session_request.take().map(|(id, _, _)| id);
-        for id in std::mem::take(&mut self.mails).into_values().chain(session) {
+        let status = self.status.deferred.drain(..).map(|(_, request)| request);
+        for id in std::mem::take(&mut self.mails)
+            .into_values()
+            .chain(session)
+            .chain(status)
+        {
             self.settled
                 .push((id, Outcome::Refused(RequestRefusal::NotAttached)));
         }
@@ -1336,10 +1355,14 @@ where
     /// A lost output, or a snapshot that cannot be paged.
     pub fn flush(&mut self) -> CliResult<()> {
         self.flush_answers()?;
+        if self.viewport_prefix_pending() {
+            return Ok(());
+        }
         let Some(attachment) = self.attachment else {
             return Ok(());
         };
-        self.write_observations(attachment, self.service.take_shared(attachment))
+        self.write_observations(attachment, self.service.take_shared(attachment))?;
+        self.flush_attachment_status()
     }
 
     fn write_observations(
@@ -1411,9 +1434,11 @@ where
                 }
                 Outbound::Event {
                     observation: SessionObservation::PresentationSnapshot(snapshot),
+                    seq,
                     ..
                 } => {
                     self.write_snapshot(attachment, snapshot)?;
+                    self.record_baseline_sent(attachment, Some(seq));
                 }
                 Outbound::Event {
                     seq,
@@ -1446,8 +1471,12 @@ where
     }
 
     fn flush_pending(&mut self, bulk: bool) -> CliResult<()> {
+        if self.viewport_prefix_pending() {
+            return self.flush_answers();
+        }
         if self.snapshot_output.is_some() {
-            return self.flush_paced(bulk);
+            self.flush_paced(bulk)?;
+            return self.flush_attachment_status();
         }
         if bulk
             || self
@@ -1458,7 +1487,8 @@ where
             // Retain that order rather than extracting its boundary alone.
             self.flush()
         } else {
-            self.flush_answers()
+            self.flush_answers()?;
+            self.flush_attachment_status()
         }
     }
 
@@ -1496,6 +1526,7 @@ where
         seq: u64,
         frame: HostFrame<P>,
     ) -> CliResult<()> {
+        let mut skipped = false;
         let written = if self.snapshot_output.is_some()
             && let HostFrame::Event {
                 observation: SessionObservation::TranscriptPatch(patch),
@@ -1509,6 +1540,7 @@ where
                     .and_then(|()| self.stdout.flush())
                     .map_err(|_| CliFailure::new("stdout failed")),
                 Err(WireError::TooLarge) => {
+                    skipped = true;
                     self.service.lose_wire_patch(attachment, &patch.scope);
                     Ok(())
                 }
@@ -1522,6 +1554,9 @@ where
             && let Some(delivery) = delivery
         {
             pending.push(delivery);
+        }
+        if written.is_ok() && !skipped {
+            self.record_event_sent(attachment, seq);
         }
         written
     }
@@ -1540,6 +1575,7 @@ where
         if let Some(pending) = &mut self.buffered_drafts {
             pending.clear();
         }
+        self.status_output_sent();
     }
 }
 
@@ -1549,6 +1585,8 @@ mod served;
 mod session;
 mod slot;
 
+pub use super::attachment::AttachmentStatus;
+pub use super::retained::{ViewportRead, ViewportRevision, ViewportStart};
 pub use host::{
     AdmissionPause, Created, Creation, DirectorySlot, HostConnection, HostPrincipal,
     HostReadLimits, HostReadTask, HostRequestContext, HostSessions, HostStepDrain, LifecycleOutput,

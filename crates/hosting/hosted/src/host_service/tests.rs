@@ -8,6 +8,7 @@ mod child;
 mod fanout;
 mod gap_repair;
 mod retained;
+mod viewport;
 
 type Observation = SessionObservation<Core>;
 
