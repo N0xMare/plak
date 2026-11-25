@@ -67,7 +67,7 @@ pub(super) async fn register_admitted_turn(
     let id = agent_id.to_owned();
     *registration = runtime
         .prepare_then_emit(move |tree| {
-            admission.check(tree, &id)?;
+            admission.check_binding(tree, &id, turn_id)?;
             tree.bind_turn_owner(&id, turn_id.to_string());
             Ok(TurnWaiterRegistration::enter(&driver, tree, &id))
         })

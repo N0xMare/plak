@@ -16,12 +16,12 @@ fn directory_counts_exclude_root_and_separate_live_held_and_completed_children()
         WriterMode::SingleLease,
     )
     .unwrap();
-    assert_eq!(super::count_children(&tree), (0, 0));
+    assert_eq!(super::count_children(&tree, false), (0, 0));
     let live = tree
         .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
         .unwrap()
         .agent_id;
-    assert_eq!(super::count_children(&tree), (1, 0));
+    assert_eq!(super::count_children(&tree, false), (1, 0));
     let held = tree
         .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
         .unwrap()
@@ -42,9 +42,16 @@ fn directory_counts_exclude_root_and_separate_live_held_and_completed_children()
     .unwrap();
     tree.release_attempt_turn(&held).unwrap();
     tree.park_child(&held, Vec::new()).unwrap();
-    assert_eq!(super::count_children(&tree), (2, 0));
+    assert_eq!(super::count_children(&tree, false), (2, 0));
+    let mut handed_off = tree.clone();
+    assert_eq!(
+        handed_off.record_handoff().unwrap().as_slice(),
+        std::slice::from_ref(&held)
+    );
+    assert_eq!(super::count_children(&handed_off, false), (2, 0));
     tree.mark_owner_lost(&held);
-    assert_eq!(super::count_children(&tree), (1, 1));
+    assert_eq!(super::count_children(&tree, false), (1, 1));
+    assert_eq!(super::count_children(&tree, true), (2, 0));
     tree.submit_result(
         &live,
         &SubmitResultRequest {
@@ -55,7 +62,7 @@ fn directory_counts_exclude_root_and_separate_live_held_and_completed_children()
     )
     .unwrap();
     tree.record_turn_completed(&live).unwrap();
-    assert_eq!(super::count_children(&tree), (0, 1));
+    assert_eq!(super::count_children(&tree, false), (0, 1));
 }
 
 /// A control spawned on an executor that already stopped is still

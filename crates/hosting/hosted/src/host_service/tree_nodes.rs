@@ -5,8 +5,9 @@ use crate::agent_tree_protocol::NodeStatus;
 use super::{ChildNodes, NodeState};
 
 pub(super) fn try_child_counts(tree_id: &str) -> Option<(usize, usize)> {
-    crate::topology_runtime::lookup(tree_id)
-        .map_or(Some((0, 0)), |runtime| runtime.try_read(count_children))
+    crate::topology_runtime::lookup(tree_id).map_or(Some((0, 0)), |runtime| {
+        runtime.try_read(|tree| count_children(tree, runtime.continues_after_loss()))
+    })
 }
 
 pub(super) fn lifecycle_children(tree_id: &str) -> Result<Vec<String>, ()> {
@@ -33,23 +34,30 @@ pub(super) fn lifecycle_children(tree_id: &str) -> Result<Vec<String>, ()> {
         .map_err(|_| ())
 }
 
-fn count_children(tree: &crate::agent_tree::ProductAgentTree) -> (usize, usize) {
-    use crate::agent_tree::LossContinuationState;
+fn count_children(tree: &crate::agent_tree::ProductAgentTree, continues: bool) -> (usize, usize) {
+    use crate::agent_tree::{ContinuationCause, LossContinuationState};
     let mut running = 0;
     let mut held = 0;
     for (id, node) in tree.nodes() {
         if *id == tree.root_agent_id {
             continue;
         }
-        if tree
-            .loss_continuation(id)
-            .is_some_and(|continuation| continuation.state == LossContinuationState::Held)
-        {
+        let continuation = tree.loss_continuation(id);
+        if continuation.as_ref().is_some_and(|loss| {
+            loss.state == LossContinuationState::Held
+                && loss.cause == ContinuationCause::OwnerLost
+                && (!continues || loss.interrupted_continuation)
+        }) {
             held += 1;
-        } else if matches!(
-            node.status,
-            NodeStatus::Pending | NodeStatus::Running | NodeStatus::Paused | NodeStatus::Sealing
-        ) {
+        } else if continuation.is_some()
+            || matches!(
+                node.status,
+                NodeStatus::Pending
+                    | NodeStatus::Running
+                    | NodeStatus::Paused
+                    | NodeStatus::Sealing
+            )
+        {
             running += 1;
         }
     }

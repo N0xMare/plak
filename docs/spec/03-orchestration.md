@@ -4143,7 +4143,10 @@ crash after the runtime admitted the command leaves either a turn the child's
 exact open restores, which is cancelled and lost again (the child is marked
 anew on it, and its continuation decided on that turn), or an accepted
 command the next projection names, which is no longer pending; so a
-continuation is never dispatched twice.
+continuation is never dispatched twice. The exact continuation's accepted
+command clears the interrupt that authorized it when folded. It does not
+clear a later interrupt or close. Its later admission is not, by itself,
+evidence of another owner loss.
 Its Start re-checks that it is still pending when it reserves the child and
 when it binds the turn, so a close, an interrupt or another turn that ended it
 refuses the Start. A Start the runtime already admitted when its bind is

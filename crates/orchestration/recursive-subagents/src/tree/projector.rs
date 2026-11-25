@@ -925,6 +925,13 @@ impl ProductAgentTree {
         turn_id: Option<String>,
         projection: &mut TreeProjection,
     ) -> Result<(), TopologyError> {
+        // An exact continuation's acceptance ends its own interrupt, not a
+        // later interrupt that outranked the continuation before admission.
+        let continues = self.commands.get(command_id).is_some_and(|command| {
+            command.kind == AgentCommandKind::Resume
+                && !command.withdrawn
+                && self.loss_continuation_admissible(agent_id, command_id)
+        });
         let Some(command) = self.commands.get_mut(command_id).filter(|command| {
             command.recipient == agent_id
                 && (command.fact.is_none()
@@ -975,7 +982,9 @@ impl ProductAgentTree {
         // An interrupt or close intent outranks the binding: the recovered
         // turn is cancelled, never resumed onto the node.
         let status = self.node(agent_id)?.status;
-        if attempt.status.is_stopped() || status.is_terminal() || status == NodeStatus::Interrupted
+        if attempt.status.is_stopped()
+            || status.is_terminal()
+            || (status == NodeStatus::Interrupted && !continues)
         {
             if let Some(attempt) = self.current_attempt_mut(agent_id) {
                 attempt.turn_id = Some(turn_id);

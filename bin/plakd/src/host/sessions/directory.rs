@@ -10,7 +10,6 @@ use plakous_host_protocol::{
 };
 use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::runtime::{ResumeAfterLoss, SurfaceSession};
-use plakous_recursive_subagents::tree::ProductAgentTree;
 use plakous_recursive_subagents_store::{SqliteTreeStore, TreeDirectoryProbe, TreeInspection};
 use tokio::sync::watch;
 
@@ -618,9 +617,7 @@ fn diagnostic(omitted: &mut BTreeSet<String>, id: &str, reason: &str) {
 
 fn inspect_tree(paths: &PlakPaths, tree: &str) -> Result<Option<Box<TreeFacts>>, ()> {
     match SqliteTreeStore::inspect(&paths.subagents_database(), tree).map_err(|_| ())? {
-        TreeInspection::Tree(rows) => Ok(Some(Box::new(TreeFacts::of(&ProductAgentTree::reopen(
-            *rows,
-        ))))),
+        TreeInspection::Tree(rows) => Ok(Some(Box::new(TreeFacts::of(rows.rows())))),
         TreeInspection::StoreAbsent | TreeInspection::TreeAbsent => Ok(None),
     }
 }

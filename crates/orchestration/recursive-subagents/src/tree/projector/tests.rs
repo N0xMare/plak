@@ -4009,6 +4009,63 @@ fn a_child_handoff_keeps_its_busy_turn_after_an_accepted_steer() {
     }
 }
 
+#[test]
+fn handoff_acceptance_clears_only_the_interrupt_it_continues() {
+    for (source, interrupted_again) in [
+        (ChildEnd::Parked, false),
+        (ChildEnd::Open, false),
+        (ChildEnd::Parked, true),
+    ] {
+        let (_tmp, mut tree, child, mut feed) = live_child_run(&[ChildStep::Turn {
+            corrective: false,
+            end: source,
+        }]);
+        assert_eq!(tree.record_handoff().unwrap(), vec![child.clone()]);
+        let mut tree = ProductAgentTree::reopen(tree.to_persisted());
+        if matches!(source, ChildEnd::Open) {
+            // The continuation never starts while the source turn is still
+            // bound. Let that turn settle after the handoff record.
+            feed.terminal("start-0", turn(1), End::Completed);
+            project(&mut tree, &child, &feed);
+        }
+        assert!(tree.loss_notice("root", &BTreeSet::new()).is_none());
+        let command = tree.record_loss_continuation(&child, 7).unwrap();
+        let attempt = tree.attempt(&child).unwrap().attempt_id.clone();
+        record_child_command(
+            &mut tree,
+            &child,
+            &attempt,
+            &command,
+            AgentCommandKind::Resume,
+        );
+        assert!(tree.loss_notice("root", &BTreeSet::new()).is_none());
+        if interrupted_again {
+            tree.interrupt_agent("root", &close_req(&child), None)
+                .unwrap();
+        }
+        let resumed = turn(20);
+        feed.accepted(&command, resumed);
+        project(&mut tree, &child, &feed);
+        let expected = if interrupted_again {
+            NodeStatus::Interrupted
+        } else {
+            NodeStatus::Running
+        };
+        assert_eq!(tree.node(&child).unwrap().status, expected, "{source:?}");
+        assert!(tree.loss_notice("root", &BTreeSet::new()).is_none());
+        if !interrupted_again {
+            let loss = tree.loss_continuation(&child).unwrap();
+            assert_eq!(loss.cause, ContinuationCause::Handoff);
+            assert_eq!(loss.state, LossContinuationState::Running);
+        }
+        feed.terminal(&command, resumed, End::Completed);
+        project(&mut tree, &child, &feed);
+        assert_eq!(tree.node(&child).unwrap().status, expected);
+        assert!(tree.loss_continuation(&child).is_none());
+        assert!(tree.loss_notice("root", &BTreeSet::new()).is_none());
+    }
+}
+
 fn record_child_command(
     tree: &mut ProductAgentTree,
     agent: &str,

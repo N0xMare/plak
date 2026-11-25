@@ -148,6 +148,33 @@ impl StartAdmission {
             Self::LossContinuation(_) => Err(LOSS_CONTINUATION_ENDED.to_owned()),
         }
     }
+
+    pub(super) fn check_binding(
+        &self,
+        tree: &crate::agent_tree::ProductAgentTree,
+        agent_id: &str,
+        turn_id: TurnId,
+    ) -> Result<(), String> {
+        if let Self::LossContinuation(command_id) = self
+            && tree.loss_continuation(agent_id).is_some_and(|loss| {
+                loss.state == crate::agent_tree::LossContinuationState::Running
+                    && loss.command_id.as_deref() == Some(command_id.as_str())
+            })
+            && tree
+                .attempt(agent_id)
+                .and_then(|attempt| attempt.turn_id.as_ref()?.parse().ok())
+                == Some(turn_id)
+        {
+            // Another feed reader may have projected this exact acceptance
+            // between runtime admission and registration of its waiter.
+            return if tree.placement_ready(agent_id) {
+                Ok(())
+            } else {
+                Err(PLACEMENT_UNAVAILABLE.into())
+            };
+        }
+        self.check(tree, agent_id)
+    }
 }
 
 pub(in crate::agent) async fn start_child_turn(

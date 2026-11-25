@@ -4924,7 +4924,8 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   submission itself is not counted as a queued wake. This part can be read
   from durable facts even while the session is dormant. It does not count
   unrelated mail to runnable nodes, and it does not decide admission or
-  continue a turn. It is also
+  continue a turn. Inspection does not apply the custody-take reopen law
+  to a tree snapshot to infer an owner loss. It is also
   true for a resident row whose root turn itself is running while the row's
   runner status is `blocked {runner_unreachable}`: that turn may be waiting
   on its placement (spec 01 §8.4) until automatic release after reconnection
@@ -6336,7 +6337,11 @@ settles asynchronously after endpoint binding, before local admission.
   open (a planned handoff, or a decided continuation a crash left pending),
   `idle` otherwise; its live work is none. A resident row counts non-root
   pending, running (including parked), paused and sealing nodes as
-  `children`, and children held for consent after host loss as
+  `children`, along with interrupted children that have an automatic
+  continuation (a handoff hold, a pending or running continuation, or an
+  owner-loss hold under the continue policy that did not interrupt a
+  continuation); only owner-loss holds that require consent (under the
+  hold policy or after an interrupted continuation) count as
   `held_children`, never in both counts. Any live child also makes the
   row busy unless operator attention takes precedence. A session is held elsewhere by its tree's
   custody holder or, for every session, by the holder of its runtime

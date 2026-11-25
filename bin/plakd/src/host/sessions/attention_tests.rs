@@ -1,11 +1,68 @@
 use super::*;
 use plakous::sessions::feed::FeedSeq;
-use plakous_hosted::agent_tree_protocol::{SpawnAgentRequest, SubmitResultRequest, WriterMode};
+use plakous_hosted::agent_tree_protocol::{
+    MessagePriority, SendAgentMessageRequest, SpawnAgentRequest, SubmitResultRequest, WriterMode,
+};
 use plakous_hosted::sessions::projector::{
     Anchored, AnchoredIntent, PauseCause, RootContinuation, RootContinuationCause,
     RootContinuationDecision, RootInterrupt, RootInterruptCause, RootStopAnchor, SessionViews,
     Submission, SubmissionKind, ViewWrites,
 };
+
+#[test]
+fn parked_child_mail_needs_attention_only_after_a_recorded_owner_loss() {
+    let (_temp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let mut record = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
+    ProductStore::open(&paths)
+        .unwrap()
+        .commit(&mut record)
+        .unwrap();
+    let mut tree = ProductAgentTree::bootstrap_root_for_test(
+        &record.id,
+        "root",
+        "owner",
+        paths.home().to_owned(),
+        "selected",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let child = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .unwrap()
+        .agent_id;
+    tree.bind_session_locator(&child, "locator").unwrap();
+    tree.bind_attempt_turn(&child, "00000000-0000-4000-8000-000000000001")
+        .unwrap();
+    tree.release_attempt_turn(&child).unwrap();
+    tree.park_child(&child, Vec::new()).unwrap();
+    tree.send_agent_message(
+        "root",
+        &SendAgentMessageRequest {
+            agent_id: child.clone(),
+            message: "for the next boundary".into(),
+            purpose: None,
+            priority: Some(MessagePriority::Deferred),
+            in_reply_to: None,
+            acknowledge_recovery: None,
+            refresh: None,
+            output_schema_json: None,
+        },
+        None,
+    )
+    .unwrap();
+    crate::store::tree::save_tree(&paths, &mut tree).unwrap();
+    let services = Services::for_home(paths.clone());
+    let sessions = ProductSessions::new(&services, None, None).unwrap();
+    sessions.directory.settle();
+    assert!(!status(&paths).contains(&record.id));
+    assert!(!sessions.rows(None, None, false).unwrap()[0].needs_operator);
+
+    tree.mark_owner_lost(&child);
+    crate::store::tree::save_tree(&paths, &mut tree).unwrap();
+    sessions.directory.settle();
+    assert!(status(&paths).contains("child_held_after_loss"));
+    assert!(sessions.rows(None, None, false).unwrap()[0].needs_operator);
+}
 
 #[test]
 fn status_and_directory_show_blocked_mail_and_clear_with_operator_action() {

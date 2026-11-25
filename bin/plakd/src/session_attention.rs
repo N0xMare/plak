@@ -2,7 +2,6 @@ use std::io::{self, Write};
 
 use plakous_hosted::runtime::ResumeAfterLoss;
 use plakous_hosted::runtime::operator_attention::PendingTreeWork;
-use plakous_recursive_subagents::tree::ProductAgentTree;
 use plakous_recursive_subagents_store::{SqliteTreeStore, TreeInspection};
 
 use crate::home::paths::PlakPaths;
@@ -36,9 +35,7 @@ pub(super) fn write_status(paths: &PlakPaths, out: &mut dyn Write) -> io::Result
     let mut unreadable = 0;
     for root in roots {
         let work = match SqliteTreeStore::inspect(&paths.subagents_database(), &root.tree) {
-            Ok(TreeInspection::Tree(tree)) => {
-                PendingTreeWork::read(&ProductAgentTree::reopen(*tree), policy)
-            }
+            Ok(TreeInspection::Tree(tree)) => PendingTreeWork::read(tree.rows(), policy),
             Ok(TreeInspection::StoreAbsent | TreeInspection::TreeAbsent) => {
                 PendingTreeWork::default()
             }
