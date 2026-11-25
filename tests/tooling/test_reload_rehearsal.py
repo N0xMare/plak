@@ -1076,7 +1076,10 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
             self.assertEqual(existing.read_text(), "keep")
 
     def test_detached_real_child_has_its_own_session_and_no_input_terminal(self):
-        with self.wrapper_fixture() as (base, repo, _home, env, _output):
+        with (
+            self.wrapper_fixture() as (base, repo, _home, env, _output),
+            contextlib.ExitStack() as cleanup,
+        ):
             runner = repo / "detached-fixture.py"
             runner.write_text(
                 "import json, os\nprint(json.dumps([os.getsid(0), os.getpid(), os.isatty(0)]))\n"
@@ -1084,8 +1087,13 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
             children = []
             popen = subprocess.Popen
 
+            def reap(child):
+                child.kill()
+                child.wait(timeout=10)
+
             def launch(*args, **kwargs):
                 child = popen(*args, **kwargs)
+                cleanup.callback(reap, child)
                 children.append(child)
                 return child
 

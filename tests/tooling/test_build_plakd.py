@@ -49,15 +49,19 @@ class BuildPlakTests(unittest.TestCase):
                 OPENAI_API_KEY="synthetic",
             )
             for _ in range(2):
-                process = subprocess.Popen(
+                with subprocess.Popen(
                     ["bash", str(repo / "tools/dev/plakd-dev.sh"), "run", "two words", ""],
                     cwd=base,
                     env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                )
-                stdout, stderr = process.communicate(timeout=15)
+                ) as process:
+                    try:
+                        stdout, stderr = process.communicate(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        raise
                 self.assertEqual(process.returncode, 0, stderr)
                 cwd, argv, home, capture, key, pid = json.loads(stdout)
                 self.assertEqual(cwd, str(base))

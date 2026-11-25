@@ -14,6 +14,7 @@ import textwrap
 import threading
 import time
 import unittest
+from contextlib import ExitStack
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -63,29 +64,24 @@ class TestProcessGuardTests(unittest.TestCase):
     def test_child_keeps_run_locked_after_guard_is_killed(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
-            script = textwrap.dedent(f'''
-                import os, pathlib, time
+            script = textwrap.dedent('''
+                import os, pathlib, sys
                 root = pathlib.Path(os.environ['TMPDIR'])
                 os.chdir(root)
-                pathlib.Path({str(base / 'ready')!r}).write_text(str(root) + '\\n' + str(os.getpid()))
-                deadline = time.monotonic() + 20
-                while not pathlib.Path({str(base / 'release')!r}).exists() and time.monotonic() < deadline:
-                    assert root.is_dir()
-                    time.sleep(0.02)
+                print(root, os.getpid(), sep='\\t', flush=True)
+                sys.stdin.read(1)
             ''')
             guard = subprocess.Popen(
                 [sys.executable, str(GUARD), '--', sys.executable, '-c', script],
                 env=dict(os.environ, TMPDIR=str(base)),
-                stdout=subprocess.DEVNULL,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
+                text=True,
             )
             pid = None
             try:
-                deadline = time.monotonic() + 5
-                while not (base / 'ready').exists():
-                    self.assertLess(time.monotonic(), deadline)
-                    time.sleep(0.01)
-                name, recorded_pid = (base / 'ready').read_text().splitlines()
+                name, recorded_pid = self.ready_line(guard).split('\t')
                 root, pid = Path(name), int(recorded_pid)
                 guard.kill()
                 guard.wait(timeout=5)
@@ -103,14 +99,28 @@ class TestProcessGuardTests(unittest.TestCase):
                 self.assertTrue(root.is_dir())
                 os.kill(pid, 0)
             finally:
-                if pid is not None:
+                # Closing stdin releases even the orphan; stdout EOF proves
+                # that it has closed its inherited descriptor before cleanup.
+                try:
+                    guard.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
                     try:
-                        os.killpg(pid, signal.SIGKILL)
+                        if pid is not None:
+                            os.killpg(pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
-                if guard.poll() is None:
-                    guard.kill()
-                guard.wait(timeout=5)
+                    finally:
+                        guard.kill()
+                        guard.communicate(timeout=5)
+                    raise
+
+    def ready_line(self, guard):
+        with selectors.DefaultSelector() as ready:
+            ready.register(guard.stdout, selectors.EVENT_READ)
+            self.assertTrue(ready.select(timeout=10), "fixture launch watchdog")
+            line = guard.stdout.readline()
+        self.assertTrue(line, "fixture exited before readiness")
+        return line.rstrip("\n")
 
     def test_free_run_with_non_fixture_cwd_is_not_removed(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -331,52 +341,51 @@ class TestProcessGuardTests(unittest.TestCase):
                 child.wait()
 
     def test_concurrent_invocations_do_not_reap_each_others_hosts(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as cleanup:
             base = Path(temporary).resolve()
             guards = []
-            try:
-                for index in range(2):
-                    script = textwrap.dedent(f"""
-                        import os, pathlib, signal, subprocess, time
-                        root = pathlib.Path(os.environ['TMPDIR'])
-                        (root / 'host').write_text('sleep 60 & wait\\n')
-                        child = subprocess.Popen(['plakd', 'host'], executable='/bin/bash',
-                            cwd=root, start_new_session=True, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
-                        pathlib.Path({str(base / f'ready-{index}')!r}).write_text(str(root))
-                        try:
-                            while not pathlib.Path({str(base / 'release')!r}).exists():
-                                time.sleep(0.01)
-                            assert child.poll() is None, 'another run killed our host'
-                        finally:
-                            if child.poll() is None: os.killpg(child.pid, signal.SIGKILL)
-                            child.wait()
-                    """)
-                    guards.append(
-                        subprocess.Popen(
-                            [sys.executable, str(GUARD), "--", sys.executable, "-c", script],
-                            env=dict(os.environ, TMPDIR=str(base)),
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            text=True,
-                        )
-                    )
-                    deadline = time.monotonic() + 10
-                    while not (base / f"ready-{index}").exists():
-                        self.assertLess(time.monotonic(), deadline)
-                        time.sleep(0.01)
-                self.assertNotEqual((base / 'ready-0').read_text(), (base / 'ready-1').read_text())
-                (base / "release").touch()
-                for guard in guards:
-                    _, error = guard.communicate(timeout=10)
-                    self.assertEqual(guard.returncode, 0, error)
-                    self.assertNotIn("previous run", error)
-            finally:
-                (base / "release").touch()
-                for guard in guards:
-                    if guard.poll() is None:
-                        guard.terminate()
+            roots = []
+            script = textwrap.dedent("""
+                import os, pathlib, signal, subprocess, sys
+                root = pathlib.Path(os.environ['TMPDIR'])
+                (root / 'host').write_text('sleep 60 & wait\\n')
+                child = subprocess.Popen(['plakd', 'host'], executable='/bin/bash',
+                    cwd=root, start_new_session=True, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL)
+                try:
+                    print(root, flush=True)
+                    sys.stdin.read(1)
+                    assert child.poll() is None, 'another run killed our host'
+                finally:
+                    if child.poll() is None: os.killpg(child.pid, signal.SIGKILL)
+                    child.wait()
+            """)
+
+            def finish(guard):
+                try:
+                    return guard.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    guard.terminate()
                     guard.communicate(timeout=10)
+                    raise
+
+            for _ in range(2):
+                guard = subprocess.Popen(
+                    [sys.executable, str(GUARD), "--", sys.executable, "-c", script],
+                    env=dict(os.environ, TMPDIR=str(base)),
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                cleanup.callback(finish, guard)
+                guards.append(guard)
+                roots.append(self.ready_line(guard))
+            self.assertNotEqual(*roots)
+            for guard in guards:
+                _, error = finish(guard)
+                self.assertEqual(guard.returncode, 0, error)
+                self.assertNotIn("previous run", error)
 
     def test_cwd_is_cached_per_process_identity_and_inspection_errors_are_safe(self):
         table = MODULE.ProcessTable()
