@@ -404,6 +404,7 @@ fn host_upgrade_binding_regression_refuses_before_surrender_and_prints_live_rows
     assert!(!refused.status.success());
     let report = String::from_utf8_lossy(&refused.stderr);
     assert!(report.contains("binding_preflight_refused"), "{report}");
+    assert!(!report.contains("phase=exact_reopen"), "{report}");
     assert!(
         report.contains("offending rows") && report.contains(runtime_session),
         "{report}"

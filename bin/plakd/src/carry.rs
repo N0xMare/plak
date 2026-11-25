@@ -26,8 +26,8 @@ pub(crate) use history::{TraceHistory, redact_payload};
 
 pub(crate) use export::{export_session, new_carry_file};
 pub(crate) use reload::{
-    CarryCapacityProbe, REOPEN_HEAD_ADVANCED, ReloadProbe, ReloadTarget, ReopenProbe, reload_probe,
-    reopen_credential_gate, reopen_probe,
+    CarryCapacityProbe, ChildReopenRefusal, REOPEN_HEAD_ADVANCED, ReloadProbe, ReloadTarget,
+    ReopenProbe, reload_probe, reopen_credential_gate, reopen_probe,
 };
 /// A running turn refuses a reload or rebind whose successor is another
 /// session: only a reload that resumes the same session hands it off.

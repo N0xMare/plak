@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, path::Path, thread};
 
 use super::{PROBE_BOUND, Request, process};
-use crate::carry::{REOPEN_HEAD_ADVANCED, ReopenProbe};
+use crate::carry::{ChildReopenRefusal, REOPEN_HEAD_ADVANCED, ReopenProbe};
 use crate::home::paths::PlakPaths;
 use crate::store::ProductStore;
 use crate::{CliFailure, CliResult};
@@ -136,19 +136,32 @@ fn probe_roots(
         .min(MAX_LOCAL_PROBES);
     let probe = |root: &Root| exact_reopen(paths, request, scratch, &root.id, allow_advance);
     let mut verdicts = Vec::with_capacity(roots.len());
+    let mut failures: Option<Box<ChildReopenRefusal>> = None;
+    let mut collect = |result: CliResult<Proof>| -> CliResult<()> {
+        match result? {
+            Proof::Root(passed) => verdicts.push(passed),
+            Proof::ChildRefused(children) => {
+                if let Some(failures) = &mut failures {
+                    failures.merge(*children);
+                } else {
+                    failures = Some(children);
+                }
+            }
+        }
+        Ok(())
+    };
     for placement in roots.chunk_by(|a, b| a.local == b.local) {
         let width = if placement[0].local { local_width } else { 1 };
         for wave in placement.chunks(width) {
             if let [record] = wave {
-                verdicts.push(probe(record)?);
+                collect(probe(record))?;
             } else {
                 thread::scope(|scope| {
                     let pending = wave
                         .iter()
                         .map(|record| scope.spawn(|| probe(record)))
                         .collect::<Vec<_>>();
-                    // Join the entire wave even on refusal, and report the
-                    // first refusal in the same order as the serial check.
+                    // Join the already dispatched wave before returning a refusal.
                     let joined = pending
                         .into_iter()
                         .map(|task| {
@@ -158,14 +171,23 @@ fn probe_roots(
                         })
                         .collect::<Vec<_>>();
                     for result in joined {
-                        verdicts.push(result?);
+                        collect(result)?;
                     }
                     Ok::<_, CliFailure>(())
                 })?;
             }
         }
     }
-    Ok(verdicts)
+    if let Some(children) = failures {
+        Err(CliFailure::new(children.to_string()))
+    } else {
+        Ok(verdicts)
+    }
+}
+
+enum Proof {
+    Root(bool),
+    ChildRefused(Box<ChildReopenRefusal>),
 }
 
 fn exact_reopen(
@@ -174,7 +196,7 @@ fn exact_reopen(
     scratch: Option<&Path>,
     session: &str,
     allow_advance: bool,
-) -> CliResult<bool> {
+) -> CliResult<Proof> {
     let mut command =
         process::command(&request.destination, paths.home(), &request.destination_key);
     command
@@ -188,16 +210,20 @@ fn exact_reopen(
             CliFailure::new("same-key upgrade destination did not answer its exact-reopen probe")
         })?;
     match verdict {
-        ReopenProbe::Opens => Ok(true),
+        ReopenProbe::Opens => Ok(Proof::Root(true)),
+        ReopenProbe::Refused {
+            children: Some(children),
+            ..
+        } => Ok(Proof::ChildRefused(children)),
         ReopenProbe::Unknown { reason }
             if reason == plakous_hosted::runtime::REOPEN_UNSETTLED_WORK =>
         {
             // Recheck under the holds; if still unfinished, the planned
             // handoff recovery law owns it rather than a qualification probe.
-            Ok(false)
+            Ok(Proof::Root(false))
         }
         ReopenProbe::Unknown { reason } if allow_advance && reason == REOPEN_HEAD_ADVANCED => {
-            Ok(false)
+            Ok(Proof::Root(false))
         }
         verdict => Err(CliFailure::new(format!(
             "host_upgrade_reopen_refused: {session}: {verdict:?}; same-key upgrade uses planned handoff, not carry",

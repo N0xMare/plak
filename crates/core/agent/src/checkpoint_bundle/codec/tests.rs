@@ -12,6 +12,39 @@ use crate::manifest::{OperationRecordWire, RuntimeComponentKind, RuntimeManifest
 use plakous_model::WorkingProjection;
 
 #[test]
+fn binding_inspection_never_loads_history_or_working_objects() -> TestResult {
+    let checkpoint = fixture(512, 9200, false)?;
+    let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
+    let mut reads = 0;
+    let binding = RuntimeCheckpointCodec::inspect_binding(
+        bundle.checkpoint_id(),
+        bundle.checkpoint_integrity(),
+        bundle.root(),
+        |address| {
+            reads += 1;
+            assert!(!matches!(
+                address.kind(),
+                RuntimeObjectKind::HistoryNode | RuntimeObjectKind::HistorySegment
+            ));
+            bundle
+                .objects()
+                .iter()
+                .find(|object| object.address() == address)
+                .cloned()
+                .ok_or(CheckpointBundleError::MissingObject)
+        },
+        |error| error,
+    )?;
+    assert!(reads <= 5);
+    assert_eq!(&binding.tools, checkpoint.manifest().tools());
+    assert_eq!(
+        &binding.configuration,
+        checkpoint.manifest().provider_configuration()
+    );
+    Ok(())
+}
+
+#[test]
 fn an_operation_reference_to_non_operation_evidence_fails_closed() -> TestResult {
     let records = every_state_operation_records()?;
     let mut builder = BundleBuilder {

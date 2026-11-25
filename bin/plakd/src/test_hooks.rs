@@ -125,6 +125,12 @@ pub(crate) fn binding_executor_cut() -> bool {
     })
 }
 
+pub(crate) fn child_binding_cut() -> bool {
+    std::env::var_os("PLAK_TEST_CHILD_BINDING_CUT_IMAGE").is_some_and(|image| {
+        std::env::current_exe().is_ok_and(|current| current == Path::new(&image))
+    })
+}
+
 pub(crate) fn force_host_upgrade() -> bool {
     std::env::var("PLAK_TEST_FORCE_HOST_UPGRADE").as_deref() == Ok("1")
 }

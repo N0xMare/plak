@@ -7,6 +7,8 @@ fn row(name: &str) -> Row {
         checkpoint: "head".into(),
         archived: false,
         superseded: false,
+        child: false,
+        closed: false,
         binding_change: None,
         unavailable: None,
         unaffected: Vec::new(),
@@ -52,6 +54,12 @@ fn differential_binding_preflight_refuses_only_new_live_regressions() {
                 ..row("superseded")
             },
             Row {
+                closed: true,
+                child: true,
+                binding_change: Some("retired child refusal".into()),
+                ..row("closed")
+            },
+            Row {
                 unaffected: vec!["MCP external contract unaffected".into()],
                 ..row("external")
             },
@@ -71,4 +79,20 @@ fn differential_binding_preflight_refuses_only_new_live_regressions() {
             .collect::<Vec<_>>(),
         ["changed", "already-refused"]
     );
+}
+
+#[test]
+fn a_child_binding_regression_reports_the_count_and_change_without_exact_reopen() {
+    let report = Report {
+        compatible: false,
+        sessions: vec![Row {
+            child: true,
+            binding_change: Some("provider configuration".into()),
+            ..row("child")
+        }],
+    };
+    let failure = finish(None, &report).unwrap_err();
+    assert!(failure.message().contains(
+        "host_upgrade_child_reopen_refused: 1 affected child session(s); binding change: provider configuration"
+    ));
 }

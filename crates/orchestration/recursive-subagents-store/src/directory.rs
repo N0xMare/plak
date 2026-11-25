@@ -23,6 +23,29 @@ pub struct TreeQualificationStamp {
 }
 
 impl SqliteTreeStore {
+    /// Reads the locators of non-closed children in one tree, without loading
+    /// its roster, workspaces, result mail, or any retired summaries.
+    #[doc(hidden)]
+    pub fn inspect_reopen_children(
+        database: &Path,
+        tree_id: &str,
+    ) -> Result<Vec<String>, OpenError> {
+        SubagentsDatabase::inspect_rows(database, Vec::new(), |tx| {
+            let mut statement = tx
+                .prepare(
+                    "SELECT session_locator FROM agent_nodes WHERE tree_id=?1
+                     AND parent_agent_id IS NOT NULL AND status<>'closed'
+                     AND session_locator IS NOT NULL ORDER BY agent_id",
+                )
+                .map_err(unavailable)?;
+            statement
+                .query_map([tree_id], |row| row.get(0))
+                .map_err(unavailable)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(unavailable)
+        })
+    }
+
     /// Reads exact tree revisions and custody from one read-only snapshot, in
     /// caller order. An absent tree has no stamp; an existing tree must have
     /// a readable custody floor. This does not load or reopen any tree image.

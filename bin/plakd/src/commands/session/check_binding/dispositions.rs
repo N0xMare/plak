@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 pub(super) struct Dispositions {
     pub(super) rows: HashMap<String, (bool, bool)>,
+    pub(super) children_closed: HashMap<String, bool>,
 }
 
 pub(super) fn key(locator: SessionLocator) -> String {
@@ -26,19 +27,28 @@ pub(super) fn inspect(paths: &PlakPaths) -> CliResult<Dispositions> {
             rows.insert(key(locator), (record.archived, record.superseded));
         }
     }
-    if !archived_trees.is_empty() {
-        let nodes = plakous_recursive_subagents_store::SqliteTreeStore::inspect_node_locators(
-            &paths.subagents_database(),
-        )
-        .map_err(|error| CliFailure::new(error.message()))?;
-        for (tree, locator) in nodes {
-            if archived_trees.contains(&tree) {
-                let locator = locator
-                    .parse::<SessionLocator>()
-                    .map_err(|error| CliFailure::new(error.to_string()))?;
-                rows.entry(key(locator)).or_insert((true, false)).0 = true;
+    let nodes = plakous_recursive_subagents_store::SqliteTreeStore::inspect_node_locators(
+        &paths.subagents_database(),
+    )
+    .map_err(|error| CliFailure::new(error.message()))?;
+    let mut children_closed = HashMap::new();
+    for (tree, locator, child_closed) in nodes {
+        let tree_archived = archived_trees.contains(&tree);
+        if tree_archived || child_closed.is_some() {
+            let Ok(locator) = locator.parse::<SessionLocator>() else {
+                continue;
+            };
+            let key = key(locator);
+            if let Some(closed) = child_closed {
+                children_closed.insert(key.clone(), closed);
+            }
+            if tree_archived {
+                rows.entry(key).or_insert((true, false)).0 = true;
             }
         }
     }
-    Ok(Dispositions { rows })
+    Ok(Dispositions {
+        rows,
+        children_closed,
+    })
 }

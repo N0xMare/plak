@@ -5857,9 +5857,10 @@ The hidden `plakd session check-binding --all` command inspects retained runtime
 branch heads, including children, through one read-only SQLite snapshot for
 listing and loading. It opens no runtime, runner, credential source or
 diagnostics writer and acquires no custody or runtime lease. Product archival
-and succession metadata, and archived trees' node locators, are read separately
-without reopening a tree. Every retained head is decoded and its actual verdict
-reported, including archived and superseded rows; inactive verdicts do not gate
+and succession metadata and tree node locators are read separately without
+reopening a tree. Every retained head is decoded and its actual verdict reported.
+Rows for children carry `child: true`; closed children also carry `closed: true`.
+Archived and superseded rows and closed children are reported but do not gate
 upgrade. Inspection checks checkpoint/plan and presentation integrity, current
 release-owned executor bindings (including both
 fetch image-result variants and optional web/image packs), and native selected
@@ -5876,7 +5877,8 @@ two dots use their exact pinned ID rather than a namespace prefix.
 Same-key host upgrade waits for both inspections before exact reopen and
 surrender. It refuses only a live row that the source found compatible and the
 destination no longer does, printing the offending rows while the source keeps
-running. A source without the command is explicitly reported as baseline
+running, with the affected child count and binding change when the regressions
+include children. A source without the command is explicitly reported as baseline
 unavailable; no source verdict is invented. In that first-upgrade case only
 real live binding refusals gate surrender, not external availability or an
 unknown executor alone. The existing exact-reopen probes still run. Inspection
@@ -5988,15 +5990,27 @@ live steps only after source drain and release and before announcing
 readiness; a failure after either commit is fixed forward under
 §2.5, not by restarting the source.
 The destination verifies exact reopen for each eligible root before admissions
-pause. A probe refuses known binding/configuration/credential changes. Neither
+pause. Its read-only reopen probe also follows every child runtime branch
+named by that tree, whether live, parked, held, or dormant. It skips closed
+and retired nodes and archived runtime sessions. It inspects the branch's
+frozen construction data against the build, including the recorded evaluator
+contract and artifact and the release-owned executor and provider bindings.
+It reads only the binding objects, not conversation or operation history, and
+does not resolve child credentials, start runners or evaluators, or take
+custody. External availability remains a live-open check. A child refusal
+reports the number of affected children and names the binding change or
+unreadable input; a child-only change never asks to carry the root.
+A root probe also refuses known configuration and credential changes. Neither
 an unfinished turn nor an observed advance of the same runtime branch is a
 reusable pre-pause verdict. The coordinator records each root's product
 revision, locator, durable branch revision, and persisted agent-tree revision
 and custody (including an absent tree). Descendant changes can advance this
-tree without moving the root branch. The reuse stamp predates the probes or,
+tree without moving the root branch; a change to the child roster or any
+child branch locator invalidates the tree's verdict. The reuse stamp predates the probes or,
 for revision rehearsal, the scratch copies. After admission closes and the
 step drain joins, it rechecks new, changed, or unproven roots under the
-reversible holds. A refusal there rolls back preparation; no source
+reversible holds. A non-child refusal stops qualification without starting more
+root probes. A refusal under the holds rolls back preparation; no source
 surrenders on a stale verdict. A still-unfinished turn at that boundary keeps
 the existing planned-handoff recovery law. Revision qualification takes fresh
 scratch copies if a held-root recheck needs them.

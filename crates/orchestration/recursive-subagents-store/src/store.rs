@@ -79,8 +79,12 @@ impl SqliteTreeStore {
         SubagentsDatabase::inspect_tree_with_custody(database, tree_id)
     }
 
-    /// Content-free node binding locators, without loading tree images or custody.
-    pub fn inspect_node_locators(database: &Path) -> Result<Vec<(String, String)>, OpenError> {
+    /// Content-free node locators with their tree ID and child status:
+    /// `None` for roots, otherwise whether the child is closed. Does not load
+    /// tree images or custody.
+    pub fn inspect_node_locators(
+        database: &Path,
+    ) -> Result<Vec<(String, String, Option<bool>)>, OpenError> {
         SubagentsDatabase::inspect_node_locators(database)
     }
 

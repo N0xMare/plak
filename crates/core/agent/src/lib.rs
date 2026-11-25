@@ -171,9 +171,9 @@ pub mod internal {
     pub use crate::binding_change::BindingChange;
     pub use crate::checkpoint_bundle::{
         CheckpointBundleError, CheckpointBundleStats, CheckpointObjectBundle,
-        PREVIOUS_RUNTIME_FORMAT_EPOCH, RUNTIME_FORMAT_EPOCH, RuntimeCheckpointCodec,
-        RuntimeCheckpointInspection, RuntimeObject, RuntimeObjectAddress, RuntimeObjectKind,
-        reads_checkpoint_epoch,
+        PREVIOUS_RUNTIME_FORMAT_EPOCH, RUNTIME_FORMAT_EPOCH, RuntimeCheckpointBinding,
+        RuntimeCheckpointCodec, RuntimeCheckpointInspection, RuntimeObject, RuntimeObjectAddress,
+        RuntimeObjectKind, reads_checkpoint_epoch,
     };
     pub use crate::compaction_verdict::{CompactionMeasure, CompactionVerdict, MeasuredFit};
     pub use crate::context_source::{

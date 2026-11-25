@@ -164,15 +164,22 @@ pub fn checkpoint_instruction_sources(
 pub fn checkpoint_harness_plan(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<crate::ResolvedHarnessPlan, AgentError> {
-    checkpoint
-        .manifest()
-        .rehydrate_harness_plan()
-        .map_err(|error| {
-            AgentError::new(
-                crate::AgentErrorKind::IncompatibleSession,
-                format!("stored harness plan is unreadable: {error}"),
-            )
-        })
+    stored_harness_plan(checkpoint.manifest().harness_plan_component())
+}
+
+/// Rehydrates the plan from the binding-only projection.
+///
+/// # Errors
+/// Returns an incompatible-session error for unreadable or unsupported plans.
+pub fn stored_harness_plan(
+    component: &crate::manifest::ReconstructiveComponent,
+) -> Result<crate::ResolvedHarnessPlan, AgentError> {
+    crate::manifest::rehydrate_stored_plan(component).map_err(|error| {
+        AgentError::new(
+            crate::AgentErrorKind::IncompatibleSession,
+            format!("stored harness plan is unreadable: {error}"),
+        )
+    })
 }
 
 /// Whether an exact checkpoint's frozen tool registry registers `name`.
@@ -211,6 +218,7 @@ pub fn checkpoint_registers_tool(
 }
 
 /// Exact evaluator reconstruction facts for facade implementation only.
+#[derive(Eq, Hash, PartialEq)]
 pub struct StoredCompositionArtifact {
     /// Complete recorded profile digest identity.
     pub profile_identity: Vec<u8>,
@@ -231,7 +239,17 @@ pub struct StoredCompositionArtifact {
 pub fn checkpoint_composition_artifact(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<Option<StoredCompositionArtifact>, AgentError> {
-    crate::runtime::stored_composition_artifact(checkpoint.manifest().tools().environment().bytes())
+    tool_runtime_composition_artifact(checkpoint.manifest().tools())
+}
+
+/// Reads exact evaluator reconstruction facts from a binding-only projection.
+///
+/// # Errors
+/// Returns an incompatible-session error for an invalid stored environment.
+pub fn tool_runtime_composition_artifact(
+    tools: &crate::manifest::ToolRuntimeManifest,
+) -> Result<Option<StoredCompositionArtifact>, AgentError> {
+    crate::runtime::stored_composition_artifact(tools.environment().bytes())
 }
 
 /// Returns the private-driver inspection endpoint only to facade composition.

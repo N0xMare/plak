@@ -36,6 +36,24 @@ static RELEASE_EXECUTOR_NAMESPACES: LazyLock<Result<BTreeSet<String>, serde_json
 pub fn check_frozen_binding(
     frozen: &FrozenSessionPresentation,
 ) -> CliResult<Option<BindingChange>> {
+    check_binding(frozen, true)
+}
+
+/// Checks build-owned bindings of a child without requiring external executors.
+///
+/// # Errors
+/// Returns unreadable or inconsistent frozen binding inputs.
+#[doc(hidden)]
+pub fn check_frozen_child_binding(
+    frozen: &FrozenSessionPresentation,
+) -> CliResult<Option<BindingChange>> {
+    check_binding(frozen, false)
+}
+
+fn check_binding(
+    frozen: &FrozenSessionPresentation,
+    report_external: bool,
+) -> CliResult<Option<BindingChange>> {
     let configuration = frozen.configuration();
     let restored = frozen
         .restore_configuration(configuration)
@@ -70,7 +88,7 @@ pub fn check_frozen_binding(
         composition == CompositionSelection::NativePtc,
         &crate::tools::ProductToolExtensions::empty(),
     )?;
-    if let Some(change) = check_executors(frozen, &registry)? {
+    if let Some(change) = check_executors(frozen, &registry, report_external)? {
         return Ok(Some(change));
     }
     check_native_selection(configuration, composition)
@@ -79,6 +97,7 @@ pub fn check_frozen_binding(
 fn check_executors(
     frozen: &FrozenSessionPresentation,
     registry: &plakous::tools::FrozenToolRegistry,
+    report_external: bool,
 ) -> CliResult<Option<BindingChange>> {
     for (name, id, recorded) in frozen.executor_requirements().map_err(CliFailure::from)? {
         if id.as_str().starts_with("plakous.mcp.") {
@@ -112,11 +131,12 @@ fn check_executors(
                     tool: id.to_string(),
                 }));
             }
-            None => {
+            None if report_external => {
                 return Err(CliFailure::new(format!(
                     "binding inspection cannot establish current executor authority: {id}"
                 )));
             }
+            None => {}
         }
     }
     Ok(None)

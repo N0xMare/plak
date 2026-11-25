@@ -11,6 +11,7 @@ use crate::{MAX_RUNTIME_CHECKPOINT_BYTES, MAX_RUNTIME_RECORDS, RuntimeCheckpoint
 
 mod builder;
 mod codec;
+pub use codec::RuntimeCheckpointBinding;
 mod index;
 mod object;
 mod operation_tree;

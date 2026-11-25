@@ -859,10 +859,16 @@ impl RuntimeManifest {
     pub(crate) fn rehydrate_harness_plan(
         &self,
     ) -> Result<ResolvedHarnessPlan, RuntimeManifestError> {
-        match rehydrate_harness_plan(self.harness_plan.bytes(), RUNTIME_POLICY_REVISION)? {
-            HarnessPlanReadiness::Exact(plan) => Ok(plan),
-            HarnessPlanReadiness::Mismatch(_) => Err(RuntimeManifestError::UnsupportedComponent),
-        }
+        rehydrate_stored_plan(&self.harness_plan)
+    }
+}
+
+pub(crate) fn rehydrate_stored_plan(
+    component: &ReconstructiveComponent,
+) -> Result<ResolvedHarnessPlan, RuntimeManifestError> {
+    match rehydrate_harness_plan(component.bytes(), RUNTIME_POLICY_REVISION)? {
+        HarnessPlanReadiness::Exact(plan) => Ok(plan),
+        HarnessPlanReadiness::Mismatch(_) => Err(RuntimeManifestError::UnsupportedComponent),
     }
 }
 

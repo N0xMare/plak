@@ -22,6 +22,10 @@ pub(crate) struct Row {
     pub(crate) unavailable: Option<String>,
     pub(crate) archived: bool,
     pub(crate) superseded: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) child: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) closed: bool,
     pub(crate) unaffected: Vec<String>,
 }
 
@@ -37,13 +41,12 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
     let mut rows = Vec::with_capacity(sources.len());
     for head in sources {
         let locator = head.locator;
-        let (archived, superseded) = disposition
-            .rows
-            .get(&dispositions::key(locator))
-            .copied()
-            .unwrap_or_default();
+        let key = dispositions::key(locator);
+        let (archived, superseded) = disposition.rows.get(&key).copied().unwrap_or_default();
         let archived = archived || head.archived;
         let superseded = superseded || !head.line_head;
+        let child_status = disposition.children_closed.get(&key).copied();
+        let closed = child_status == Some(true);
         let unaffected = head
             .presentation
             .as_ref()
@@ -68,7 +71,7 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
                 Err(error) => (None, Some(error.message().to_owned())),
             },
         };
-        if !archived && !superseded {
+        if !archived && !superseded && !closed {
             compatible &= binding_change.is_none() && unavailable.is_none();
         }
         rows.push(Row {
@@ -79,6 +82,8 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
             unavailable,
             archived,
             superseded,
+            child: child_status.is_some(),
+            closed,
             unaffected,
         });
     }

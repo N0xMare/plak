@@ -43,7 +43,7 @@ fn the_probe_answers_unknown_rather_than_renew_a_login() {
             needs_refresh
         );
     }
-    let Some(ReopenProbe::Refused { reason }) =
+    let Some(ReopenProbe::Refused { reason, .. }) =
         credential_verdict("codex", Some(NativeAuthStatus::Quarantined), fresh)
     else {
         panic!("a quarantined login is refused");
@@ -60,10 +60,11 @@ fn the_probe_answers_unknown_rather_than_renew_a_login() {
         credential_verdict("claude", Some(NativeAuthStatus::LoginRequired), fresh),
         Some(ReopenProbe::Refused {
             reason: "the claude login is stored by an earlier build; run `plakd login claude`, then retry the host upgrade"
-                .to_owned()
+                .to_owned(),
+            children: None,
         })
     );
-    let Some(ReopenProbe::Refused { reason }) =
+    let Some(ReopenProbe::Refused { reason, .. }) =
         credential_verdict("codex", Some(NativeAuthStatus::WrittenByNewerBuild), fresh)
     else {
         panic!("a newer build's login is refused");

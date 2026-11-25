@@ -158,7 +158,11 @@ Keep the old and new snapshots, including sidecars, until the command confirms
 success. Installation does not itself replace the running host.
 
 Same-key upgrade uses planned handoff and the existing session identities,
-not cross-key carry. On Linux it replaces the image in the running process:
+not cross-key carry. The destination checks saved child bindings before drain.
+If it reports affected child sessions and a binding change, the current host
+keeps running. Use a destination that can reopen those bindings or settle and
+close the affected children before retrying. On Linux the upgrade replaces
+the image in the running process:
 the unit's `MainPID` stays the same, but the host generation changes. If you
 then replace a legacy unit, stop it and start the new unit as a separate
 operation; the new unit has a new PID.

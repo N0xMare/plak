@@ -7,10 +7,14 @@ const SEAL: &str = "SELECT hex(validation_seal) FROM checkpoints WHERE root_code
 fn paired_handoff_preserves_previous_epoch_records() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
-    let mut source = start(&fixture);
-    let image = replacement_image(&fixture).canonicalize().unwrap();
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let runtime = paths.runtime_database();
+    // Publishing the host socket does not guarantee its startup scan has
+    // already opened an empty runtime store.
+    std::fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+    drop(plakous::sessions::SessionBackend::sqlite(&runtime).unwrap());
+    let mut source = start(&fixture);
+    let image = replacement_image(&fixture).canonicalize().unwrap();
     let legacy = fixture.root.join("previous.sqlite3");
     copy_legacy_fixture(&legacy);
     seed_legacy(&runtime, &legacy);

@@ -76,7 +76,19 @@ impl FrozenSessionPresentation {
         checkpoint: &super::RuntimeCheckpoint,
     ) -> Result<Self, AgentSessionsError> {
         let manifest = checkpoint.manifest();
-        let component = manifest.tools().registry();
+        Self::from_binding(
+            manifest.provider_configuration().clone(),
+            manifest.tools(),
+            manifest.harness_plan_component(),
+        )
+    }
+
+    pub(super) fn from_binding(
+        configuration: CompiledProviderConfiguration,
+        tools: &plakous_agent::internal::ToolRuntimeManifest,
+        harness: &plakous_agent::internal::ReconstructiveComponent,
+    ) -> Result<Self, AgentSessionsError> {
+        let component = tools.registry();
         let registry = match component.codec_revision() {
             plakous_tools::TOOL_REGISTRY_DESCRIPTOR_CODEC_REVISION => {
                 FrozenToolRegistryDescriptor::decode_v1(component.bytes())
@@ -87,7 +99,7 @@ impl FrozenSessionPresentation {
             _ => return Err(invalid("stored tool registry codec is unsupported")),
         }
         .map_err(|_| invalid("stored tool registry is unreadable"))?;
-        let plan = plakous_agent::internal::facade_support::checkpoint_harness_plan(checkpoint)
+        let plan = plakous_agent::internal::facade_support::stored_harness_plan(harness)
             .map_err(|error| super::runtime_error(&error))?;
         if plan.tool_registry_digest() != registry.registry_identity() {
             return Err(
@@ -95,7 +107,7 @@ impl FrozenSessionPresentation {
                     .with_binding_change(plakous_agent::BindingChange::ToolRegistry),
             );
         }
-        let exposure = manifest.tools().exposure();
+        let exposure = tools.exposure();
         match exposure.codec_revision() {
             plakous_tools::TOOL_EXPOSURE_DESCRIPTOR_CODEC_REVISION => {
                 plakous_tools::FrozenToolExposureDescriptor::decode_v1(exposure.bytes(), &registry)
@@ -112,7 +124,7 @@ impl FrozenSessionPresentation {
         }
         .map_err(|_| invalid("stored tool presentation is unreadable"))?;
         Ok(Self {
-            configuration: manifest.provider_configuration().clone(),
+            configuration,
             registry,
         })
     }

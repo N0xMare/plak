@@ -242,13 +242,15 @@ pub(crate) fn restore_stored_artifact(
             "recorded evaluator path, bytes or contract is unavailable or inconsistent; no inference was dispatched",
         )
     };
-    let (prefix, label) = if stored.host.starts_with(b"rquickjs-host") {
+    let (engine, prefix, label) = if stored.host.starts_with(b"rquickjs-host") {
         (
+            CellEngine::Quickjs,
             b"rquickjs-host".as_slice(),
             b"plakous.local-composition.engine-artifact.v1".as_slice(),
         )
     } else if stored.host.starts_with(b"monty-host") {
         (
+            CellEngine::Monty,
             b"monty-host".as_slice(),
             b"plakous.monty-engine-artifact.v1".as_slice(),
         )
@@ -303,6 +305,20 @@ pub(crate) fn restore_stored_artifact(
     {
         return Err(refused());
     }
+    if cell_engine_contract_identity(&engine.worker())?.identity_bytes()
+        != stored.engine_contract_identity
+    {
+        let evaluator = match engine {
+            CellEngine::Quickjs => "JavaScript",
+            CellEngine::Monty => "Python",
+        };
+        return Err(AgentError::new(
+            AgentErrorKind::IncompatibleSession,
+            format!(
+                "recorded {evaluator} evaluator engine contract changed; no inference was dispatched"
+            ),
+        ));
+    }
     let path_end = host
         .len()
         .checked_sub(32)
@@ -319,14 +335,9 @@ pub(crate) fn restore_stored_artifact(
     {
         return Err(refused());
     }
-    let artifact = if prefix == b"rquickjs-host" {
-        LocalCompositionEngineArtifact::quickjs_worker_v1(&path).map_err(|_| refused())?
-    } else {
-        LocalCompositionEngineArtifact::monty_worker_v1(&path).map_err(|_| refused())?
-    };
-    if artifact.identity().identity_bytes() != stored.artifact_identity
-        || artifact.engine_contract_identity().identity_bytes() != stored.engine_contract_identity
-    {
+    let artifact =
+        LocalCompositionEngineArtifact::cell_worker(engine, &path).map_err(|_| refused())?;
+    if artifact.identity().identity_bytes() != stored.artifact_identity {
         return Err(refused());
     }
     Ok(artifact)
@@ -540,6 +551,11 @@ mod monty_upgrade_tests {
         };
         assert_eq!(refusal.kind(), AgentErrorKind::IncompatibleSession);
         assert!(!refusal.message().contains("plak session"));
+        assert!(
+            refusal
+                .message()
+                .contains("Python evaluator engine contract changed")
+        );
         assert!(
             refusal.message().contains("no inference was dispatched"),
             "{}",

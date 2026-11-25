@@ -1,9 +1,10 @@
 //! Upgrade binding regressions, not pre-existing or external availability failures.
 
+use crate::carry::ChildReopenRefusal;
 use crate::commands::session::check_binding::{Report, Row};
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliResult};
-use std::{path::Path, time::Duration};
+use std::{collections::HashSet, path::Path, time::Duration};
 
 // The explicit 200-head / 28.5 MB retained-state measurement emits 49 KB in
 // about 14 seconds. Leave headroom without making a pre-surrender probe unbounded.
@@ -28,26 +29,27 @@ fn probe(
 }
 
 pub(super) fn regressions<'a>(source: Option<&Report>, destination: &'a Report) -> Vec<&'a Row> {
+    let comparable = |row: &Row| !row.archived && !row.superseded && !row.closed;
+    let source = source.map(|report| {
+        report
+            .sessions
+            .iter()
+            .filter(|row| {
+                comparable(row) && row.binding_change.is_none() && row.unavailable.is_none()
+            })
+            .map(|row| (row.session.as_str(), row.branch.as_str()))
+            .collect::<HashSet<_>>()
+    });
     destination
         .sessions
         .iter()
         .filter(|row| {
-            if row.archived
-                || row.superseded
-                || row.binding_change.is_none() && row.unavailable.is_none()
-            {
+            if !comparable(row) || row.binding_change.is_none() && row.unavailable.is_none() {
                 return false;
             }
-            match source {
+            match &source {
                 None => row.binding_change.is_some(),
-                Some(source) => source.sessions.iter().any(|old| {
-                    old.session == row.session
-                        && old.branch == row.branch
-                        && !old.archived
-                        && !old.superseded
-                        && old.binding_change.is_none()
-                        && old.unavailable.is_none()
-                }),
+                Some(source) => source.contains(&(row.session.as_str(), row.branch.as_str())),
             }
         })
         .collect()
@@ -106,8 +108,15 @@ fn finish(baseline: Option<&Report>, destination: &Report) -> CliResult<()> {
 }
 
 fn refusal(baseline_available: bool, refused: &[&Row]) -> CliResult<()> {
+    let mut children = ChildReopenRefusal::default();
+    for row in refused.iter().filter(|row| row.child) {
+        children.record(row.binding_change.as_deref(), row.unavailable.as_deref());
+    }
+    let children = children
+        .into_report()
+        .map_or_else(String::new, |refusal| format!("; {refusal}"));
     Err(CliFailure::new(format!(
-        "host_upgrade_binding_preflight_refused: source remains running; baseline {}; offending rows: {}",
+        "host_upgrade_binding_preflight_refused: source remains running; baseline {}; offending rows: {}{children}",
         if baseline_available {
             "available"
         } else {

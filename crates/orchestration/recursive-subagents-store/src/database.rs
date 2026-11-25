@@ -259,15 +259,19 @@ impl SubagentsDatabase {
 
     pub(crate) fn inspect_node_locators(
         database: &Path,
-    ) -> Result<Vec<(String, String)>, OpenError> {
+    ) -> Result<Vec<(String, String, Option<bool>)>, OpenError> {
         Self::inspect_rows(database, Vec::new(), |tx| {
-            let mut rows = tx.prepare("SELECT tree_id,session_locator FROM agent_nodes WHERE session_locator IS NOT NULL ORDER BY tree_id,agent_id").map_err(|_| OpenError::unavailable("could not inspect node bindings"))?;
-            rows.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|_| OpenError::unavailable("could not inspect node bindings"))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| OpenError::unavailable("could not inspect node bindings"))
+            let mut rows = tx
+                .prepare(
+                    "SELECT tree_id,session_locator,
+                CASE WHEN parent_agent_id IS NOT NULL THEN status='closed' END
+                FROM agent_nodes WHERE session_locator IS NOT NULL ORDER BY tree_id,agent_id",
+                )
+                .map_err(|_| OpenError::unavailable("could not inspect node bindings"))?;
+            rows.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .map_err(|_| OpenError::unavailable("could not inspect node bindings"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| OpenError::unavailable("could not inspect node bindings"))
         })
     }
 

@@ -34,7 +34,67 @@ use super::{
     RuntimeObjectAddress, RuntimeObjectKind, reads_checkpoint_epoch,
 };
 
+/// Binding-only projection of a content-addressed checkpoint.
+pub struct RuntimeCheckpointBinding {
+    /// The saved harness-plan component.
+    pub harness: ReconstructiveComponent,
+    /// The saved selected and effective provider configuration.
+    pub configuration: plakous_model::CompiledProviderConfiguration,
+    /// The saved tool and execution-environment data.
+    pub tools: crate::manifest::ToolRuntimeManifest,
+}
+
 impl RuntimeCheckpointCodec {
+    /// Reads only the binding objects, not conversation or operation history.
+    ///
+    /// # Errors
+    /// Refuses unsupported or invalid objects and inconsistent root identities.
+    pub fn inspect_binding<E>(
+        checkpoint_id: CheckpointId,
+        integrity: Digest,
+        root: RuntimeObjectAddress,
+        mut load: impl FnMut(RuntimeObjectAddress) -> Result<RuntimeObject, E>,
+        error: impl Fn(CheckpointBundleError) -> E,
+    ) -> Result<RuntimeCheckpointBinding, E> {
+        let epoch = root.codec_revision();
+        if !reads_checkpoint_epoch(epoch) {
+            return Err(error(CheckpointBundleError::UnsupportedEpoch(epoch)));
+        }
+        let mut read = |address: RuntimeObjectAddress, kind| {
+            if address.codec_revision() != epoch {
+                return Err(error(CheckpointBundleError::UnsupportedRevision));
+            }
+            if address.kind() != kind {
+                return Err(error(CheckpointBundleError::WrongKind));
+            }
+            let object = load(address)?;
+            if object.address() != address {
+                return Err(error(CheckpointBundleError::InvalidAddress));
+            }
+            Ok(object)
+        };
+        let object = read(root, RuntimeObjectKind::CheckpointRoot)?;
+        let (stored_id, stored_integrity, manifest) =
+            parse_checkpoint_root(object.canonical_bytes(), epoch).map_err(&error)?;
+        if stored_id != checkpoint_id || stored_integrity != integrity {
+            return Err(error(CheckpointBundleError::SemanticDisagreement));
+        }
+        let object = read(manifest, RuntimeObjectKind::ManifestRoot)?;
+        let manifest = parse_manifest_root(object.canonical_bytes(), epoch).map_err(&error)?;
+        let harness = read(manifest.harness, RuntimeObjectKind::ReconstructiveComponent)?;
+        let configuration = read(
+            manifest.provider_configuration,
+            RuntimeObjectKind::ProviderConfiguration,
+        )?;
+        let tools = read(manifest.tools, RuntimeObjectKind::ToolRuntime)?;
+        Ok(RuntimeCheckpointBinding {
+            harness: canonical_component(harness.canonical_bytes()).map_err(&error)?,
+            configuration: canonical_provider_configuration(configuration.canonical_bytes())
+                .map_err(&error)?,
+            tools: canonical_tools(tools.canonical_bytes()).map_err(&error)?,
+        })
+    }
+
     /// Reads diagnostic metadata and only the ledger paths named by Working obligations.
     /// The loader must reconstruct each object with `RuntimeObject::from_store`.
     /// This is not a full graph validation or permission to resume a runtime.

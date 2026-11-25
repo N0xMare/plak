@@ -1668,19 +1668,34 @@ async fn fenced_direct_child_session_admits_its_projection_at_construction()
     let selected = selected_coding_provider_configuration(
         NativeProvider::Claude,
         ModelId::new("claude-opus-5-5")?,
-        ReasoningEffort::High,
+        None,
         None,
         composition,
     )
     .expect("Claude selection");
-    let resolved = standard_claude_model(&selected)?;
     let job_config = plakous::tools::JobConfig::default();
     let store = tempfile::tempdir()?;
+    let database = store.path().join("runtime.sqlite3");
     let sessions = plakous::sessions::AgentSessions::new(
-        plakous::sessions::SessionBackend::sqlite(store.path().join("runtime.sqlite3"))?,
+        plakous::sessions::SessionBackend::sqlite(&database)?,
     )?;
 
-    for tier in [Tier::ReadOnly, Tier::Execute] {
+    for (tier, changed) in [
+        (Tier::ReadOnly, false),
+        (Tier::Execute, false),
+        (Tier::Execute, true),
+    ] {
+        let resolved = if changed {
+            // A valid earlier native selection, not a synthetic probe verdict.
+            let mut behavior = selected.behavior().clone();
+            behavior.parallel_tools = ParallelToolDisposition::Disabled;
+            standard_claude_model(&plakous::model::SelectedProviderConfiguration::new(
+                selected.route().clone(),
+                behavior,
+            )?)?
+        } else {
+            standard_claude_model(&selected)?
+        };
         let root = tempfile::tempdir()?;
         let mut tree = ProductAgentTree::bootstrap_root_for_test(
             "tree-fenced-direct-child",
@@ -1698,8 +1713,10 @@ async fn fenced_direct_child_session_admits_its_projection_at_construction()
                 None,
             )
             .expect("child");
-        let extensions = topology_tool_extensions(Arc::new(Mutex::new(tree)), spawned.agent_id)
-            .expect("child extensions");
+        let tree = Arc::new(Mutex::new(tree));
+        let child = spawned.agent_id;
+        let extensions =
+            topology_tool_extensions(Arc::clone(&tree), child.clone()).expect("child extensions");
         let extras = extensions.names().cloned().collect::<Vec<_>>();
         assert!(
             !extras.is_empty(),
@@ -1752,7 +1769,7 @@ async fn fenced_direct_child_session_admits_its_projection_at_construction()
         let profile = selected_harness_profile(
             NativeProvider::Claude,
             &ModelId::new("claude-opus-5-5")?,
-            ReasoningEffort::High,
+            None,
             false,
             false,
             &extras,
@@ -1797,15 +1814,12 @@ async fn fenced_direct_child_session_admits_its_projection_at_construction()
                 Vec::new(),
             )
             .expect("generation limits"),
-            plakous::agent::ReasoningPolicy::Enabled {
-                effort: Some(ReasoningEffort::High),
-                requirement: CapabilityRequirement::Required,
-            },
+            plakous::agent::ReasoningPolicy::Disabled,
         ));
         let created = sessions
             .create(plakous::sessions::CreateSessionRequest::new(
                 plakous::sessions::SessionOperationId::new(format!(
-                    "fenced-direct-child-{tier:?}"
+                    "fenced-direct-child-{tier:?}-{changed}"
                 ))?,
                 plakous::sessions::SessionRuntimeBinding::new(builder),
             ))
@@ -1814,7 +1828,34 @@ async fn fenced_direct_child_session_admits_its_projection_at_construction()
         let plakous::sessions::CreateSessionOutcome::Created { session, .. } = created else {
             panic!("{tier:?}: a fresh create creates its session");
         };
-        session.release().await?;
+        let locator = session.release().await?;
+        let recorded = {
+            let mut tree = tree.lock().unwrap();
+            tree.bind_session_locator(&child, locator.to_string())
+                .unwrap();
+            tree.nodes()[&child]
+                .session_locator
+                .as_ref()
+                .unwrap()
+                .parse()?
+        };
+        let mut verdicts = Vec::new();
+        plakous::sessions::rehearsal::inspect_child_bindings_sqlite(
+            &database,
+            &[recorded],
+            |frozen| {
+                verdicts.push(
+                    frozen
+                        .map_err(crate::CliFailure::from)
+                        .and_then(|frozen| check_frozen_child_binding(&frozen)),
+                );
+            },
+        )?;
+        assert_eq!(
+            verdicts.into_iter().collect::<Result<Vec<_>, _>>()?,
+            [changed.then_some(plakous::agent::BindingChange::ProviderConfiguration)],
+            "{tier:?}: native child with default effort, changed={changed}"
+        );
     }
     Ok(())
 }

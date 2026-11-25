@@ -1,11 +1,63 @@
 //! Read-only binding liveness metadata without runtime ownership.
 use super::{
     BindingCheckpointInspection, SessionRef, SessionStoreError, SqliteSessionStore,
-    admit_inspection_snapshot, load_checkpoint, map_sqlite,
+    admit_inspection_snapshot, branch_row_with_checkpoint, bundle_error, id, load_checkpoint,
+    load_object, map_sqlite,
 };
+use plakous_agent::internal::{RuntimeCheckpointBinding, RuntimeCheckpointCodec};
+use rusqlite::OptionalExtension as _;
 use std::path::Path;
 
 impl SqliteSessionStore {
+    /// Visits the saved binding of each named live branch, using one read snapshot.
+    /// An archived session is skipped; a missing branch is a per-head refusal.
+    ///
+    /// # Errors
+    /// Returns database admission or storage failures.
+    pub fn inspect_live_bindings(
+        path: &Path,
+        selectors: impl IntoIterator<Item = SessionRef>,
+        mut visit: impl FnMut(Result<RuntimeCheckpointBinding, SessionStoreError>),
+    ) -> Result<(), SessionStoreError> {
+        let connection = Self::open_inspection(path)?.ok_or(SessionStoreError::NotFound)?;
+        let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
+        admit_inspection_snapshot(&snapshot)?;
+        let mut archived = snapshot
+            .prepare("SELECT archived FROM sessions WHERE session_id=?1")
+            .map_err(map_sqlite)?;
+        for selector in selectors {
+            if archived
+                .query_row([id(selector.session_id())], |row| row.get::<_, bool>(0))
+                .optional()
+                .map_err(map_sqlite)?
+                == Some(true)
+            {
+                continue;
+            }
+            visit((|| {
+                let (branch, row) = branch_row_with_checkpoint(&snapshot, selector)?
+                    .ok_or(SessionStoreError::NotFound)?;
+                let (line, generation) = super::lines::branch_line(&snapshot, selector)?
+                    .ok_or_else(SessionStoreError::corrupt)?;
+                super::lines::require_line_head(&snapshot, selector, line, generation)?;
+                if row.selector != selector || row.revision != branch.head.revision() {
+                    return Err(SessionStoreError::corrupt());
+                }
+                let reference = row.reference;
+                RuntimeCheckpointCodec::inspect_binding(
+                    reference.checkpoint_id(),
+                    reference.integrity(),
+                    reference.root(),
+                    |address| {
+                        load_object(&snapshot, address)?.ok_or_else(SessionStoreError::corrupt)
+                    },
+                    bundle_error,
+                )
+            })());
+        }
+        Ok(())
+    }
+
     /// Projects retained branch checkpoints and liveness through one read-only snapshot.
     /// No boot, lease, runtime actor, recovery or write is opened.
     ///

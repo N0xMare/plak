@@ -27,7 +27,7 @@ impl ReloadTarget {
                 "reload kept this session open: {error}; fix the named file and retry the host upgrade"
             ));
         }
-        if let Some(ReopenProbe::Refused { reason }) = self.reopen.as_deref() {
+        if let Some(ReopenProbe::Refused { reason, .. }) = self.reopen.as_deref() {
             return Some(format!(
                 "reload kept this session open: the installed build would not reopen it: {}",
                 safe_terminal_block(reason)

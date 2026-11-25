@@ -93,6 +93,55 @@ pub fn inspect_binding_presentations_sqlite(
     .map_err(store_error)
 }
 
+/// Visits only the binding data of the named child branches, following their
+/// current head without acquiring authority or materializing history.
+///
+/// # Errors
+/// Returns database admission and storage failures. Per-head binding failures
+/// go to the visitor; archived sessions are not visited.
+#[doc(hidden)]
+pub fn inspect_child_bindings_sqlite(
+    path: &Path,
+    locators: &[SessionLocator],
+    mut visit: impl FnMut(Result<super::FrozenSessionPresentation, AgentSessionsError>),
+) -> Result<(), AgentSessionsError> {
+    if locators.is_empty() {
+        return Ok(());
+    }
+    let mut evaluators = std::collections::HashMap::new();
+    SqliteSessionStore::inspect_live_bindings(
+        path,
+        locators.iter().map(|locator| locator.session_ref()),
+        |binding| {
+            visit(binding.map_err(store_error).and_then(|binding| {
+                let evaluator =
+                    plakous_agent::internal::facade_support::tool_runtime_composition_artifact(
+                        &binding.tools,
+                    )
+                    .map_err(|error| super::runtime_error(&error))?;
+                if let Some(stored) = evaluator {
+                    let check = evaluators.entry(stored).or_insert_with_key(|stored| {
+                        crate::verify_saved_evaluator(stored).map_err(|error| {
+                            AgentSessionsError::new(
+                                super::AgentSessionsErrorKind::IncompatibleBuild,
+                                error.message(),
+                            )
+                            .with_binding_change(plakous_agent::BindingChange::ExecutionEnvironment)
+                        })
+                    });
+                    check.clone()?;
+                }
+                super::FrozenSessionPresentation::from_binding(
+                    binding.configuration,
+                    &binding.tools,
+                    &binding.harness,
+                )
+            }));
+        },
+    )
+    .map_err(store_error)
+}
+
 /// What the pure resume predicates permit, before credentialed reconstruction.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -175,12 +224,8 @@ pub(super) fn inspect_exact(exact: &ExactSource) -> OfflineReopenInspection {
     };
     let evaluator_verified =
         plakous_agent::internal::facade_support::checkpoint_composition_artifact(checkpoint)
-            .is_ok_and(|stored| match stored {
-                None => true,
-                #[cfg(feature = "composition")]
-                Some(stored) => crate::local_composition::restore_stored_artifact(&stored).is_ok(),
-                #[cfg(not(feature = "composition"))]
-                Some(_) => false,
+            .is_ok_and(|stored| {
+                stored.is_none_or(|stored| crate::verify_saved_evaluator(&stored).is_ok())
             });
     OfflineReopenInspection {
         outcome,

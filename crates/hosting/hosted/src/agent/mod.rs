@@ -9,7 +9,7 @@
 mod binding_inspection;
 pub mod build;
 #[doc(hidden)]
-pub use binding_inspection::check_frozen_binding;
+pub use binding_inspection::{check_frozen_binding, check_frozen_child_binding};
 pub mod children;
 pub(crate) mod feed_projection;
 mod ledger;

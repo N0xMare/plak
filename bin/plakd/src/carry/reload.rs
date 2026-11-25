@@ -5,6 +5,9 @@ use crate::home::paths::PlakPaths;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+mod child_reopen;
+pub(crate) use child_reopen::ChildReopenRefusal;
+
 /// The installed `plakd` a reload would start, and the state key it answered;
 /// it crosses from the session's host to the face that asked (spec 02 §5.1).
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, schemars::JsonSchema)]
@@ -76,10 +79,23 @@ pub(crate) enum ReopenProbe {
     BindingChanged { change: String },
     /// Exact reopen refuses for another reason (login, configuration,
     /// unsettled work, storage); never a carry trigger.
-    Refused { reason: String },
+    Refused {
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        children: Option<Box<ChildReopenRefusal>>,
+    },
     /// The destination could not answer without renewing a credential
     /// (`needs_refresh`); the source treats it as no verdict.
     Unknown { reason: String },
+}
+
+impl ReopenProbe {
+    fn refused(reason: impl Into<String>) -> Self {
+        Self::Refused {
+            reason: reason.into(),
+            children: None,
+        }
+    }
 }
 
 /// Only the host coordinator can defer this verdict, and it must then check
@@ -106,6 +122,17 @@ pub(crate) fn reopen_probe(
         crate::store::revisions::refuse_incompatible(paths)?;
         let record = crate::store::ProductStore::inspect_session_read_only(paths, id)
             .map_err(|error| error.to_string())?;
+        if host_upgrade {
+            crate::test_hooks::gate_upgrade_reopen(&record.id)?;
+        }
+        if !record.archived
+            && let Some(children) = child_reopen::inspect(paths, &record.node.tree_id)?
+        {
+            return Ok(ReopenProbe::Refused {
+                reason: children.to_string(),
+                children: Some(Box::new(children)),
+            });
+        }
         let (_, recorded, _, views) =
             crate::store::ProductStore::inspect_projection_read_only(paths, &record.id)?;
         let recorded = recorded
@@ -114,9 +141,6 @@ pub(crate) fn reopen_probe(
         let head = views.as_ref().map_or(recorded, |views| {
             plakous_hosted::runtime::projected_head(recorded, views)
         });
-        if host_upgrade {
-            crate::test_hooks::gate_upgrade_reopen(&record.id)?;
-        }
         let verify = if host_upgrade {
             crate::commands::session::verify_host_upgrade_reopen
         } else {
@@ -124,7 +148,7 @@ pub(crate) fn reopen_probe(
         };
         verify(services, record, head).map_err(|error| error.message().to_owned())
     };
-    verdict().unwrap_or_else(|reason| ReopenProbe::Refused { reason })
+    verdict().unwrap_or_else(ReopenProbe::refused)
 }
 
 impl From<plakous_hosted::runtime::ReopenVerdict> for ReopenProbe {
@@ -138,9 +162,7 @@ impl From<plakous_hosted::runtime::ReopenVerdict> for ReopenProbe {
                 change: binding_change_words(&change, current_revision.as_deref()),
             },
             plakous_hosted::runtime::ReopenVerdict::Refused(reason)
-            | plakous_hosted::runtime::ReopenVerdict::HeadAdvanced(reason) => {
-                Self::Refused { reason }
-            }
+            | plakous_hosted::runtime::ReopenVerdict::HeadAdvanced(reason) => Self::refused(reason),
             plakous_hosted::runtime::ReopenVerdict::Unknown(reason) => Self::Unknown { reason },
         }
     }
@@ -184,9 +206,7 @@ pub(crate) fn reopen_credential_gate(
     let status = match executor.block_on(subscriptions.status(provider)) {
         Ok(Ok(status)) => Some(status.credential()),
         Ok(Err(error @ NativeSubscriptionError::GatewayProtocolMismatch)) => {
-            return Some(ReopenProbe::Refused {
-                reason: error.to_string(),
-            });
+            return Some(ReopenProbe::refused(error.to_string()));
         }
         _ => None,
     };
@@ -209,10 +229,10 @@ pub(super) fn credential_verdict(
     let needs_refresh = || ReopenProbe::Unknown {
         reason: "needs_refresh".to_owned(),
     };
-    let unusable = |state: &str| ReopenProbe::Refused {
-        reason: format!(
+    let unusable = |state: &str| {
+        ReopenProbe::refused(format!(
             "the {account} login is {state}; run `plakd login {account}`, then retry the host upgrade"
-        ),
+        ))
     };
     match status {
         Some(NativeAuthStatus::Ready) => match expiring() {
@@ -226,11 +246,9 @@ pub(super) fn credential_verdict(
         Some(NativeAuthStatus::Quarantined) => Some(unusable("quarantined")),
         Some(NativeAuthStatus::Revoked) => Some(unusable("revoked")),
         Some(NativeAuthStatus::LoginRequired) => Some(unusable("stored by an earlier build")),
-        Some(NativeAuthStatus::WrittenByNewerBuild) => Some(ReopenProbe::Refused {
-            reason: format!(
-                "the {account} login was written by a newer build; run that build, or replace the login with `plakd login {account}`"
-            ),
-        }),
+        Some(NativeAuthStatus::WrittenByNewerBuild) => Some(ReopenProbe::refused(format!(
+            "the {account} login was written by a newer build; run that build, or replace the login with `plakd login {account}`"
+        ))),
         Some(_) => Some(unusable("not usable by this build")),
     }
 }
@@ -318,7 +336,7 @@ impl From<ReopenProbe> for plakd_wire_types::ReopenProbe {
         match value {
             ReopenProbe::Opens => Self::Opens,
             ReopenProbe::BindingChanged { change } => Self::BindingChanged { change },
-            ReopenProbe::Refused { reason } => Self::Refused { reason },
+            ReopenProbe::Refused { reason, .. } => Self::Refused { reason },
             ReopenProbe::Unknown { reason } => Self::Unknown { reason },
         }
     }
@@ -331,7 +349,7 @@ impl From<plakd_wire_types::ReopenProbe> for ReopenProbe {
             plakd_wire_types::ReopenProbe::BindingChanged { change } => {
                 Self::BindingChanged { change }
             }
-            plakd_wire_types::ReopenProbe::Refused { reason } => Self::Refused { reason },
+            plakd_wire_types::ReopenProbe::Refused { reason } => Self::refused(reason),
             plakd_wire_types::ReopenProbe::Unknown { reason } => Self::Unknown { reason },
         }
     }

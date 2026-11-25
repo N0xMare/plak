@@ -55,6 +55,23 @@ pub mod exchange_observation {
 #[cfg(feature = "composition")]
 mod local_composition;
 
+#[cfg(all(feature = "sessions-sqlite", feature = "composition"))]
+fn verify_saved_evaluator(
+    stored: &plakous_agent::internal::facade_support::StoredCompositionArtifact,
+) -> Result<(), plakous_agent::AgentError> {
+    local_composition::restore_stored_artifact(stored).map(drop)
+}
+
+#[cfg(all(feature = "sessions-sqlite", not(feature = "composition")))]
+fn verify_saved_evaluator(
+    _stored: &plakous_agent::internal::facade_support::StoredCompositionArtifact,
+) -> Result<(), plakous_agent::AgentError> {
+    Err(plakous_agent::AgentError::new(
+        plakous_agent::AgentErrorKind::IncompatibleSession,
+        "recorded evaluator is unavailable in this build",
+    ))
+}
+
 /// The Plakous library version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

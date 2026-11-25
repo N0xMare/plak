@@ -1479,6 +1479,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakd", "src/gateway/route_custody.rs"): {"gateway": {"custody::CredentialCustodian"}},
     # Frozen construction data and pure metadata checks, not runtime authority.
     ("plakd", "src/commands/session/check_binding.rs"): {"sessions": {"rehearsal"}},
+    ("plakd", "src/carry/reload/child_reopen.rs"): {"sessions": {"rehearsal"}},
     ("plakous-hosted", "src/agent/binding_inspection.rs"): {
         "sessions": {"FrozenSessionPresentation"},
         "tools": {"RegisteredToolIdentity", "ToolBindingError"},
