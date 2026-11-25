@@ -23,6 +23,7 @@ test-support = [
     "plakous-openrouter?/test-clock",
     "plakous-cell?/test-hooks",
     "plakous-agent/test-hooks",
+    "plakous-tools/test-support",
 ]
 default = []
 # Provider protocol crates on the facade are provider internals (not TUI surface).

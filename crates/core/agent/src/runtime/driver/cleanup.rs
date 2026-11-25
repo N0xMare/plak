@@ -561,11 +561,20 @@ impl Driver {
                 update_error.get_or_insert(error);
             }
         }
-        if !matches!(cleanup, Ok(Ok(()))) {
+        let failure = match cleanup {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(format!(
+                "process.stop: {:?}: {}",
+                error.kind(),
+                error.message()
+            )),
+            Err(_) => Some("cleanup task did not join".to_owned()),
+        };
+        if let Some(failure) = failure {
             self.process_session_cleanup_uncertainty = Some(turn_id);
             return Err(AgentError::new(
                 AgentErrorKind::OutcomeUnknown,
-                "process session cleanup did not prove every child joined",
+                format!("process session cleanup did not prove every child joined: {failure}"),
             ));
         }
         if durable_identities

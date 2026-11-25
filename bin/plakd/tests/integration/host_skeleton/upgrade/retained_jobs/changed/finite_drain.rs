@@ -421,6 +421,8 @@ fn assert_one_child_terminal(database: &Path, locator: plakous::sessions::Sessio
     );
 }
 
+mod projection;
+
 fn loss_resumptions(tree: &ProductAgentTree) -> usize {
     tree.commands()
         .keys()

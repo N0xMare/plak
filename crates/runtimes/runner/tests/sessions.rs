@@ -531,6 +531,56 @@ async fn a_runner_sessions_service_runs_jobs_and_reports_them_from_job_events() 
     drop(loopback);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_readopted_jobs_projection_does_not_own_foreground_cleanup() {
+    let root = tempfile::tempdir().unwrap();
+    let (loopback, environment) = loopback(root.path(), RunnerLimits::default()).await;
+    let original = RunnerSessions::new(&loopback.backend(), &environment, owner(1, 1));
+    let job = original
+        .start(literal("read -r finish", true), effect(1))
+        .await
+        .unwrap();
+    original.promote(job).await.unwrap();
+
+    let environment = environment.with_line_owner(owner(1, 2));
+    let sessions = plakous_tools::internal::runner::adopt_runner_process_sessions(
+        &environment,
+        &tokio::runtime::Handle::current(),
+    )
+    .unwrap();
+    eventually(
+        || sessions.running_job_count() == 1,
+        "running job was not adopted",
+    )
+    .await;
+    sessions
+        .write_stdin(job, b"finish\n", JoinedProcessInputDisposition::KeepOpen)
+        .unwrap();
+    eventually(
+        || sessions.job_terminal_generation() > 0,
+        "the adopted job did not report its terminal",
+    )
+    .await;
+    assert_eq!(sessions.jobs()[0].status, JobStatus::Exited(Some(0)));
+
+    let number = JoinedProcessSessions::job_number(job);
+    assert_eq!(sessions.session_for_number(number), Some(job));
+    plakous_tools::internal::process_session_projection_state(&sessions, job).unwrap();
+    plakous_tools::internal::consume_jobs(&sessions, &[number]);
+    eventually(
+        || !sessions.is_promoted(job),
+        "ACK did not clear the job mirror",
+    )
+    .await;
+
+    let foreground = sessions
+        .start(literal("read -r finish", true), effect(2))
+        .unwrap();
+    assert_eq!(sessions.active_session_ids(), [foreground]);
+    sessions.stop_foreground().unwrap();
+    assert!(sessions.is_drained());
+}
+
 /// A restarted runner numbers a line's sessions afresh on its own, so the
 /// host carries the lowest number it may use: past every number the handle
 /// has seen and the host's durable seed. No number is reused across a

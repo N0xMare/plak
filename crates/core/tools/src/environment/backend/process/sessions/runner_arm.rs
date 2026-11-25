@@ -17,6 +17,19 @@ use crate::environment::runner::{RunnerSessions, wait_on};
 use crate::internal::{ProcessQuietPollState, ProcessSessionProjectionState};
 use crate::{JobStatus, JobStopReason, JobView};
 
+#[cfg(feature = "test-support")]
+mod test_support;
+#[cfg(not(feature = "test-support"))]
+mod test_support {
+    pub(super) const fn acknowledged(_: &[u32]) {}
+
+    pub(super) const fn terminal_projection(
+        _: &super::RunnerSessions,
+        _: super::JoinedProcessSessionId,
+    ) {
+    }
+}
+
 /// How long one background wait for a session's output lasts.
 const CHANGE_WAIT: Duration = Duration::from_secs(1);
 /// How long a stop may wait for its process group, as a local stop.
@@ -34,9 +47,11 @@ fn process_status(status: JobStatus) -> JoinedProcessStatus {
     }
 }
 
-/// One session this service started on the runner.
+/// Cached state for one session, including retained jobs observed from another owner.
 struct ArmSession {
     status: JoinedProcessStatus,
+    /// Only a successful start on this arm confers foreground cleanup ownership.
+    started_here: bool,
     promoted: bool,
     projection: ProcessSessionProjectionState,
     changes: tokio::sync::watch::Sender<u64>,
@@ -47,6 +62,7 @@ impl ArmSession {
     fn new() -> Self {
         Self {
             status: JoinedProcessStatus::Running,
+            started_here: false,
             promoted: false,
             projection: (
                 Arc::new(Mutex::new(JoinedProcessOutputCursor::new(0))),
@@ -367,7 +383,9 @@ impl RunnerArm {
         let numbers = numbers.to_vec();
         self.runtime.spawn(async move {
             for chunk in numbers.chunks(128) {
-                let _ = sessions.acknowledge_jobs(chunk.to_vec()).await;
+                if sessions.acknowledge_jobs(chunk.to_vec()).await.is_ok() {
+                    test_support::acknowledged(chunk);
+                }
             }
         });
     }
@@ -433,7 +451,11 @@ impl RunnerArm {
         control: OperationContext,
     ) -> Result<JoinedProcessSessionId, ExecutionBackendError> {
         let id = self.wait(self.sessions.start(request, control))?;
-        lock(&self.state).sessions.insert(id, ArmSession::new());
+        lock(&self.state)
+            .sessions
+            .entry(id)
+            .or_insert_with(ArmSession::new)
+            .started_here = true;
         Ok(id)
     }
 
@@ -516,13 +538,14 @@ impl RunnerArm {
         &self,
         id: JoinedProcessSessionId,
     ) -> ProcessSessionProjectionState {
-        let mut state = lock(&self.state);
-        let session = state.sessions.entry(id).or_insert_with(ArmSession::new);
-        (
-            Arc::clone(&session.projection.0),
-            Arc::clone(&session.projection.1),
-            Arc::clone(&session.projection.2),
-        )
+        let projection = lock(&self.state)
+            .sessions
+            .entry(id)
+            .or_insert_with(ArmSession::new)
+            .projection
+            .clone();
+        test_support::terminal_projection(&self.sessions, id);
+        projection
     }
 
     /// Subscribes to the session's output and status, which a background
@@ -560,7 +583,7 @@ impl RunnerArm {
         lock(&self.state)
             .sessions
             .iter()
-            .filter(|(_, session)| !session.status.is_terminal())
+            .filter(|(_, session)| session.started_here && !session.status.is_terminal())
             .map(|(id, _)| *id)
             .collect()
     }
@@ -639,7 +662,9 @@ impl RunnerArm {
         let foreground = lock(&self.state)
             .sessions
             .iter()
-            .filter(|(_, session)| !session.promoted && !session.status.is_terminal())
+            .filter(|(_, session)| {
+                session.started_here && !session.promoted && !session.status.is_terminal()
+            })
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
         let mut failure = None;
