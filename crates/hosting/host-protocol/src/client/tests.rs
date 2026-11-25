@@ -10,6 +10,27 @@ mod lifecycle;
 mod slow_link;
 
 #[test]
+fn neutral_connect_helpers_refuse_product_hellos_locally() {
+    let transport = || Transport::new(std::io::empty(), std::io::sink());
+    for proto in [12, crate::wire::WIRE_VERSION] {
+        let product = Hello { proto, ..hello() };
+        for result in [
+            connect::<Core>(transport(), product.clone()),
+            connect_to::<Core>(transport(), product.clone(), node("root")),
+            connect_directory::<Core>(transport(), product),
+        ] {
+            assert!(matches!(
+                result,
+                Err(ConnectError::Wire(WireError::Malformed(detail)))
+                    if detail == format!(
+                        "the neutral client only decodes protocol {NEUTRAL_WIRE_VERSION}, not {proto}"
+                    )
+            ));
+        }
+    }
+}
+
+#[test]
 fn product_host_responses_route_by_id_without_attaching_a_session() {
     #[derive(Clone, Debug, Eq, PartialEq)]
     struct Reads;

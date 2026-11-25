@@ -4331,11 +4331,12 @@ admitted connections are seeded with the current phase, including a directory
 connection arriving mid-drain; registration cannot race publication and miss it. Failure without a
 notice remains possible. A destination serves ordinary Welcome; committed,
 ready carried-root aliases use the existing `RequestRefusal::Moved`, not a new
-successor field. Versions match exactly, without negotiation. A protocol 12
-Hello gets only `{"frame":"refused","kind":"version_mismatch","host":13,"client":12}`.
+successor field. The served product listeners match versions exactly, without
+negotiation. On those listeners, a protocol 12 Hello gets only
+`{"frame":"refused","kind":"version_mismatch","host":13,"client":12}`.
 There is no Welcome or lifecycle frame after that refusal.
-The unsupported standalone neutral diagnostic accepts only its own version
-12, never 13. The host protocol crate's neutral convenience clients are not
+The unsupported standalone neutral diagnostic accepts only its reserved
+version, not any product version. The host protocol crate's neutral convenience clients are not
 product v13 clients; product clients use the exact contract in
 `plakd-wire-types::v13`.
 

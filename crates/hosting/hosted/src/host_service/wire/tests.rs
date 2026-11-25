@@ -626,27 +626,29 @@ fn the_hello_wait_ends_at_its_deadline_or_a_stop() {
 }
 
 #[test]
-fn the_neutral_diagnostic_refuses_protocol_thirteen_before_attach() {
+fn the_neutral_diagnostic_refuses_product_protocols_before_attach() {
     use plakous_host_protocol::Core;
     use plakous_host_protocol::wire::Hello;
-    let (sender, lines) = lines(1);
-    sender
-        .send(Ok(encode_line(&ClientFrame::<Core>::Hello(Hello {
-            proto: 13,
-            binary_id: "product-client".into(),
-            caps: Vec::new(),
-        }))
-        .unwrap()))
-        .unwrap();
-    let mut stdout = Vec::new();
-    assert!(!handshake::<Core>(&lines, welcome(), &mut stdout, &|| false).unwrap());
-    assert!(matches!(
-        host_frames(&stdout).as_slice(),
-        [HostFrame::Refused(HandshakeRefusal::VersionMismatch {
-            host: NEUTRAL_WIRE_VERSION,
-            client: 13
-        })]
-    ));
+    for proto in [12, 13] {
+        let (sender, lines) = lines(1);
+        sender
+            .send(Ok(encode_line(&ClientFrame::<Core>::Hello(Hello {
+                proto,
+                binary_id: "product-client".into(),
+                caps: Vec::new(),
+            }))
+            .unwrap()))
+            .unwrap();
+        let mut stdout = Vec::new();
+        assert!(!handshake::<Core>(&lines, welcome(), &mut stdout, &|| false).unwrap());
+        assert!(matches!(
+            host_frames(&stdout).as_slice(),
+            [HostFrame::Refused(HandshakeRefusal::VersionMismatch {
+                host: NEUTRAL_WIRE_VERSION,
+                client
+            })] if *client == proto
+        ));
+    }
 }
 
 fn binding(session: &str) -> SessionObservation<plakous_host_protocol::Core> {

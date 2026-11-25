@@ -22,8 +22,8 @@ The [CLI reference](cli.md) covers flags. The normative contracts are
 [exit classes](../spec/02-plak-product.md#33-exit-codes). The host and runner
 protocols are distinct. New framed-wire integrations use the supported host
 socket or stdio bridge. `plakd agent --wire v2` is a hidden, unsupported
-single-session diagnostic that speaks neutral protocol 12, not the supported
-stdio integration boundary. The host-protocol crate's default neutral
+single-session diagnostic with a reserved neutral version, not a product
+protocol or the supported stdio integration boundary. The host-protocol crate's default neutral
 client helpers do not decode product v13; use the published v13 frame types.
 
 ## Schema and exact versions

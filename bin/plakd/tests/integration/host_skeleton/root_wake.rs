@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 mod notice;
 mod suppression;
+mod wire_scope;
 
 pub(super) fn child_fixture(process: bool) -> Option<(Fixture, serde_json::Value)> {
     let fixture = fixture()?;

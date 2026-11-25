@@ -81,9 +81,9 @@ pub use tool_rows::{FramedObservation, FramedTranscriptRow};
 /// and attachment, blob and host lifecycle outcomes.
 pub const WIRE_VERSION: u32 = 13;
 
-/// Version of the neutral, standalone framed transport, not the product's
-/// served protocol. Its convenience clients do not decode product v13.
-pub const NEUTRAL_WIRE_VERSION: u32 = 12;
+/// The standalone diagnostic uses a reserved number outside the product's
+/// sequential protocol versions. The neutral clients decode only this dialect.
+pub const NEUTRAL_WIRE_VERSION: u32 = 1 << 31;
 
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
