@@ -14,9 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliResult};
 
-pub(super) use self::facts::CAPTURE_TIME;
 use self::facts::{Budget, Key};
-pub(super) use self::trees::REVISION_BACKUP_TIME;
 
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 pub(in crate::host) enum Evidence {
@@ -61,7 +59,7 @@ impl Snapshot {
             &mut budget,
         )?;
         let (runtime, accepted) = runtime::capture(paths, candidates, evidence, &mut budget)?;
-        let trees = trees::capture(paths, evidence, &mut budget)?;
+        let trees = trees::capture(paths, evidence, before.is_none(), &mut budget)?;
         Ok((
             Self {
                 evidence,

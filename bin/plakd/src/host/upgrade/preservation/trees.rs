@@ -3,7 +3,9 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Instant;
+
+mod retained;
 
 use plakous_recursive_subagents_store::admission::Status;
 use plakous_recursive_subagents_store::database::schema;
@@ -124,7 +126,7 @@ const ARCHIVES: Table = Table::stable(
     ],
 );
 const MAX_REVISION_BACKUP_BYTES: u64 = 16 * 1024 * 1024 * 1024;
-pub(in crate::host) const REVISION_BACKUP_TIME: Duration = Duration::from_secs(60);
+use crate::carry::upgrade::timing::REVISION_BACKUP as REVISION_BACKUP_TIME;
 
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
 struct SchemaIdentity {
@@ -145,11 +147,13 @@ pub(super) struct Trees {
     backups: BTreeMap<i64, Stamp>,
     fences: Map<u64>,
     tables: Map<Map<Fact>>,
+    retained: Option<retained::Retained>,
 }
 
 pub(super) fn capture(
     paths: &PlakPaths,
     evidence: Evidence,
+    baseline: bool,
     budget: &mut Budget,
 ) -> CliResult<Trees> {
     let path = paths.subagents_database();
@@ -186,11 +190,22 @@ pub(super) fn capture(
                     backups.insert(version, stamp);
                 }
             }
+            let retained = if held {
+                None
+            } else {
+                Some(retained::Retained::capture(
+                    db,
+                    schema.version,
+                    baseline,
+                    budget,
+                )?)
+            };
             Ok(Trees {
                 schema,
                 backups,
                 fences,
                 tables: facts,
+                retained,
             })
         })
         .map_err(|_| unreadable("subagent store"))?
@@ -274,6 +289,17 @@ impl Trees {
                 }),
                 "preservation lost a tree without a recorded delete or regressed its revision",
             )?;
+            let prior = self
+                .retained
+                .as_ref()
+                .ok_or_else(|| unreadable("tree identities"))?;
+            let current = after
+                .retained
+                .as_ref()
+                .ok_or_else(|| unreadable("tree identities"))?;
+            prior.compare(current, &|id| {
+                !after.tables["agent_trees"].contains_key(id) && recorded_delete(id)
+            })?;
         }
         check(
             self.fences.iter().all(|(tree, old)| {

@@ -32,6 +32,7 @@ struct Root {
 #[derive(Deserialize, Serialize)]
 struct Draft {
     id: Key,
+    revision: u64,
     content: Key,
     witness: Option<Key>,
 }
@@ -41,6 +42,7 @@ pub(super) struct Product {
     instance: Key,
     roots: Map<Root>,
     queues: Map<Vec<Draft>>,
+    removed_drafts: BTreeSet<Key>,
     pub(super) deleted_trees: BTreeSet<Key>,
 }
 
@@ -81,6 +83,33 @@ impl Product {
         }
         for (root, before) in &self.queues {
             let current = after.queues.get(root).map_or(&[][..], Vec::as_slice);
+            if evidence == Evidence::BaselinePredatesDrain {
+                if !after.roots.contains_key(root)
+                    && self
+                        .roots
+                        .get(root)
+                        .and_then(|row| row.runtime.as_deref())
+                        .is_some_and(&runtime_deleted)
+                {
+                    continue;
+                }
+                let current: std::collections::BTreeMap<_, _> =
+                    current.iter().map(|draft| (&draft.id, draft)).collect();
+                for draft in before {
+                    check(
+                        current.get(&draft.id).map_or_else(
+                            || after.removed_drafts.contains(&draft.id),
+                            |new| {
+                                new.revision > draft.revision
+                                    || (new.revision == draft.revision
+                                        && new.content == draft.content)
+                            },
+                        ),
+                        "preservation lost a queued draft without a recorded removal or regressed its revision",
+                    )?;
+                }
+                continue;
+            }
             let surviving = ids(current);
             let mut suffix = current;
             for item in before {
@@ -153,6 +182,7 @@ fn capture_product(
         .map_err(|_| unreadable("product schema identity"))?;
     let mut roots = Map::new();
     let mut queues = Map::new();
+    let mut removed_drafts = BTreeSet::new();
     let mut admissions = Vec::new();
     scan(
         db,
@@ -196,25 +226,27 @@ fn capture_product(
                 .map(|id| texts([id.session_id().to_string().as_str()])),
                 owns_tree: columns(row, [3])? == key && columns(row, [4])? == key,
             };
-            // Pending drafts can be edited and withdrawn while the predecessor
-            // serves. Its durable admissions are checked in the runtime feed.
-            if evidence == Evidence::BaselinePredatesDrain {
-                return insert(&mut roots, key, root);
-            }
             let queue = queue(db, &id, budget)?;
-            if let Some(locator) = locator
-                && let Some(prior) = before.and_then(|snapshot| snapshot.queues.get(&key))
-            {
+            if let Some(prior) = before.and_then(|snapshot| snapshot.queues.get(&key)) {
                 let surviving = ids(&queue);
-                let wanted = prior
-                    .iter()
-                    .filter_map(|item| {
-                        let witness = item.witness.as_ref()?;
-                        (!surviving.contains(item.id.as_str()))
-                            .then_some((item.id.clone(), witness))
-                    })
-                    .collect();
-                read_admissions(db, &id, locator, &wanted, &mut admissions, budget)?;
+                if evidence == Evidence::BaselinePredatesDrain {
+                    let missing = prior
+                        .iter()
+                        .filter(|item| !surviving.contains(item.id.as_str()))
+                        .map(|item| item.id.as_str())
+                        .collect();
+                    read_removals(db, &id, &missing, &mut removed_drafts, budget)?;
+                } else if let Some(locator) = locator {
+                    let wanted = prior
+                        .iter()
+                        .filter_map(|item| {
+                            let witness = item.witness.as_ref()?;
+                            (!surviving.contains(item.id.as_str()))
+                                .then_some((item.id.clone(), witness))
+                        })
+                        .collect();
+                    read_admissions(db, &id, locator, &wanted, &mut admissions, budget)?;
+                }
             }
             if !queue.is_empty() {
                 insert(&mut queues, key.clone(), queue)?;
@@ -227,6 +259,7 @@ fn capture_product(
             instance: texts([instance.as_str()]),
             roots,
             queues,
+            removed_drafts,
             deleted_trees: BTreeSet::new(),
         },
         admissions,
@@ -311,6 +344,7 @@ fn queue(db: &Connection, root: &str, budget: &mut Budget) -> CliResult<Vec<Draf
             };
             result.push(Draft {
                 id: texts([item.as_str()]),
+                revision,
                 content: finish(content),
                 witness,
             });
@@ -318,6 +352,38 @@ fn queue(db: &Connection, root: &str, budget: &mut Budget) -> CliResult<Vec<Draf
         },
     )?;
     Ok(result)
+}
+
+fn read_removals(
+    db: &Connection,
+    root: &str,
+    missing: &BTreeSet<&str>,
+    removed: &mut BTreeSet<Key>,
+    budget: &mut Budget,
+) -> CliResult<()> {
+    if missing.is_empty() {
+        return Ok(());
+    }
+    // A live predecessor may edit before removing. The immutable owner and
+    // terminal queue identity prove removal, not exact admission of this text.
+    scan(
+        db,
+        "
+        SELECT identity FROM identity_bindings
+        WHERE owner_session_id=?1 AND kind='queue'
+          AND terminal_disposition IN ('deleted','consumed')
+    ",
+        [root],
+        "queue removal",
+        |row| {
+            budget.take()?;
+            let id = columns(row, [0])?;
+            if missing.contains(id.as_str()) {
+                removed.insert(id);
+            }
+            Ok(())
+        },
+    )
 }
 
 fn read_admissions(
