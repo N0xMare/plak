@@ -5,7 +5,7 @@ use super::{
     load_object, map_sqlite,
 };
 use plakous_agent::internal::{
-    DurableSessionAddress, RuntimeCheckpointBinding, RuntimeCheckpointCodec,
+    CheckpointId, DurableSessionAddress, RuntimeCheckpointBinding, RuntimeCheckpointCodec,
 };
 use rusqlite::OptionalExtension as _;
 use std::path::Path;
@@ -71,12 +71,15 @@ impl SqliteSessionStore {
     }
 
     /// Projects retained branch checkpoints and liveness through one read-only snapshot.
-    /// No boot, lease, runtime actor, recovery or write is opened.
+    /// No boot, lease, runtime actor, recovery or write is opened. Only heads
+    /// that `decode` selects, from their liveness alone, load their checkpoint;
+    /// the others are projected with no payload.
     ///
     /// # Errors
     /// Returns schema, shape or read failures. An absent store is empty.
     pub fn inspect_binding_checkpoints<T>(
         path: impl AsRef<Path>,
+        mut decode: impl FnMut(SessionRef, CheckpointId, bool, bool) -> bool,
         mut project: impl FnMut(BindingCheckpointInspection) -> T,
     ) -> Result<Vec<T>, SessionStoreError> {
         let Some(connection) = Self::open_inspection(path.as_ref())? else {
@@ -107,7 +110,8 @@ impl SqliteSessionStore {
                     session.parse().map_err(|_| SessionStoreError::corrupt())?,
                     branch.parse().map_err(|_| SessionStoreError::corrupt())?,
                 );
-                let stored = Some(load_checkpoint(&snapshot, id));
+                let stored =
+                    decode(session, id, archived, head).then(|| load_checkpoint(&snapshot, id));
                 Ok(project(BindingCheckpointInspection {
                     session,
                     checkpoint: id,

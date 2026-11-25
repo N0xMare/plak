@@ -666,9 +666,11 @@ async fn binding_inspection_checks_payloads_when_projecting_retained_heads()
     let db = Database::new();
     seed_shared_corpus(&db, RuntimeDurability::Required).await?;
     let verdicts = || {
-        SqliteSessionStore::inspect_binding_checkpoints(&db.path, |head| {
-            head.stored.map(|stored| stored.is_ok())
-        })
+        SqliteSessionStore::inspect_binding_checkpoints(
+            &db.path,
+            |_, _, _, _| true,
+            |head| head.stored.map(|stored| stored.is_ok()),
+        )
     };
     let healthy = verdicts()?;
     assert_eq!(healthy.first(), Some(&Some(true)));
@@ -686,6 +688,13 @@ async fn binding_inspection_checks_payloads_when_projecting_retained_heads()
     // The index, edges, payload count and lengths still agree. Projection
     // must still validate each graph's bytes before returning a verdict.
     assert_eq!(verdicts()?, vec![Some(false); healthy.len()]);
+    // An unselected head is listed without loading its corrupt graph.
+    let skipped = SqliteSessionStore::inspect_binding_checkpoints(
+        &db.path,
+        |_, _, _, _| false,
+        |head| head.stored.is_none(),
+    )?;
+    assert_eq!(skipped, vec![true; healthy.len()]);
     Ok(())
 }
 

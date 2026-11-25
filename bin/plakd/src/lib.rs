@@ -423,9 +423,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         } => services.with_store_probe(path)?,
         _ => services,
     };
-    if let Command::SessionCheckBinding { summary, .. } = &command {
+    if let Command::SessionCheckBinding { scope, summary, .. } = &command {
         return commands::session::check_binding::run(
             services.paths()?,
+            *scope,
             *summary,
             &mut io::stdout().lock(),
         );

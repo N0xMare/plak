@@ -18,18 +18,36 @@ use crate::carry::upgrade::timing::BINDINGS as INSPECTION_TIME;
 #[cfg(test)]
 mod tests;
 
+/// Every upgrade probe asks for the gating scope (spec 02 §4.5). An image
+/// that predates it answers with a usage refusal, and gets the full audit
+/// within the same bound.
 fn probe(
     image: &Path,
     paths: &PlakPaths,
     key: &str,
     scratch: Option<&Path>,
 ) -> CliResult<std::process::Output> {
-    let mut command = super::process::command(image, paths.home(), key);
-    command.args(["session", "check-binding", "--all"]);
-    if let Some(scratch) = scratch {
-        command.arg("--store-probe").arg(scratch);
+    let deadline = std::time::Instant::now() + INSPECTION_TIME;
+    let run = |scope: &str| {
+        let mut command = super::process::command(image, paths.home(), key);
+        command.args(["session", "check-binding", scope]);
+        if let Some(scratch) = scratch {
+            command.arg("--store-probe").arg(scratch);
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        super::process::run_output(command, remaining, OUTPUT_BYTES)
+    };
+    let output = run("--gating")?;
+    if predates_gating(&output) {
+        return run("--all");
     }
-    super::process::run_output(command, INSPECTION_TIME, OUTPUT_BYTES)
+    Ok(output)
+}
+
+fn predates_gating(output: &std::process::Output) -> bool {
+    output.status.code() == Some(2)
+        && output.stdout.is_empty()
+        && String::from_utf8_lossy(&output.stderr).contains("unknown option or unexpected argument")
 }
 
 #[derive(Deserialize, Serialize)]

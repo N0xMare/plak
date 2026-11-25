@@ -5853,16 +5853,29 @@ does not inherit another connection's pending answers.
   not allowed, bounded and printable), at most 60 refusal lines a minute
   with a count of the rest; never a cookie, the key, or a frame.
 
-The hidden `plakd session check-binding --all` command inspects retained runtime
-branch heads, including children, through one read-only SQLite snapshot for
-listing and loading. It opens no runtime, runner, credential source or
+The hidden `plakd session check-binding --all|--gating` command inspects
+retained runtime branch heads, including children, through one read-only
+SQLite snapshot for listing and loading. It opens no runtime, runner, credential source or
 diagnostics writer and acquires no custody or runtime lease. Product archival
 and succession metadata and tree node locators are read separately without
-reopening a tree. Every retained head is decoded and its actual verdict reported.
+reopening a tree. With `--all`, the full audit, every retained head is
+decoded and its actual verdict reported.
 Rows for children carry `child: true`; closed children also carry `closed: true`.
 Bindings of a decoded child are reported under `child_binding` and qualified
 by §4.6. Failures decoding a full child checkpoint remain in the general
 audit differential. Archived, superseded and closed rows do not gate upgrade.
+`--gating` is the upgrade scope. From listing and disposition metadata alone,
+before any checkpoint is loaded, it selects the gating rows: retained heads
+whose runtime session and product row are not archived, that are the current
+head of their agent line and not superseded in the product, and that are not
+closed children. A node of an archived root's tree counts as archived. It
+decodes only those heads, with the same decoder, and reports only those rows.
+They are exactly the rows `--all` marks neither archived, superseded nor
+closed, with the same verdicts, and `compatible` is the same in both scopes.
+Every same-key upgrade probe uses `--gating`: the requester's source
+baseline, the source's own and destination inspections during qualification,
+and the destination's health gate. An image that refuses the option as an
+unknown argument gets `--all` within the same bound.
 Inspection checks checkpoint/plan and presentation integrity, current
 release-owned executor bindings (including both
 fetch image-result variants and optional web/image packs), and native selected

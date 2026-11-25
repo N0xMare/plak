@@ -15,7 +15,7 @@ use plakous::subscriptions::NativeLoginMode;
 #[cfg(all(test, feature = "maintainer"))]
 use plakous::subscriptions::NativeProvider;
 
-use crate::command::{Command, NATIVE_RUN_MAX_PROMPT_BYTES, RunEffort};
+use crate::command::{BindingScope, Command, NATIVE_RUN_MAX_PROMPT_BYTES, RunEffort};
 use plakous_hosted::account::{AccountRef, Vertical};
 
 /// Parse argv tokens (without binary name) into a product [`Command`].
@@ -1056,9 +1056,11 @@ enum SessionAction {
     CheckBinding {
         #[arg(long)]
         all: bool,
+        #[arg(long, hide = true, conflicts_with = "all")]
+        gating: bool,
         #[arg(long, hide = true, requires = "all")]
         summary: bool,
-        #[arg(long, hide = true, requires = "all")]
+        #[arg(long, hide = true)]
         store_probe: Option<std::path::PathBuf>,
     },
     /// List sessions for the current workspace.
@@ -1171,14 +1173,20 @@ impl SessionAction {
         match self {
             Self::List { include_archived } => Ok(Command::SessionList { include_archived }),
             Self::CheckBinding {
-                all: true,
+                all,
+                gating,
                 summary,
                 store_probe,
-            } => Ok(Command::SessionCheckBinding {
+            } if all || gating => Ok(Command::SessionCheckBinding {
+                scope: if gating {
+                    BindingScope::Gating
+                } else {
+                    BindingScope::All
+                },
                 summary,
                 store_probe,
             }),
-            Self::CheckBinding { all: false, .. } => Ok(Command::CommandHelp {
+            Self::CheckBinding { .. } => Ok(Command::CommandHelp {
                 command: "session".to_owned(),
             }),
             Self::Rename {

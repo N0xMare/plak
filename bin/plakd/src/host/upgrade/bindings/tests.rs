@@ -138,3 +138,166 @@ fn a_new_full_decode_failure_in_a_child_still_refuses() {
     };
     assert!(finish(Some(&source), &destination).is_err());
 }
+
+mod gating {
+    use super::*;
+    use crate::command::BindingScope;
+    use crate::commands::session::check_binding::inspect_with_dispositions;
+    use std::collections::{BTreeSet, HashMap};
+    use std::os::unix::fs::PermissionsExt as _;
+
+    fn seeded(directory: &Path) -> PathBuf {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/hosting/hosted/tests/fixtures/current-bindings/runtime.sqlite3");
+        let runtime = directory.join("runtime.sqlite3");
+        std::fs::copy(fixture, &runtime).unwrap();
+        std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o600)).unwrap();
+        runtime
+    }
+
+    fn heads(runtime: &Path) -> Vec<(String, String)> {
+        let report =
+            inspect_with_dispositions(runtime, HashMap::new(), HashMap::new(), BindingScope::All)
+                .unwrap();
+        let mut heads: Vec<_> = report
+            .sessions
+            .iter()
+            .map(|row| (location(row), row.checkpoint.clone()))
+            .collect();
+        heads.sort();
+        heads
+    }
+
+    /// The `<session>/<branch>` key product and tree dispositions use.
+    fn location(row: &Row) -> String {
+        format!("{}/{}", row.session, row.branch)
+    }
+
+    fn corrupt(runtime: &Path, checkpoint: &str) {
+        let connection = rusqlite::Connection::open(runtime).unwrap();
+        let changed = connection
+            .execute(
+                "UPDATE runtime_object_bytes SET bytes=x'00' WHERE id IN (
+                    SELECT o.id FROM runtime_objects o JOIN checkpoints c
+                    ON (o.kind,o.codec,o.digest)=(c.root_kind,c.root_codec,c.root_digest)
+                    WHERE c.checkpoint_id=?1
+                )",
+                [checkpoint],
+            )
+            .unwrap();
+        assert_eq!(changed, 1);
+    }
+
+    fn keys(rows: &[&Row]) -> BTreeSet<String> {
+        rows.iter().map(|row| binding_key(row)).collect()
+    }
+
+    fn json(rows: impl IntoIterator<Item = impl Serialize>) -> Vec<serde_json::Value> {
+        rows.into_iter()
+            .map(|row| serde_json::to_value(row).unwrap())
+            .collect()
+    }
+
+    /// Archived, superseded and closed rows regress too, but neither scope
+    /// lets them gate. The gating scope decodes only the rows that can.
+    #[test]
+    fn the_gating_scan_gives_the_full_scan_verdicts() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = seeded(directory.path());
+        let heads = heads(&runtime);
+        assert!(heads.len() >= 10, "{heads:?}");
+        let [
+            product_archived,
+            product_superseded,
+            runtime_archived,
+            closed_child,
+            archived_tree_child,
+            live_child,
+            live_root,
+            ..,
+        ] = heads.as_slice()
+        else {
+            unreachable!();
+        };
+        let mut rows = HashMap::new();
+        rows.insert(product_archived.0.clone(), (true, false));
+        rows.insert(product_superseded.0.clone(), (false, true));
+        rows.insert(archived_tree_child.0.clone(), (true, false));
+        let mut children = HashMap::new();
+        children.insert(closed_child.0.clone(), true);
+        children.insert(archived_tree_child.0.clone(), false);
+        children.insert(live_child.0.clone(), false);
+        let (session, _) = runtime_archived.0.split_once('/').unwrap();
+        let connection = rusqlite::Connection::open(&runtime).unwrap();
+        connection
+            .execute(
+                "UPDATE sessions SET archived=1 WHERE session_id=?1",
+                [session],
+            )
+            .unwrap();
+        drop(connection);
+        let report = |scope| {
+            inspect_with_dispositions(&runtime, rows.clone(), children.clone(), scope).unwrap()
+        };
+        let (full_source, gating_source) =
+            (report(BindingScope::All), report(BindingScope::Gating));
+        for (_, checkpoint) in [
+            product_archived,
+            product_superseded,
+            runtime_archived,
+            closed_child,
+            archived_tree_child,
+            live_child,
+            live_root,
+        ] {
+            corrupt(&runtime, checkpoint);
+        }
+        let (full, gating) = (report(BindingScope::All), report(BindingScope::Gating));
+
+        assert_eq!(full.sessions.len(), heads.len());
+        assert_eq!(gating.sessions.len(), heads.len() - 5);
+        // The non-gating rows really did regress in the full audit.
+        for (key, _) in [
+            product_archived,
+            product_superseded,
+            runtime_archived,
+            closed_child,
+            archived_tree_child,
+        ] {
+            let row = full
+                .sessions
+                .iter()
+                .find(|row| location(row) == *key)
+                .unwrap();
+            assert!(!comparable(row) && row.audit_failed(), "{key}");
+        }
+        assert_eq!(
+            json(gating.sessions.iter()),
+            json(full.sessions.iter().filter(|row| comparable(row)))
+        );
+        assert_eq!(
+            (full_source.compatible, full.compatible),
+            (gating_source.compatible, gating.compatible)
+        );
+        assert!(full_source.compatible && !full.compatible);
+        let expected: BTreeSet<_> = full
+            .sessions
+            .iter()
+            .filter(|row| [&live_child.0, &live_root.0].contains(&&location(row)))
+            .map(binding_key)
+            .collect();
+        assert_eq!(expected.len(), 2);
+        for baseline in [Some(&full_source), None] {
+            let full_baseline = Baseline::from_report(baseline);
+            let gating_baseline = Baseline::from_report(baseline.map(|_| &gating_source));
+            assert_eq!(full_baseline.0, gating_baseline.0);
+            let refused = keys(&regressions(&full_baseline, &full));
+            assert_eq!(refused, keys(&regressions(&gating_baseline, &gating)));
+            if baseline.is_some() {
+                assert_eq!(refused, expected);
+            }
+        }
+        assert!(finish(Some(&full_source), &full).is_err());
+        assert!(finish(Some(&gating_source), &gating).is_err());
+    }
+}

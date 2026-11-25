@@ -107,23 +107,42 @@ pub struct BindingHeadInspection {
 pub fn inspect_binding_presentations_sqlite(
     path: impl AsRef<Path>,
 ) -> Result<Vec<BindingHeadInspection>, AgentSessionsError> {
-    SqliteSessionStore::inspect_binding_checkpoints(path, |head| {
-        let locator = SessionLocator::new(
-            head.session.session_id(),
-            head.session.branch_id(),
-            head.checkpoint,
-        );
-        BindingHeadInspection {
-            locator,
-            archived: head.archived,
-            line_head: head.line_head,
-            presentation: head.stored.map(|stored| {
-                stored.map_err(store_error).and_then(|stored| {
-                    super::FrozenSessionPresentation::from_checkpoint(stored.checkpoint())
-                })
-            }),
-        }
-    })
+    inspect_selected_binding_presentations_sqlite(path, |_, _, _| true)
+}
+
+/// Inspects all retained binding heads in one SQLite read snapshot, decoding
+/// only the heads `decode` selects from their locator, runtime archival and
+/// line-head status. An unselected head has no presentation.
+///
+/// # Errors
+/// Returns database admission, integrity or read failures.
+#[doc(hidden)]
+pub fn inspect_selected_binding_presentations_sqlite(
+    path: impl AsRef<Path>,
+    mut decode: impl FnMut(SessionLocator, bool, bool) -> bool,
+) -> Result<Vec<BindingHeadInspection>, AgentSessionsError> {
+    let locator = |session: plakous_agent::internal::SessionRef, checkpoint| {
+        SessionLocator::new(session.session_id(), session.branch_id(), checkpoint)
+    };
+    SqliteSessionStore::inspect_binding_checkpoints(
+        path,
+        |session, checkpoint, archived, line_head| {
+            decode(locator(session, checkpoint), archived, line_head)
+        },
+        |head| {
+            let locator = locator(head.session, head.checkpoint);
+            BindingHeadInspection {
+                locator,
+                archived: head.archived,
+                line_head: head.line_head,
+                presentation: head.stored.map(|stored| {
+                    stored.map_err(store_error).and_then(|stored| {
+                        super::FrozenSessionPresentation::from_checkpoint(stored.checkpoint())
+                    })
+                }),
+            }
+        },
+    )
     .map_err(store_error)
 }
 

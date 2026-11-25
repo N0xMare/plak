@@ -159,6 +159,15 @@ pub(crate) enum GatewayCommand {
     Check,
 }
 
+/// Which retained heads `session check-binding` decodes (spec 02 §4.5).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BindingScope {
+    /// Every retained head: the full audit.
+    All,
+    /// Only heads that can gate a same-key upgrade.
+    Gating,
+}
+
 pub(crate) const NATIVE_RUN_MAX_PROMPT_BYTES: usize = 64 * 1024;
 #[derive(Clone, Debug, PartialEq)]
 #[allow(
@@ -248,6 +257,7 @@ pub(crate) enum Command {
         include_archived: bool,
     },
     SessionCheckBinding {
+        scope: BindingScope,
         summary: bool,
         store_probe: Option<PathBuf>,
     },

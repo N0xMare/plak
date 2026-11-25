@@ -1,9 +1,12 @@
 //! Read-only binding inspection beside a running owner.
 
+use crate::command::BindingScope;
 use crate::home::paths::PlakPaths;
+use plakous::sessions::SessionLocator;
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
+use std::path::Path;
 
 mod dispositions;
 
@@ -50,23 +53,72 @@ impl Row {
 
 /// No `Services` or config resolution: neither inspection path opens a writer,
 /// a runtime, a runner, credential sources or diagnostics.
-pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
+pub(crate) fn inspect(paths: &PlakPaths, scope: BindingScope) -> CliResult<Report> {
     let disposition = dispositions::inspect(paths)?;
-    let sources = plakous::sessions::rehearsal::inspect_binding_presentations_sqlite(
-        paths.runtime_database(),
+    inspect_runtime(&paths.runtime_database(), &disposition, scope)
+}
+
+/// A head's archival, succession and child state, known before decoding.
+struct Status {
+    archived: bool,
+    superseded: bool,
+    child: bool,
+    closed: bool,
+}
+
+impl Status {
+    fn of(
+        disposition: &dispositions::Dispositions,
+        locator: SessionLocator,
+        archived: bool,
+        line_head: bool,
+    ) -> Self {
+        let key = dispositions::key(locator);
+        let (product_archived, superseded) =
+            disposition.rows.get(&key).copied().unwrap_or_default();
+        let child_status = disposition.children_closed.get(&key).copied();
+        Self {
+            archived: product_archived || archived,
+            superseded: superseded || !line_head,
+            child: child_status.is_some(),
+            closed: child_status == Some(true),
+        }
+    }
+
+    /// Only these rows can refuse a same-key upgrade.
+    const fn gates(&self) -> bool {
+        !self.archived && !self.superseded && !self.closed
+    }
+}
+
+fn inspect_runtime(
+    runtime: &Path,
+    disposition: &dispositions::Dispositions,
+    scope: BindingScope,
+) -> CliResult<Report> {
+    let selected = |status: &Status| scope == BindingScope::All || status.gates();
+    let sources = plakous::sessions::rehearsal::inspect_selected_binding_presentations_sqlite(
+        runtime,
+        |locator, archived, line_head| {
+            selected(&Status::of(disposition, locator, archived, line_head))
+        },
     )
     .map_err(CliFailure::from)?;
     let mut compatible = true;
     let mut rows = Vec::with_capacity(sources.len());
     for head in sources {
         let locator = head.locator;
-        let key = dispositions::key(locator);
-        let (archived, superseded) = disposition.rows.get(&key).copied().unwrap_or_default();
-        let archived = archived || head.archived;
-        let superseded = superseded || !head.line_head;
-        let child_status = disposition.children_closed.get(&key).copied();
-        let child = child_status.is_some();
-        let closed = child_status == Some(true);
+        let status = Status::of(disposition, locator, head.archived, head.line_head);
+        if !selected(&status) {
+            continue;
+        }
+        let gates = status.gates();
+        let Status {
+            archived,
+            superseded,
+            child,
+            closed,
+        } = status;
         let unaffected = head
             .presentation
             .as_ref()
@@ -111,7 +163,7 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
             child_binding,
             unaffected,
         };
-        if !archived && !superseded && !closed {
+        if gates {
             compatible &= !row.audit_failed();
         }
         rows.push(row);
@@ -120,6 +172,22 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
         compatible,
         sessions: rows,
     })
+}
+
+/// Inspects a runtime store under given product and tree dispositions, keyed
+/// `<session>/<branch>`.
+#[cfg(test)]
+pub(crate) fn inspect_with_dispositions(
+    runtime: &Path,
+    rows: std::collections::HashMap<String, (bool, bool)>,
+    children_closed: std::collections::HashMap<String, bool>,
+    scope: BindingScope,
+) -> CliResult<Report> {
+    let disposition = dispositions::Dispositions {
+        rows,
+        children_closed,
+    };
+    inspect_runtime(runtime, &disposition, scope)
 }
 
 fn qualified_change(
@@ -137,6 +205,7 @@ fn qualified_change(
 
 pub(crate) fn run(
     paths: &PlakPaths,
+    scope: BindingScope,
     summary: bool,
     output: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
@@ -145,7 +214,7 @@ pub(crate) fn run(
         compatible: bool,
         count: usize,
     }
-    let report = inspect(paths)?;
+    let report = inspect(paths, scope)?;
     if !summary {
         return write_report(report, output);
     }
