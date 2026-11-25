@@ -735,7 +735,7 @@ fn production(f: &Fleet, green: &Value) {
         "apply",
         "production",
         "needs_reconcile",
-        "host upgrade outcome",
+        "host_upgrade_outcome_unknown:",
     );
     let mut expired = green.clone();
     expired["completed_at"] = json!(1);
@@ -1046,7 +1046,7 @@ fn deploy_paired_runner_restores_exact_link_on_pre_surrender_refusal() {
 fn deploy_requester_loss_does_not_repeat_surrender() {
     let f = Fleet::new();
     f.change(|d| d["lose_reply"] = json!("upgrade"));
-    let report = f.staging("apply", "needs_reconcile", "use deploy status");
+    let report = f.staging("apply", "needs_reconcile", "host_upgrade_outcome_unknown:");
     assert_eq!(report["step"], "host_upgrade");
     assert!(report["retry"].as_str().unwrap().contains("deploy status"));
     assert!(!f.path("receipt.json").exists());
@@ -1369,13 +1369,13 @@ fn paired_host_loss() {
                 assert_eq!(read(&f.path("fleet.json"))["runner"], "source");
             }
             "upgrade" => {
-                f.staging("apply", "needs_reconcile", "host upgrade outcome");
+                f.staging("apply", "needs_reconcile", "host_upgrade_outcome_unknown:");
                 f.staging("apply", "green", "");
                 assert_eq!(read(&f.path("fleet.json"))["runner"], "current");
                 assert!(!f.events().iter().any(|event| event == "runner_restore"));
             }
             _ => {
-                f.staging("apply", "needs_reconcile", "host upgrade outcome");
+                f.staging("apply", "needs_reconcile", "host_upgrade_outcome_unknown:");
                 f.staging("status", "needs_reconcile", "unresolved");
                 assert_eq!(read(&f.path("fleet.json"))["runner"], "current");
                 assert!(
