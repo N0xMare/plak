@@ -242,7 +242,7 @@ fn table_count(path: &Path, table: &str) -> String {
     )
 }
 
-fn make_pre_bootstrap(path: &Path, epoch: u32) {
+pub(super) fn make_pre_bootstrap(path: &Path, epoch: u32) {
     let ddl = query(
         path,
         "SELECT sql FROM sqlite_schema WHERE name='runtime_objects'",

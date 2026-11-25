@@ -4,7 +4,9 @@ use super::{
     admit_inspection_snapshot, branch_row_with_checkpoint, bundle_error, id, load_checkpoint,
     load_object, map_sqlite,
 };
-use plakous_agent::internal::{RuntimeCheckpointBinding, RuntimeCheckpointCodec};
+use plakous_agent::internal::{
+    DurableSessionAddress, RuntimeCheckpointBinding, RuntimeCheckpointCodec,
+};
 use rusqlite::OptionalExtension as _;
 use std::path::Path;
 
@@ -17,7 +19,10 @@ impl SqliteSessionStore {
     pub fn inspect_live_bindings(
         path: &Path,
         selectors: impl IntoIterator<Item = SessionRef>,
-        mut visit: impl FnMut(Result<RuntimeCheckpointBinding, SessionStoreError>),
+        mut visit: impl FnMut(
+            Option<DurableSessionAddress>,
+            Result<RuntimeCheckpointBinding, SessionStoreError>,
+        ),
     ) -> Result<(), SessionStoreError> {
         let connection = Self::open_inspection(path)?.ok_or(SessionStoreError::NotFound)?;
         let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
@@ -34,7 +39,8 @@ impl SqliteSessionStore {
             {
                 continue;
             }
-            visit((|| {
+            let mut address = None;
+            let binding = (|| {
                 let (branch, row) = branch_row_with_checkpoint(&snapshot, selector)?
                     .ok_or(SessionStoreError::NotFound)?;
                 let (line, generation) = super::lines::branch_line(&snapshot, selector)?
@@ -44,6 +50,11 @@ impl SqliteSessionStore {
                     return Err(SessionStoreError::corrupt());
                 }
                 let reference = row.reference;
+                address = Some(DurableSessionAddress::new(
+                    selector.session_id(),
+                    selector.branch_id(),
+                    reference.checkpoint_id(),
+                ));
                 RuntimeCheckpointCodec::inspect_binding(
                     reference.checkpoint_id(),
                     reference.integrity(),
@@ -53,7 +64,8 @@ impl SqliteSessionStore {
                     },
                     bundle_error,
                 )
-            })());
+            })();
+            visit(address, binding);
         }
         Ok(())
     }

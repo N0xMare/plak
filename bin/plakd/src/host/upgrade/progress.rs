@@ -43,6 +43,7 @@ impl Timing {
 pub(super) enum Event<'a> {
     Waiting(&'a str),
     Qualification(Timing),
+    ChildFaults(&'a crate::carry::child_reopen::PreExistingChildFaults),
 }
 
 pub(super) type Report<'a> = dyn Fn(Event<'_>) -> CliResult<()> + Sync + 'a;

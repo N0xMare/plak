@@ -1843,12 +1843,10 @@ async fn fenced_direct_child_session_admits_its_projection_at_construction()
         plakous::sessions::rehearsal::inspect_child_bindings_sqlite(
             &database,
             &[recorded],
-            |frozen| {
-                verdicts.push(
-                    frozen
-                        .map_err(crate::CliFailure::from)
-                        .and_then(|frozen| check_frozen_child_binding(&frozen)),
-                );
+            |_, frozen| {
+                verdicts.push(check_frozen_child_binding(
+                    &frozen.expect("saved child binding must decode"),
+                ));
             },
         )?;
         assert_eq!(

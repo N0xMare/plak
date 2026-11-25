@@ -117,7 +117,7 @@ pub(super) fn rehearse_runtime(paths: &PlakPaths) -> CliResult<()> {
     Ok(())
 }
 
-fn rehearse(paths: &PlakPaths, scratch: &Path) -> CliResult<()> {
+pub(super) fn rehearse(paths: &PlakPaths, scratch: &Path) -> CliResult<()> {
     if !revisions_pending(paths)? {
         return Ok(());
     }

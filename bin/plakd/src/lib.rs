@@ -658,11 +658,23 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         Command::ReopenProbe {
             session,
             host_upgrade_reopen,
+            child_binding_probe,
             ..
         } => {
-            let verdict = carry::reopen_probe(&services, &session, host_upgrade_reopen);
-            serde_json::to_writer(&mut stdout, &verdict)
-                .map_err(|_| CliFailure::new("stdout failed"))?;
+            if child_binding_probe {
+                serde_json::to_writer(
+                    &mut stdout,
+                    &carry::child_reopen_probe(&services, &session)?,
+                )
+            } else if host_upgrade_reopen {
+                serde_json::to_writer(
+                    &mut stdout,
+                    &carry::upgrade_reopen_probe(&services, &session),
+                )
+            } else {
+                serde_json::to_writer(&mut stdout, &carry::reopen_probe(&services, &session))
+            }
+            .map_err(|_| CliFailure::new("stdout failed"))?;
             writeln!(stdout).map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }

@@ -13,7 +13,7 @@ mod gate;
 mod lifecycle;
 mod paired;
 pub(super) mod preservation;
-mod reopen;
+pub(super) mod reopen;
 mod retained_jobs;
 mod revisions;
 mod runtime_epoch;

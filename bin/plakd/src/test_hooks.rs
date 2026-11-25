@@ -128,7 +128,9 @@ pub(crate) fn binding_executor_cut() -> bool {
 }
 
 pub(crate) fn child_binding_cut() -> bool {
-    std::env::var_os("PLAK_TEST_CHILD_BINDING_CUT_IMAGE").is_some_and(|image| running_image(&image))
+    std::env::var_os("PLAK_TEST_CHILD_BINDING_CUT_IMAGE").is_some_and(|images| {
+        std::env::split_paths(&images).any(|image| running_image(image.as_os_str()))
+    })
 }
 
 /// Whether `image` names this executable. Both sides are canonical: a

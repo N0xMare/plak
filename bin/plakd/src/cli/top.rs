@@ -533,11 +533,13 @@ impl TopCommand {
             Self::Version {
                 reopen_probe: Some(session),
                 host_upgrade_reopen,
+                child_binding_probe,
                 store_probe,
                 ..
             } => Ok(Command::ReopenProbe {
                 session,
                 host_upgrade_reopen,
+                child_binding_probe,
                 store_probe,
             }),
             Self::Version {

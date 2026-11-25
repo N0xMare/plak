@@ -2,10 +2,11 @@
 
 use super::document::IMPORTABLE_VERSIONS;
 use crate::home::paths::PlakPaths;
+use plakous_hosted::sessions::SessionRecord;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-mod child_reopen;
+pub(crate) mod child_reopen;
 pub(crate) use child_reopen::ChildReopenRefusal;
 
 /// The installed `plakd` a reload would start, and the state key it answered;
@@ -110,45 +111,129 @@ const PROBE_TOKEN_MARGIN: std::time::Duration = std::time::Duration::from_secs(6
 /// Runs in the destination build with the real home: reads the session and
 /// its projected head without writing, resolves the binding as an attach
 /// does, and verifies the exact open without taking its lease.
-pub(crate) fn reopen_probe(
-    services: &crate::shell::services::Services,
-    id: &str,
-    host_upgrade: bool,
-) -> ReopenProbe {
+pub(crate) fn reopen_probe(services: &crate::shell::services::Services, id: &str) -> ReopenProbe {
     let verdict = || -> Result<ReopenProbe, String> {
-        let paths = services
-            .paths()
-            .map_err(|error| error.message().to_owned())?;
-        crate::store::revisions::refuse_incompatible(paths)?;
-        let record = crate::store::ProductStore::inspect_session_read_only(paths, id)
-            .map_err(|error| error.to_string())?;
-        if host_upgrade {
-            crate::test_hooks::gate_upgrade_reopen(&record.id)?;
-        }
+        let (paths, record) = probe_session(services, id)?;
         if !record.archived
-            && let Some(children) = child_reopen::inspect(paths, &record.node.tree_id)?
+            && let Some(children) = child_reopen::inspect(paths, &record.node.tree_id)?.strict()
         {
             return Ok(ReopenProbe::Refused {
                 reason: children.to_string(),
                 children: Some(Box::new(children)),
             });
         }
-        let (_, recorded, _, views) =
-            crate::store::ProductStore::inspect_projection_read_only(paths, &record.id)?;
-        let recorded = recorded
-            .or(record.plakous_locator)
-            .ok_or_else(|| "the session has no runtime to reopen".to_owned())?;
-        let head = views.as_ref().map_or(recorded, |views| {
-            plakous_hosted::runtime::projected_head(recorded, views)
-        });
-        let verify = if host_upgrade {
-            crate::commands::session::verify_host_upgrade_reopen
-        } else {
-            crate::commands::session::verify_exact_reopen
-        };
-        verify(services, record, head).map_err(|error| error.message().to_owned())
+        probe_root(services, paths, record, false)
     };
     verdict().unwrap_or_else(ReopenProbe::refused)
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct UpgradeReopenProbe {
+    // Older coordinators read just the flat verdict, which applies fallback
+    // classification. A comparing coordinator reads the independent root.
+    #[serde(flatten)]
+    pub(crate) verdict: ReopenProbe,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) root: Option<ReopenProbe>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) child_inspection: Option<child_reopen::ChildReopenInspection>,
+    #[serde(skip_serializing_if = "Option::is_none", skip_deserializing)]
+    child_qualification: Option<child_reopen::ChildReopenQualification>,
+}
+
+pub(crate) fn upgrade_reopen_probe(
+    services: &crate::shell::services::Services,
+    id: &str,
+) -> UpgradeReopenProbe {
+    let probe = || -> Result<UpgradeReopenProbe, String> {
+        let (paths, record) = probe_session(services, id)?;
+        crate::test_hooks::gate_upgrade_reopen(&record.id)?;
+        let children = inspect_children(paths, &record)?;
+        let mut qualification = children.qualify(None);
+        let root = probe_root(services, paths, record, true).unwrap_or_else(ReopenProbe::refused);
+        let (verdict, root) = match std::mem::take(&mut qualification.regressions).into_report() {
+            Some(regressions) => {
+                let reason = regressions.to_string();
+                qualification.regressions = regressions.clone();
+                (
+                    ReopenProbe::Refused {
+                        reason,
+                        children: Some(Box::new(regressions)),
+                    },
+                    Some(root),
+                )
+            }
+            None => (root, None),
+        };
+        let child_inspection = children.into_faults();
+        let child_qualification = child_inspection.is_some().then_some(qualification);
+        Ok(UpgradeReopenProbe {
+            verdict,
+            root,
+            child_inspection,
+            child_qualification,
+        })
+    };
+    probe().unwrap_or_else(|reason| UpgradeReopenProbe {
+        verdict: ReopenProbe::refused(reason),
+        root: None,
+        child_inspection: None,
+        child_qualification: None,
+    })
+}
+
+pub(crate) fn child_reopen_probe(
+    services: &crate::shell::services::Services,
+    id: &str,
+) -> crate::CliResult<child_reopen::ChildReopenInspection> {
+    let (paths, record) = probe_session(services, id).map_err(crate::CliFailure::new)?;
+    inspect_children(paths, &record).map_err(crate::CliFailure::new)
+}
+
+fn inspect_children(
+    paths: &PlakPaths,
+    record: &SessionRecord,
+) -> Result<child_reopen::ChildReopenInspection, String> {
+    if record.archived {
+        Ok(child_reopen::ChildReopenInspection::default())
+    } else {
+        child_reopen::inspect(paths, &record.node.tree_id)
+    }
+}
+
+fn probe_session<'a>(
+    services: &'a crate::shell::services::Services,
+    id: &str,
+) -> Result<(&'a PlakPaths, SessionRecord), String> {
+    let paths = services
+        .paths()
+        .map_err(|error| error.message().to_owned())?;
+    crate::store::revisions::refuse_incompatible(paths)?;
+    let record = crate::store::ProductStore::inspect_session_read_only(paths, id)
+        .map_err(|error| error.to_string())?;
+    Ok((paths, record))
+}
+
+fn probe_root(
+    services: &crate::shell::services::Services,
+    paths: &PlakPaths,
+    record: SessionRecord,
+    host_upgrade: bool,
+) -> Result<ReopenProbe, String> {
+    let (_, recorded, _, views) =
+        crate::store::ProductStore::inspect_projection_read_only(paths, &record.id)?;
+    let recorded = recorded
+        .or(record.plakous_locator)
+        .ok_or_else(|| "the session has no runtime to reopen".to_owned())?;
+    let head = views.as_ref().map_or(recorded, |views| {
+        plakous_hosted::runtime::projected_head(recorded, views)
+    });
+    let verify = if host_upgrade {
+        crate::commands::session::verify_host_upgrade_reopen
+    } else {
+        crate::commands::session::verify_exact_reopen
+    };
+    verify(services, record, head).map_err(|error| error.message().to_owned())
 }
 
 impl From<plakous_hosted::runtime::ReopenVerdict> for ReopenProbe {

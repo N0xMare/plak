@@ -55,21 +55,48 @@ pub mod exchange_observation {
 #[cfg(feature = "composition")]
 mod local_composition;
 
+/// An environmental fault at a recorded evaluator artifact.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EvaluatorArtifactFault {
+    /// The recorded evaluator file does not exist.
+    Missing,
+    /// The recorded evaluator file no longer has its saved content digest.
+    BytesMismatch,
+    /// The recorded file cannot be read at its canonical path.
+    Unavailable,
+}
+
 #[cfg(all(feature = "sessions-sqlite", feature = "composition"))]
 fn verify_saved_evaluator(
     stored: &plakous_agent::internal::facade_support::StoredCompositionArtifact,
-) -> Result<(), plakous_agent::AgentError> {
-    local_composition::restore_stored_artifact(stored).map(drop)
+) -> Result<(), sessions::rehearsal::ChildBindingInspectionError> {
+    use local_composition::StoredArtifactError;
+    use sessions::rehearsal::ChildBindingInspectionError;
+    local_composition::inspect_stored_artifact(stored)
+        .map(drop)
+        .map_err(|error| match error {
+            StoredArtifactError::Binding(error) => {
+                ChildBindingInspectionError::evaluator_binding(error.message())
+            }
+            StoredArtifactError::Record(error) => {
+                ChildBindingInspectionError::evaluator_record(error.message())
+            }
+            StoredArtifactError::Environment(fault) => {
+                ChildBindingInspectionError::EvaluatorArtifact(fault)
+            }
+        })
 }
 
 #[cfg(all(feature = "sessions-sqlite", not(feature = "composition")))]
 fn verify_saved_evaluator(
     _stored: &plakous_agent::internal::facade_support::StoredCompositionArtifact,
-) -> Result<(), plakous_agent::AgentError> {
-    Err(plakous_agent::AgentError::new(
-        plakous_agent::AgentErrorKind::IncompatibleSession,
-        "recorded evaluator is unavailable in this build",
-    ))
+) -> Result<(), sessions::rehearsal::ChildBindingInspectionError> {
+    Err(
+        sessions::rehearsal::ChildBindingInspectionError::evaluator_binding(
+            "recorded evaluator is unavailable in this build",
+        ),
+    )
 }
 
 /// The Plakous library version.

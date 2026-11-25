@@ -1,5 +1,7 @@
 //! Pre-pause capability and same-key qualification, and the held-head recheck.
 
+use std::path::Path;
+
 use super::{
     PROBE_BOUND, Refusal, Request, bindings, check_cancel, io_failure, process, progress, reopen,
 };
@@ -34,12 +36,14 @@ pub(super) fn qualify_destination(
         )
         .into());
     }
-    let image = progress::timed(report, progress::Phase::Image, || {
-        process::verify_image(
-            &std::env::current_exe().map_err(io_failure)?,
-            crate::build_identity::binary_id(),
-        )?;
-        process::verify_image(&request.destination, &request.expected_binary)
+    let (source, image) = progress::timed(report, progress::Phase::Image, || {
+        let path = bindings::source_image(std::process::id())?;
+        let verified = process::verify_image(&path, crate::build_identity::binary_id())?;
+        let source = reopen::SourceImage { path, verified };
+        Ok((
+            source,
+            process::verify_image(&request.destination, &request.expected_binary)?,
+        ))
     })?;
     let scratch = Workspace::new(paths)?;
     let (probe, before_rehearsal) = progress::timed(report, progress::Phase::Capability, || {
@@ -62,7 +66,7 @@ pub(super) fn qualify_destination(
         report,
     )?;
     let reopen = progress::timed(report, progress::Phase::ExactReopen, || {
-        reopen::preflight(paths, request, stores, before_rehearsal)
+        reopen::preflight(paths, request, stores, before_rehearsal, source, report)
     })?;
     Ok((probe, image, reopen, bindings))
 }
@@ -73,6 +77,7 @@ pub(super) fn recheck_held(
     arguments: &[String],
     preflight: &reopen::Preflight,
     cancelled: &std::sync::atomic::AtomicBool,
+    report: &progress::Report<'_>,
 ) -> CliResult<()> {
     check_cancel(cancelled)?;
     let paths = services.paths()?;
@@ -96,7 +101,32 @@ pub(super) fn recheck_held(
         })
         .transpose()?;
     let stores = scratch.as_ref().map(Workspace::stores);
-    reopen::verify_held(paths, request, stores.as_deref(), &changed)
+    reopen::verify_held(
+        paths,
+        request,
+        stores.as_deref(),
+        &changed,
+        preflight,
+        report,
+    )
+}
+
+pub(super) fn legacy_child_preflight(
+    paths: &PlakPaths,
+    request_image: &Path,
+    key: &str,
+    deadline: std::time::Instant,
+) -> CliResult<()> {
+    let scratch = Workspace::new(paths)?;
+    let stores = scratch.stores();
+    super::super::store_revisions::rehearse(paths, &stores)?;
+    reopen::legacy_preflight(
+        paths,
+        request_image,
+        key,
+        stores.is_dir().then_some(stores.as_path()),
+        deadline,
+    )
 }
 
 struct Workspace {

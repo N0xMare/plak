@@ -1,10 +1,14 @@
 //! Read-only qualification of the frozen bindings reachable from a tree.
 
 use crate::home::paths::PlakPaths;
-use plakous::{agent::BindingChange, sessions::SessionLocator};
+use plakous::agent::BindingChange;
+use plakous::sessions::{SessionLocator, rehearsal};
 use plakous_recursive_subagents_store::SqliteTreeStore;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 pub(crate) struct ChildReopenRefusal {
@@ -21,11 +25,11 @@ impl ChildReopenRefusal {
     }
 
     pub(crate) fn into_report(self) -> Option<Self> {
-        (self.affected_children != 0).then_some(self)
+        (!self.is_empty()).then_some(self)
     }
 
-    fn note_unavailable(&mut self, message: &str) {
-        self.record(None, Some(message));
+    pub(crate) fn is_empty(&self) -> bool {
+        self.affected_children == 0
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
@@ -52,52 +56,242 @@ impl fmt::Display for ChildReopenRefusal {
     }
 }
 
-pub(super) fn inspect(
-    paths: &PlakPaths,
-    tree_id: &str,
-) -> Result<Option<ChildReopenRefusal>, String> {
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum Fault {
+    Binding { detail: String },
+    Unreadable { detail: String },
+    ArtifactMissing,
+    ArtifactBytesMismatch,
+    ArtifactUnavailable,
+}
+
+impl Fault {
+    fn pre_existing_kind(&self) -> FaultKind {
+        match self {
+            Self::Binding { .. } => FaultKind::BindingChange,
+            Self::Unreadable { .. } => FaultKind::BindingUnreadable,
+            Self::ArtifactMissing => FaultKind::EvaluatorArtifactMissing,
+            Self::ArtifactBytesMismatch => FaultKind::EvaluatorArtifactBytesMismatch,
+            Self::ArtifactUnavailable => FaultKind::EvaluatorArtifactUnavailable,
+        }
+    }
+
+    fn record_refusal(&self, refused: &mut ChildReopenRefusal) {
+        match self {
+            Self::Binding { detail } => refused.record(Some(detail), None),
+            Self::Unreadable { detail } => refused.record(None, Some(detail)),
+            Self::ArtifactMissing => {
+                refused.record(None, Some("recorded evaluator artifact is missing"));
+            }
+            Self::ArtifactBytesMismatch => {
+                refused.record(None, Some("recorded evaluator artifact bytes do not match"));
+            }
+            Self::ArtifactUnavailable => {
+                refused.record(None, Some("recorded evaluator artifact is unavailable"));
+            }
+        }
+    }
+}
+
+// The private probe compares only exact child heads. The operator sees counts
+// and categories, never locators or filesystem paths.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct ChildReopenInspection {
+    opened: BTreeSet<String>,
+    faults: Vec<(Option<String>, Fault)>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FaultKind {
+    BindingChange,
+    BindingUnreadable,
+    EvaluatorArtifactMissing,
+    EvaluatorArtifactBytesMismatch,
+    EvaluatorArtifactUnavailable,
+}
+
+impl FaultKind {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::BindingChange => "binding_change",
+            Self::BindingUnreadable => "binding_unreadable",
+            Self::EvaluatorArtifactMissing => "evaluator_artifact_missing",
+            Self::EvaluatorArtifactBytesMismatch => "evaluator_artifact_bytes_mismatch",
+            Self::EvaluatorArtifactUnavailable => "evaluator_artifact_unavailable",
+        }
+    }
+}
+
+#[derive(Default, Serialize)]
+pub(crate) struct ChildReopenQualification {
+    pub(crate) regressions: ChildReopenRefusal,
+    pub(crate) pre_existing: PreExistingChildFaults,
+    #[serde(skip)]
+    pub(crate) unproven: bool,
+}
+
+#[derive(Default, Serialize)]
+pub(crate) struct PreExistingChildFaults {
+    affected_children: usize,
+    by_kind: BTreeMap<FaultKind, usize>,
+}
+
+impl PreExistingChildFaults {
+    fn record(&mut self, kind: FaultKind) {
+        self.affected_children += 1;
+        *self.by_kind.entry(kind).or_default() += 1;
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.affected_children == 0
+    }
+
+    pub(crate) fn merge(&mut self, other: Self) {
+        self.affected_children += other.affected_children;
+        for (kind, count) in other.by_kind {
+            *self.by_kind.entry(kind).or_default() += count;
+        }
+    }
+}
+
+impl fmt::Display for PreExistingChildFaults {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            out,
+            "host_upgrade_child_reopen_pre_existing: {} affected child session(s)",
+            self.affected_children
+        )?;
+        for (kind, count) in &self.by_kind {
+            write!(out, "; {}={count}", kind.label())?;
+        }
+        Ok(())
+    }
+}
+
+impl ChildReopenInspection {
+    pub(super) fn into_faults(mut self) -> Option<Self> {
+        self.opened.clear();
+        (!self.faults.is_empty()).then_some(self)
+    }
+
+    pub(crate) fn needs_source(&self) -> bool {
+        self.faults.iter().any(|(head, fault)| {
+            head.is_some() && matches!(fault, Fault::Binding { .. } | Fault::Unreadable { .. })
+        })
+    }
+
+    pub(crate) fn qualify(&self, source: Option<&Self>) -> ChildReopenQualification {
+        let mut report = ChildReopenQualification::default();
+        for (head, fault) in &self.faults {
+            let regression = match fault {
+                Fault::Binding { .. } | Fault::Unreadable { .. } => match source {
+                    Some(source) => {
+                        if let Some(head) = head {
+                            if source.opened.contains(head) {
+                                true
+                            } else if source
+                                .faults
+                                .iter()
+                                .any(|(other, _)| other.as_ref() == Some(head))
+                            {
+                                false
+                            } else {
+                                report.unproven = true;
+                                continue;
+                            }
+                        } else {
+                            false
+                        }
+                    }
+                    None => matches!(fault, Fault::Binding { .. }),
+                },
+                _ => false,
+            };
+            if regression {
+                fault.record_refusal(&mut report.regressions);
+            } else {
+                report.pre_existing.record(fault.pre_existing_kind());
+            }
+        }
+        report
+    }
+
+    pub(super) fn strict(&self) -> Option<ChildReopenRefusal> {
+        let mut refused = ChildReopenRefusal::default();
+        for (_, fault) in &self.faults {
+            fault.record_refusal(&mut refused);
+        }
+        refused.into_report()
+    }
+}
+
+pub(crate) fn inspect(paths: &PlakPaths, tree_id: &str) -> Result<ChildReopenInspection, String> {
+    use rehearsal::{ChildBindingInspectionError, EvaluatorArtifactFault};
+
     let nodes = SqliteTreeStore::inspect_reopen_children(&paths.subagents_database(), tree_id)
         .map_err(|error| error.message().to_owned())?;
     let mut locators = Vec::with_capacity(nodes.len());
-    let mut refused = ChildReopenRefusal::default();
+    let mut report = ChildReopenInspection::default();
     for locator in nodes {
         match locator.parse::<SessionLocator>() {
             Ok(locator) => locators.push(locator),
-            Err(_) => refused.note_unavailable("child session locator is invalid"),
+            Err(_) => report.faults.push((
+                None,
+                Fault::Unreadable {
+                    detail: "child session locator is invalid".into(),
+                },
+            )),
         }
     }
     let executor_cut = crate::test_hooks::child_binding_cut();
-    plakous::sessions::rehearsal::inspect_child_bindings_sqlite(
+    rehearsal::inspect_child_bindings_sqlite(
         &paths.runtime_database(),
         &locators,
-        |child| {
-            let change = match child {
+        |head, child| {
+            let fault = match child {
                 Ok(frozen) => match plakous_hosted::agent::check_frozen_child_binding(&frozen) {
-                    Ok(None) if executor_cut => Some("executor binding for child tool".into()),
-                    Ok(change) => change.map(|change| change.to_string()),
-                    Err(error) => {
-                        refused.note_unavailable(error.message());
-                        return;
-                    }
+                    Ok(None) if executor_cut => Some(Fault::Binding {
+                        detail: "executor binding for child tool".into(),
+                    }),
+                    Ok(change) => change.map(|change| Fault::Binding {
+                        detail: bounded(&change.to_string()),
+                    }),
+                    Err(error) => Some(Fault::Unreadable {
+                        detail: bounded(error.message()),
+                    }),
                 },
-                Err(error) => match error.binding_change() {
-                    Some(BindingChange::ExecutionEnvironment) => {
-                        Some(format!("execution environment: {error}"))
-                    }
-                    Some(change) => Some(change.to_string()),
-                    None => {
-                        refused.note_unavailable(&error.to_string());
-                        return;
-                    }
-                },
+                Err(ChildBindingInspectionError::EvaluatorArtifact(fault)) => Some(match fault {
+                    EvaluatorArtifactFault::Missing => Fault::ArtifactMissing,
+                    EvaluatorArtifactFault::BytesMismatch => Fault::ArtifactBytesMismatch,
+                    EvaluatorArtifactFault::Unavailable => Fault::ArtifactUnavailable,
+                }),
+                Err(ChildBindingInspectionError::Binding(error)) => {
+                    Some(match error.binding_change() {
+                        Some(BindingChange::ExecutionEnvironment) => Fault::Binding {
+                            detail: bounded(&format!("execution environment: {error}")),
+                        },
+                        Some(change) => Fault::Binding {
+                            detail: bounded(&change.to_string()),
+                        },
+                        None => Fault::Unreadable {
+                            detail: bounded(&error.to_string()),
+                        },
+                    })
+                }
             };
-            if let Some(change) = change {
-                refused.record(Some(&change), None);
+            if let Some(fault) = fault {
+                report
+                    .faults
+                    .push((head.map(|head| head.to_string()), fault));
+            } else if let Some(head) = head {
+                report.opened.insert(head.to_string());
             }
         },
     )
     .map_err(|error| error.to_string())?;
-    Ok(refused.into_report())
+    Ok(report)
 }
 
 fn bounded(message: &str) -> String {

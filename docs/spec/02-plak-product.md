@@ -5859,9 +5859,11 @@ listing and loading. It opens no runtime, runner, credential source or
 diagnostics writer and acquires no custody or runtime lease. Product archival
 and succession metadata and tree node locators are read separately without
 reopening a tree. Every retained head is decoded and its actual verdict reported.
-Rows for children carry `child: true`; closed children also carry `closed: true`.
-Archived and superseded rows and closed children are reported but do not gate
-upgrade. Inspection checks checkpoint/plan and presentation integrity, current
+Rows for children carry `child: true` and their audit verdict under
+`child_binding`; closed children also carry `closed: true`. Child audit rows
+do not gate upgrade; §4.6 qualifies children separately. Archived and
+superseded rows are reported but do not gate upgrade.
+Inspection checks checkpoint/plan and presentation integrity, current
 release-owned executor bindings (including both
 fetch image-result variants and optional web/image packs), and native selected
 policy with frozen tool data. MCP contracts are reported as externally owned
@@ -5875,10 +5877,9 @@ inspection does not maintain a separate prefix inventory. IDs with fewer than
 two dots use their exact pinned ID rather than a namespace prefix.
 
 Same-key host upgrade waits for both inspections before exact reopen and
-surrender. It refuses only a live row that the source found compatible and the
-destination no longer does, printing the offending rows while the source keeps
-running, with the affected child count and binding change when the regressions
-include children. A source without the command is explicitly reported as baseline
+surrender. It refuses only a live root row that the source found compatible
+and the destination no longer does, printing the offending rows while the
+source keeps running. A source without the command is explicitly reported as baseline
 unavailable; no source verdict is invented. In that first-upgrade case only
 real live binding refusals gate surrender, not external availability or an
 unknown executor alone. The existing exact-reopen probes still run. Inspection
@@ -6061,9 +6062,18 @@ frozen construction data against the build, including the recorded evaluator
 contract and artifact and the release-owned executor and provider bindings.
 It reads only the binding objects, not conversation or operation history, and
 does not resolve child credentials, start runners or evaluators, or take
-custody. External availability remains a live-open check. A child refusal
-reports the number of affected children and names the binding change or
-unreadable input; a child-only change never asks to carry the root.
+custody. Qualification refuses before drain only for a build-attributable
+child reopen regression: the destination cannot reopen a child that the
+source can. The coordinator compares the same child head against the verified
+source image when available. If the source predates the comparison probe,
+qualification uses the typed cause: a changed evaluator contract or engine,
+executor binding, or other release-owned binding is a refusal. A recorded
+artifact absent, unreadable, or with mismatching bytes on disk already prevents
+either build from restoring it; it does not refuse the cut. Qualification
+reports pre-existing child faults to the operator by kind and count, separately
+from the number of regressed children and their binding change. A child-only
+change never asks to carry the root. Other external availability remains a
+live-open check.
 A root probe also refuses known configuration and credential changes. Neither
 an unfinished turn nor an observed advance of the same runtime branch is a
 reusable pre-pause verdict. The coordinator records each root's product

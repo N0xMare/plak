@@ -1,9 +1,17 @@
 //! Verify while live, then recheck changed or unproven heads at the step hold.
 
-use std::{collections::BTreeMap, path::Path, thread};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    thread,
+    time::Instant,
+};
 
-use super::{PROBE_BOUND, Request, process};
-use crate::carry::{ChildReopenRefusal, REOPEN_HEAD_ADVANCED, ReopenProbe};
+use super::{PROBE_BOUND, Request, process, progress};
+use crate::carry::{
+    ChildReopenRefusal, REOPEN_HEAD_ADVANCED, ReopenProbe, UpgradeReopenProbe,
+    child_reopen::{ChildReopenInspection, ChildReopenQualification, PreExistingChildFaults},
+};
 use crate::home::paths::PlakPaths;
 use crate::store::ProductStore;
 use crate::{CliFailure, CliResult};
@@ -74,6 +82,12 @@ pub(super) fn snapshot(paths: &PlakPaths) -> CliResult<Vec<Root>> {
 pub(super) struct Preflight {
     passed: BTreeMap<String, Head>,
     pub(super) rehearsed: bool,
+    source: SourceImage,
+}
+
+pub(super) struct SourceImage {
+    pub(super) path: PathBuf,
+    pub(super) verified: process::VerifiedImage,
 }
 
 impl Preflight {
@@ -90,6 +104,8 @@ pub(super) fn preflight(
     request: &Request,
     scratch: Option<&Path>,
     before_rehearsal: Vec<Root>,
+    source: SourceImage,
+    report: &progress::Report<'_>,
 ) -> CliResult<Preflight> {
     // Capture before starting probes: even if a probe follows the latest head,
     // an advance during its execution can't make the held check optional.
@@ -98,7 +114,7 @@ pub(super) fn preflight(
     } else {
         snapshot(paths)?
     };
-    let verdicts = probe_roots(paths, request, scratch, &roots, true)?;
+    let verdicts = probe_roots(paths, request, scratch, &roots, &source, true, report)?;
     let passed = roots
         .into_iter()
         .zip(verdicts)
@@ -112,6 +128,7 @@ pub(super) fn preflight(
     Ok(Preflight {
         passed,
         rehearsed: scratch.is_some(),
+        source,
     })
 }
 
@@ -120,74 +137,94 @@ pub(super) fn verify_held(
     request: &Request,
     scratch: Option<&Path>,
     roots: &[Root],
+    preflight: &Preflight,
+    report: &progress::Report<'_>,
 ) -> CliResult<()> {
-    probe_roots(paths, request, scratch, roots, false).map(drop)
+    probe_roots(
+        paths,
+        request,
+        scratch,
+        roots,
+        &preflight.source,
+        false,
+        report,
+    )
+    .map(drop)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "shared qualification at the live and held boundaries"
+)]
 fn probe_roots(
     paths: &PlakPaths,
     request: &Request,
     scratch: Option<&Path>,
     roots: &[Root],
+    source: &SourceImage,
     allow_advance: bool,
+    report: &progress::Report<'_>,
 ) -> CliResult<Vec<bool>> {
     let local_width = thread::available_parallelism()
         .map_or(1, std::num::NonZeroUsize::get)
         .min(MAX_LOCAL_PROBES);
-    let probe = |root: &Root| exact_reopen(paths, request, scratch, &root.id, allow_advance);
+    let probe =
+        |root: &Root| exact_reopen(paths, request, scratch, &root.id, source, allow_advance);
     let mut verdicts = Vec::with_capacity(roots.len());
-    let mut failures: Option<Box<ChildReopenRefusal>> = None;
+    let mut failures = ChildReopenRefusal::default();
+    let mut pre_existing = PreExistingChildFaults::default();
     let mut collect = |result: CliResult<Proof>| -> CliResult<()> {
-        match result? {
-            Proof::Root(passed) => verdicts.push(passed),
-            Proof::ChildRefused(children) => {
-                if let Some(failures) = &mut failures {
-                    failures.merge(*children);
+        let proof = result?;
+        failures.merge(proof.children.regressions);
+        pre_existing.merge(proof.children.pre_existing);
+        verdicts.push(proof.root? && !proof.children.unproven);
+        Ok(())
+    };
+    let probes = (|| -> CliResult<()> {
+        for placement in roots.chunk_by(|a, b| a.local == b.local) {
+            let width = if placement[0].local { local_width } else { 1 };
+            for wave in placement.chunks(width) {
+                if let [record] = wave {
+                    collect(probe(record))?;
                 } else {
-                    failures = Some(children);
+                    thread::scope(|scope| {
+                        let pending = wave
+                            .iter()
+                            .map(|record| scope.spawn(|| probe(record)))
+                            .collect::<Vec<_>>();
+                        // Join the already dispatched wave before returning a refusal.
+                        let joined = pending
+                            .into_iter()
+                            .map(|task| {
+                                task.join().unwrap_or_else(|_| {
+                                    Err(CliFailure::new("host upgrade exact-reopen worker failed"))
+                                })
+                            })
+                            .collect::<Vec<_>>();
+                        for result in joined {
+                            collect(result)?;
+                        }
+                        Ok::<_, CliFailure>(())
+                    })?;
                 }
             }
         }
         Ok(())
-    };
-    for placement in roots.chunk_by(|a, b| a.local == b.local) {
-        let width = if placement[0].local { local_width } else { 1 };
-        for wave in placement.chunks(width) {
-            if let [record] = wave {
-                collect(probe(record))?;
-            } else {
-                thread::scope(|scope| {
-                    let pending = wave
-                        .iter()
-                        .map(|record| scope.spawn(|| probe(record)))
-                        .collect::<Vec<_>>();
-                    // Join the already dispatched wave before returning a refusal.
-                    let joined = pending
-                        .into_iter()
-                        .map(|task| {
-                            task.join().unwrap_or_else(|_| {
-                                Err(CliFailure::new("host upgrade exact-reopen worker failed"))
-                            })
-                        })
-                        .collect::<Vec<_>>();
-                    for result in joined {
-                        collect(result)?;
-                    }
-                    Ok::<_, CliFailure>(())
-                })?;
-            }
-        }
+    })();
+    if !pre_existing.is_empty() {
+        report(progress::Event::ChildFaults(&pre_existing))?;
     }
-    if let Some(children) = failures {
+    probes?;
+    if let Some(children) = failures.into_report() {
         Err(CliFailure::new(children.to_string()))
     } else {
         Ok(verdicts)
     }
 }
 
-enum Proof {
-    Root(bool),
-    ChildRefused(Box<ChildReopenRefusal>),
+struct Proof {
+    root: CliResult<bool>,
+    children: ChildReopenQualification,
 }
 
 fn exact_reopen(
@@ -195,6 +232,7 @@ fn exact_reopen(
     request: &Request,
     scratch: Option<&Path>,
     session: &str,
+    source: &SourceImage,
     allow_advance: bool,
 ) -> CliResult<Proof> {
     let mut command =
@@ -205,28 +243,137 @@ fn exact_reopen(
     if let Some(scratch) = scratch {
         command.arg("--store-probe").arg(scratch);
     }
-    let verdict: ReopenProbe = serde_json::from_slice(&process::run(command, PROBE_BOUND)?.stdout)
-        .map_err(|_| {
+    let verdict: UpgradeReopenProbe =
+        serde_json::from_slice(&process::run(command, PROBE_BOUND)?.stdout).map_err(|_| {
             CliFailure::new("same-key upgrade destination did not answer its exact-reopen probe")
         })?;
+    let verdict = if let Some(children) = verdict.child_inspection {
+        let baseline = children
+            .needs_source()
+            .then(|| {
+                source.verified.recheck(&source.path)?;
+                let baseline = child_probe(
+                    &source.path,
+                    paths,
+                    &request.source_key,
+                    None,
+                    session,
+                    PROBE_BOUND,
+                )?;
+                source.verified.recheck(&source.path)?;
+                Ok::<_, CliFailure>(baseline)
+            })
+            .transpose()?;
+        let children = children.qualify(baseline.as_ref());
+        return Ok(Proof {
+            // As before, aggregate child refusals across roots before reporting.
+            root: if children.regressions.is_empty() {
+                root_verdict(
+                    verdict.root.unwrap_or(verdict.verdict),
+                    session,
+                    allow_advance,
+                )
+            } else {
+                Ok(false)
+            },
+            children,
+        });
+    } else {
+        verdict.verdict
+    };
     match verdict {
-        ReopenProbe::Opens => Ok(Proof::Root(true)),
         ReopenProbe::Refused {
             children: Some(children),
             ..
-        } => Ok(Proof::ChildRefused(children)),
+        } => Ok(Proof {
+            root: Ok(false),
+            children: ChildReopenQualification {
+                regressions: *children,
+                ..Default::default()
+            },
+        }),
+        verdict => Ok(Proof {
+            root: root_verdict(verdict, session, allow_advance),
+            children: ChildReopenQualification::default(),
+        }),
+    }
+}
+
+fn root_verdict(verdict: ReopenProbe, session: &str, allow_advance: bool) -> CliResult<bool> {
+    match verdict {
+        ReopenProbe::Opens => Ok(true),
         ReopenProbe::Unknown { reason }
             if reason == plakous_hosted::runtime::REOPEN_UNSETTLED_WORK =>
         {
             // Recheck under the holds; if still unfinished, the planned
             // handoff recovery law owns it rather than a qualification probe.
-            Ok(Proof::Root(false))
+            Ok(false)
         }
         ReopenProbe::Unknown { reason } if allow_advance && reason == REOPEN_HEAD_ADVANCED => {
-            Ok(Proof::Root(false))
+            Ok(false)
         }
         verdict => Err(CliFailure::new(format!(
             "host_upgrade_reopen_refused: {session}: {verdict:?}; same-key upgrade uses planned handoff, not carry",
         ))),
     }
+}
+
+fn child_probe(
+    image: &Path,
+    paths: &PlakPaths,
+    key: &str,
+    scratch: Option<&Path>,
+    session: &str,
+    bound: std::time::Duration,
+) -> CliResult<ChildReopenInspection> {
+    let mut command = process::command(image, paths.home(), key);
+    command
+        .args([
+            "version",
+            "--host-upgrade-reopen",
+            "--child-binding-probe",
+            "--reopen-probe",
+        ])
+        .arg(session);
+    if let Some(scratch) = scratch {
+        command.arg("--store-probe").arg(scratch);
+    }
+    serde_json::from_slice(&process::run(command, bound)?.stdout)
+        .map_err(|_| CliFailure::new("host upgrade child binding probe did not answer"))
+}
+
+pub(super) fn legacy_preflight(
+    paths: &PlakPaths,
+    image: &Path,
+    key: &str,
+    scratch: Option<&Path>,
+    deadline: Instant,
+) -> CliResult<()> {
+    let store_paths = scratch.map(|scratch| paths.clone().with_probe_stores(scratch.to_path_buf()));
+    let records = ProductStore::inspect_upgrade_roots(store_paths.as_ref().unwrap_or(paths))
+        .map_err(CliFailure::new)?;
+    let mut report = ChildReopenQualification::default();
+    for record in records {
+        if record.archived || record.plakous_locator.is_none() {
+            continue;
+        }
+        let bound = deadline
+            .saturating_duration_since(Instant::now())
+            .min(PROBE_BOUND);
+        if bound.is_zero() {
+            return Err(CliFailure::new(
+                "host_upgrade_preflight_timeout: no surrender was requested",
+            ));
+        }
+        let children = child_probe(image, paths, key, scratch, &record.id, bound)?.qualify(None);
+        report.regressions.merge(children.regressions);
+        report.pre_existing.merge(children.pre_existing);
+    }
+    if !report.pre_existing.is_empty() {
+        eprintln!("host upgrade: {}", report.pre_existing);
+    }
+    if let Some(refusal) = report.regressions.into_report() {
+        return Err(CliFailure::new(refusal.to_string()));
+    }
+    Ok(())
 }

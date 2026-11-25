@@ -5,7 +5,7 @@ use plakd::home::paths::PlakPaths;
 use plakous::sessions::AgentSessions;
 use std::path::{Path, PathBuf};
 
-mod children;
+pub(in crate::host_skeleton) mod children;
 
 fn gated_host(fixture: &Fixture) -> (Host, PathBuf) {
     let gate = fixture.root.join("reopen-gate");

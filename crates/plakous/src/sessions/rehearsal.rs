@@ -10,6 +10,35 @@ use {plakous_store::SqliteSessionStore, std::path::Path};
 #[doc(hidden)]
 pub use plakous_store::PreservationReader;
 
+#[doc(hidden)]
+pub use crate::EvaluatorArtifactFault;
+
+/// A per-child qualification failure, separating environment from binding.
+#[doc(hidden)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ChildBindingInspectionError {
+    /// The binding could not be decoded or does not agree with this build.
+    Binding(AgentSessionsError),
+    /// A recorded evaluator artifact cannot be used on this machine.
+    EvaluatorArtifact(EvaluatorArtifactFault),
+}
+
+impl ChildBindingInspectionError {
+    pub(crate) fn evaluator_binding(message: &str) -> Self {
+        Self::Binding(
+            AgentSessionsError::new(super::AgentSessionsErrorKind::IncompatibleBuild, message)
+                .with_binding_change(plakous_agent::BindingChange::ExecutionEnvironment),
+        )
+    }
+
+    pub(crate) fn evaluator_record(message: &str) -> Self {
+        Self::Binding(AgentSessionsError::new(
+            super::AgentSessionsErrorKind::InvalidInput,
+            message,
+        ))
+    }
+}
+
 /// Construct a verification-only facade over exact SQLite reads, without
 /// opening its writer or bootstrapping supported legacy DDL.
 ///
@@ -106,7 +135,10 @@ pub fn inspect_binding_presentations_sqlite(
 pub fn inspect_child_bindings_sqlite(
     path: &Path,
     locators: &[SessionLocator],
-    mut visit: impl FnMut(Result<super::FrozenSessionPresentation, AgentSessionsError>),
+    mut visit: impl FnMut(
+        Option<SessionLocator>,
+        Result<super::FrozenSessionPresentation, ChildBindingInspectionError>,
+    ),
 ) -> Result<(), AgentSessionsError> {
     if locators.is_empty() {
         return Ok(());
@@ -115,23 +147,22 @@ pub fn inspect_child_bindings_sqlite(
     SqliteSessionStore::inspect_live_bindings(
         path,
         locators.iter().map(|locator| locator.session_ref()),
-        |binding| {
-            visit(binding.map_err(store_error).and_then(|binding| {
+        |address, binding| {
+            let presentation = (|| {
+                let binding = binding
+                    .map_err(store_error)
+                    .map_err(ChildBindingInspectionError::Binding)?;
                 let evaluator =
                     plakous_agent::internal::facade_support::tool_runtime_composition_artifact(
                         &binding.tools,
                     )
-                    .map_err(|error| super::runtime_error(&error))?;
+                    .map_err(|error| {
+                        ChildBindingInspectionError::evaluator_record(error.message())
+                    })?;
                 if let Some(stored) = evaluator {
-                    let check = evaluators.entry(stored).or_insert_with_key(|stored| {
-                        crate::verify_saved_evaluator(stored).map_err(|error| {
-                            AgentSessionsError::new(
-                                super::AgentSessionsErrorKind::IncompatibleBuild,
-                                error.message(),
-                            )
-                            .with_binding_change(plakous_agent::BindingChange::ExecutionEnvironment)
-                        })
-                    });
+                    let check = evaluators
+                        .entry(stored)
+                        .or_insert_with_key(crate::verify_saved_evaluator);
                     check.clone()?;
                 }
                 super::FrozenSessionPresentation::from_binding(
@@ -139,7 +170,9 @@ pub fn inspect_child_bindings_sqlite(
                     &binding.tools,
                     &binding.harness,
                 )
-            }));
+                .map_err(ChildBindingInspectionError::Binding)
+            })();
+            visit(address.map(SessionLocator::from_durable), presentation);
         },
     )
     .map_err(store_error)

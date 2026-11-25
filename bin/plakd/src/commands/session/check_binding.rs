@@ -26,7 +26,15 @@ pub(crate) struct Row {
     pub(crate) child: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) closed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) child_binding: Option<ChildBinding>,
     pub(crate) unaffected: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct ChildBinding {
+    binding_change: Option<String>,
+    unavailable: Option<String>,
 }
 
 /// No `Services` or config resolution: neither inspection path opens a writer,
@@ -46,6 +54,7 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
         let archived = archived || head.archived;
         let superseded = superseded || !head.line_head;
         let child_status = disposition.children_closed.get(&key).copied();
+        let child = child_status.is_some();
         let closed = child_status == Some(true);
         let unaffected = head
             .presentation
@@ -57,7 +66,7 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
             .filter(|(_, id, _)| id.as_str().starts_with("plakous.mcp."))
             .map(|(name, _, _)| format!("MCP external contract unaffected: {name}"))
             .collect();
-        let (binding_change, unavailable) = match head.presentation {
+        let (mut binding_change, mut unavailable) = match head.presentation {
             None => (None, None),
             Some(Err(error)) => (
                 error.binding_change().map(ToString::to_string),
@@ -65,7 +74,7 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
             ),
             Some(Ok(frozen)) => match plakous_hosted::agent::check_frozen_binding(&frozen) {
                 Ok(change) => (
-                    qualified_change(change).map(|change| change.to_string()),
+                    qualified_change(change, child).map(|change| change.to_string()),
                     None,
                 ),
                 Err(error) => (None, Some(error.message().to_owned())),
@@ -74,6 +83,12 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
         if !archived && !superseded && !closed {
             compatible &= binding_change.is_none() && unavailable.is_none();
         }
+        // A predecessor compares the flat fields without checking child
+        // reopen. Keep the audit details, but let the child probe qualify them.
+        let child_binding = child.then(|| ChildBinding {
+            binding_change: binding_change.take(),
+            unavailable: unavailable.take(),
+        });
         rows.push(Row {
             session: locator.session_id().to_string(),
             branch: locator.branch_id().to_string(),
@@ -82,8 +97,9 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
             unavailable,
             archived,
             superseded,
-            child: child_status.is_some(),
+            child,
             closed,
+            child_binding,
             unaffected,
         });
     }
@@ -95,12 +111,13 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
 
 fn qualified_change(
     change: Option<plakous::agent::BindingChange>,
+    child: bool,
 ) -> Option<plakous::agent::BindingChange> {
     change.or_else(|| {
-        crate::test_hooks::binding_executor_cut().then(|| {
-            plakous::agent::BindingChange::ToolBinding {
-                tool: "fixture.revised-executor".into(),
-            }
+        (crate::test_hooks::binding_executor_cut()
+            || child && crate::test_hooks::child_binding_cut())
+        .then(|| plakous::agent::BindingChange::ToolBinding {
+            tool: "fixture.revised-executor".into(),
         })
     })
 }

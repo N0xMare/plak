@@ -6,6 +6,7 @@
 )]
 
 use super::*;
+use crate::EvaluatorArtifactFault;
 
 /// One verified out-of-process evaluator artifact.
 ///
@@ -104,6 +105,14 @@ impl LocalCompositionEngineArtifact {
 
     fn cell_worker(engine: CellEngine, path: &Path) -> Result<Self, AgentError> {
         let (path, _dev, _ino, sha256) = file_identity(path)?;
+        Self::from_verified_file(engine, path, sha256)
+    }
+
+    fn from_verified_file(
+        engine: CellEngine,
+        path: PathBuf,
+        sha256: [u8; 32],
+    ) -> Result<Self, AgentError> {
         let worker = CellWorkerArtifact {
             engine,
             path,
@@ -236,12 +245,44 @@ pub(super) fn cell_engine_contract_identity(
 pub(crate) fn restore_stored_artifact(
     stored: &plakous_agent::internal::facade_support::StoredCompositionArtifact,
 ) -> Result<LocalCompositionEngineArtifact, AgentError> {
-    let refused = || {
-        AgentError::new(
+    inspect_stored_artifact(stored).map_err(|error| match error {
+        StoredArtifactError::Binding(error) | StoredArtifactError::Record(error) => error,
+        StoredArtifactError::Environment(fault) => AgentError::new(
             AgentErrorKind::IncompatibleSession,
-            "recorded evaluator path, bytes or contract is unavailable or inconsistent; no inference was dispatched",
-        )
-    };
+            match fault {
+                EvaluatorArtifactFault::Missing => "recorded evaluator artifact is missing",
+                EvaluatorArtifactFault::BytesMismatch => {
+                    "recorded evaluator artifact bytes changed"
+                }
+                EvaluatorArtifactFault::Unavailable => "recorded evaluator artifact is unavailable",
+            },
+        ),
+    })
+}
+
+pub(crate) enum StoredArtifactError {
+    Binding(AgentError),
+    Record(AgentError),
+    Environment(EvaluatorArtifactFault),
+}
+
+impl From<AgentError> for StoredArtifactError {
+    fn from(error: AgentError) -> Self {
+        Self::Binding(error)
+    }
+}
+
+fn inconsistent_evaluator() -> AgentError {
+    AgentError::new(
+        AgentErrorKind::IncompatibleSession,
+        "recorded evaluator path, bytes or contract is unavailable or inconsistent; no inference was dispatched",
+    )
+}
+
+pub(crate) fn inspect_stored_artifact(
+    stored: &plakous_agent::internal::facade_support::StoredCompositionArtifact,
+) -> Result<LocalCompositionEngineArtifact, StoredArtifactError> {
+    let refused = || StoredArtifactError::Record(inconsistent_evaluator());
     let (engine, prefix, label) = if stored.host.starts_with(b"rquickjs-host") {
         (
             CellEngine::Quickjs,
@@ -255,7 +296,7 @@ pub(crate) fn restore_stored_artifact(
             b"plakous.monty-engine-artifact.v1".as_slice(),
         )
     } else {
-        return Err(refused());
+        return Err(StoredArtifactError::Binding(inconsistent_evaluator()));
     };
     // Product PTC appends one evidence digest; Code Mode does not. Select the
     // framing by the recorded artifact digest, never by probing candidate files.
@@ -305,9 +346,31 @@ pub(crate) fn restore_stored_artifact(
     {
         return Err(refused());
     }
-    if cell_engine_contract_identity(&engine.worker())?.identity_bytes()
-        != stored.engine_contract_identity
-    {
+    let path_end = host
+        .len()
+        .checked_sub(32)
+        .filter(|end| *end > prefix.len())
+        .ok_or_else(refused)?;
+    let path = PathBuf::from(std::ffi::OsString::from_vec(
+        host[prefix.len()..path_end].to_vec(),
+    ));
+    if !path.is_absolute() {
+        return Err(refused());
+    }
+    // Check the saved bytes before the build contract. A missing or changed
+    // file already prevents the source from restoring this evaluator.
+    let (path, _, _, sha256) = file_identity(&path)
+        .map_err(|error| StoredArtifactError::Environment(error.artifact_fault()))?;
+    if sha256 != host[path_end..] {
+        return Err(StoredArtifactError::Environment(
+            EvaluatorArtifactFault::BytesMismatch,
+        ));
+    }
+    let artifact = LocalCompositionEngineArtifact::from_verified_file(engine, path, sha256)?;
+    if artifact.identity().identity_bytes() != stored.artifact_identity {
+        return Err(StoredArtifactError::Binding(inconsistent_evaluator()));
+    }
+    if artifact.engine_contract_identity().identity_bytes() != stored.engine_contract_identity {
         let evaluator = match engine {
             CellEngine::Quickjs => "JavaScript",
             CellEngine::Monty => "Python",
@@ -317,28 +380,8 @@ pub(crate) fn restore_stored_artifact(
             format!(
                 "recorded {evaluator} evaluator engine contract changed; no inference was dispatched"
             ),
-        ));
-    }
-    let path_end = host
-        .len()
-        .checked_sub(32)
-        .filter(|end| *end > prefix.len())
-        .ok_or_else(refused)?;
-    let path = PathBuf::from(std::ffi::OsString::from_vec(
-        host[prefix.len()..path_end].to_vec(),
-    ));
-    if !path.is_absolute()
-        || std::fs::canonicalize(&path)
-            .map_err(|_| refused())?
-            .as_os_str()
-            != path.as_os_str()
-    {
-        return Err(refused());
-    }
-    let artifact =
-        LocalCompositionEngineArtifact::cell_worker(engine, &path).map_err(|_| refused())?;
-    if artifact.identity().identity_bytes() != stored.artifact_identity {
-        return Err(refused());
+        )
+        .into());
     }
     Ok(artifact)
 }
@@ -362,29 +405,51 @@ pub(super) fn verify_cell_worker_before_spawn(
     }
 }
 
-fn file_identity(path: &Path) -> Result<(PathBuf, u64, u64, [u8; 32]), AgentError> {
-    use sha2::Digest as _;
-    let canonical = path
-        .canonicalize()
-        .map_err(|error| invalid(error.to_string()))?;
-    if canonical != path {
-        return Err(invalid(
-            "composition executable path must already be canonical",
-        ));
+enum FileIdentityError {
+    Io(std::io::Error),
+    NotCanonical,
+    NotRegular,
+}
+
+impl FileIdentityError {
+    fn artifact_fault(&self) -> EvaluatorArtifactFault {
+        if matches!(self, Self::Io(error) if error.kind() == std::io::ErrorKind::NotFound) {
+            EvaluatorArtifactFault::Missing
+        } else {
+            EvaluatorArtifactFault::Unavailable
+        }
     }
-    let mut file = File::open(&canonical).map_err(|error| invalid(error.to_string()))?;
-    let metadata = file
-        .metadata()
-        .map_err(|error| invalid(error.to_string()))?;
+}
+
+impl From<FileIdentityError> for AgentError {
+    fn from(error: FileIdentityError) -> Self {
+        match error {
+            FileIdentityError::Io(error) => invalid(error.to_string()),
+            FileIdentityError::NotCanonical => {
+                invalid("composition executable path must already be canonical")
+            }
+            FileIdentityError::NotRegular => {
+                invalid("composition executable must be a regular file")
+            }
+        }
+    }
+}
+
+fn file_identity(path: &Path) -> Result<(PathBuf, u64, u64, [u8; 32]), FileIdentityError> {
+    use sha2::Digest as _;
+    let canonical = path.canonicalize().map_err(FileIdentityError::Io)?;
+    if canonical != path {
+        return Err(FileIdentityError::NotCanonical);
+    }
+    let mut file = File::open(&canonical).map_err(FileIdentityError::Io)?;
+    let metadata = file.metadata().map_err(FileIdentityError::Io)?;
     if !metadata.is_file() {
-        return Err(invalid("composition executable must be a regular file"));
+        return Err(FileIdentityError::NotRegular);
     }
     let mut hasher = sha2::Sha256::new();
     let mut buffer = [0_u8; 16 * 1024];
     loop {
-        let count = file
-            .read(&mut buffer)
-            .map_err(|error| invalid(error.to_string()))?;
+        let count = file.read(&mut buffer).map_err(FileIdentityError::Io)?;
         if count == 0 {
             break;
         }
@@ -466,15 +531,24 @@ mod quickjs_upgrade_tests {
             engine_contract_identity: previous.identity_bytes(),
             host: environment_identity.clone(),
         };
-        let Err(refusal) = restore_stored_artifact(&stored) else {
+        let Err(StoredArtifactError::Binding(refusal)) = inspect_stored_artifact(&stored) else {
             return Err("a previous-contract record must not reopen".into());
         };
         assert_eq!(refusal.kind(), AgentErrorKind::IncompatibleSession);
         assert!(
-            refusal.message().contains("no inference was dispatched"),
+            refusal
+                .message()
+                .contains("JavaScript evaluator engine contract changed"),
             "{}",
             refusal.message()
         );
+        std::fs::remove_file(path)?;
+        assert!(matches!(
+            inspect_stored_artifact(&stored),
+            Err(StoredArtifactError::Environment(
+                EvaluatorArtifactFault::Missing
+            ))
+        ));
         Ok(())
     }
 }

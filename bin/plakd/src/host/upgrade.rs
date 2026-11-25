@@ -37,6 +37,8 @@ struct Identity {
     binary: String,
     #[serde(default)]
     deploy_idle: Option<bool>,
+    #[serde(default)]
+    child_reopen_baseline: bool,
 }
 
 use requester::Request;
@@ -344,6 +346,9 @@ pub(super) fn request(
     }
     health::stores(paths)?;
     let bindings = bindings::requester_baseline(paths, &identity)?;
+    if !identity.child_reopen_baseline {
+        qualification::legacy_child_preflight(paths, &destination, &identity.key, before_request)?;
+    }
     let (baseline, _) = preservation::Snapshot::capture_at(
         paths,
         None,
@@ -639,6 +644,7 @@ fn next_upgrade(
             instance: identity.instance.to_string(),
             binary: crate::build_identity::binary_id().to_owned(),
             deploy_idle: Some(!has_ready(pending)),
+            child_reopen_baseline: true,
         },
     )?;
     match read(stream)? {
@@ -694,6 +700,7 @@ fn handle(
     let progress = |event: progress::Event<'_>| {
         let (detail, qualification) = match event {
             progress::Event::Qualification(timing) => (timing.detail(), Some(timing)),
+            progress::Event::ChildFaults(faults) => (faults.to_string(), None),
             progress::Event::Waiting(detail) => {
                 let mut last = last_progress
                     .lock()
@@ -833,7 +840,7 @@ fn prepare(
     )?;
     pause.commit()?;
     host.join_paused_stops(&pause, Instant::now() + Duration::from_secs(10))?;
-    qualification::recheck_held(services, &request, arguments, &reopen, cancelled)?;
+    qualification::recheck_held(services, &request, arguments, &reopen, cancelled, report)?;
     if inspect_runner {
         runner_carry::held(&request, services, runtime)?;
     }
@@ -919,6 +926,7 @@ mod tests {
             instance,
             binary: binary.to_owned(),
             deploy_idle: Some(true),
+            child_reopen_baseline: true,
         };
         let ticket = checkpoint::Ticket::new(&identity, binary).unwrap();
         let (reader, mut source) = UnixStream::pair().unwrap();

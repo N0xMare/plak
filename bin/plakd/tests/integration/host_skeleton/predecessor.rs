@@ -34,6 +34,24 @@ const RESUMED: &str = "candidate reply";
 const DIFFERENT_STATE_KEY: &str = "host_upgrade_offline_migration_required";
 
 #[test]
+fn production_predecessor_with_a_missing_child_evaluator_can_upgrade() {
+    let old = PathBuf::from(std::env::var_os("PLAK_INSTALL_PREDECESSOR").unwrap()).join("plakd");
+    let candidate = PathBuf::from(std::env::var_os("PLAK_TEST_BINARY").unwrap());
+    let (fixture, _) = root_wake::child_fixture(false).expect("short fixture socket paths");
+    let (before, after) = probe_pair(&fixture, &old, &candidate);
+    if before["state_key"] == after["state_key"] {
+        upgrade::reopen::children::missing_evaluator_upgrade(
+            &fixture,
+            &old,
+            &candidate,
+            |session| {
+                source::idle_locator(&source::open(&fixture), session, 1);
+            },
+        );
+    }
+}
+
+#[test]
 fn production_predecessor_upgrade_preserves_live_work() {
     let directory = std::env::var_os("PLAK_INSTALL_PREDECESSOR")
         .expect("prepare the pinned predecessor with tools/gate/build_predecessor.py");

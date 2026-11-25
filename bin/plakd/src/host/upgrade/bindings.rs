@@ -1,6 +1,5 @@
 //! Upgrade binding regressions, not pre-existing or external availability failures.
 
-use crate::carry::ChildReopenRefusal;
 use crate::commands::session::check_binding::{Report, Row};
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliResult};
@@ -36,7 +35,7 @@ fn probe(
 pub(in crate::host) struct Baseline(Option<BTreeSet<String>>);
 
 fn comparable(row: &Row) -> bool {
-    !row.archived && !row.superseded && !row.closed
+    !row.archived && !row.superseded && !row.child && !row.closed
 }
 
 impl Baseline {
@@ -79,7 +78,7 @@ pub(super) fn requester_baseline(
 }
 
 #[cfg(target_os = "linux")]
-fn source_image(pid: u32) -> CliResult<PathBuf> {
+pub(super) fn source_image(pid: u32) -> CliResult<PathBuf> {
     // The descriptor path resolves the running bytes even if the installed
     // link has been switched ahead of the process.
     let path = PathBuf::from(format!("/proc/{pid}/exe"));
@@ -88,7 +87,7 @@ fn source_image(pid: u32) -> CliResult<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn source_image(pid: u32) -> CliResult<PathBuf> {
+pub(super) fn source_image(pid: u32) -> CliResult<PathBuf> {
     let image = super::process::ps_field(pid, "comm=", super::PROBE_BOUND)?;
     let path = PathBuf::from(image.trim_end_matches('\n'));
     if !path.is_absolute() {
@@ -114,10 +113,9 @@ pub(in crate::host) fn health(paths: &PlakPaths, baseline: &Baseline) -> CliResu
     if refused.is_empty() {
         Ok(())
     } else {
-        Err(CliFailure::new(format!(
-            "host_upgrade_health_refused: destination binding compatibility did not pass{}",
-            child_refusal(&refused),
-        )))
+        Err(CliFailure::new(
+            "host_upgrade_health_refused: destination binding compatibility did not pass",
+        ))
     }
 }
 
@@ -190,20 +188,9 @@ fn finish(source: Option<&Report>, destination: &Report) -> CliResult<Baseline> 
     refusal(source.is_some(), &refused)
 }
 
-fn child_refusal(refused: &[&Row]) -> String {
-    let mut children = ChildReopenRefusal::default();
-    for row in refused.iter().filter(|row| row.child) {
-        children.record(row.binding_change.as_deref(), row.unavailable.as_deref());
-    }
-    children
-        .into_report()
-        .map_or_else(String::new, |refusal| format!("; {refusal}"))
-}
-
 fn refusal<T>(baseline_available: bool, refused: &[&Row]) -> CliResult<T> {
-    let children = child_refusal(refused);
     Err(CliFailure::new(format!(
-        "host_upgrade_binding_preflight_refused: source remains running; baseline {}; offending rows: {}{children}",
+        "host_upgrade_binding_preflight_refused: source remains running; baseline {}; offending rows: {}",
         if baseline_available {
             "available"
         } else {

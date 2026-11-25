@@ -433,6 +433,7 @@ mod tests {
             instance: instance.clone(),
             binary: binary.to_owned(),
             deploy_idle: Some(true),
+            child_reopen_baseline: true,
         };
         let mut ticket = Ticket::new(&identity, binary).unwrap();
         let publish_ticket = |ticket: &Ticket| {

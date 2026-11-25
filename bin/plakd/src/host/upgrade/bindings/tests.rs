@@ -9,6 +9,7 @@ fn row(name: &str) -> Row {
         superseded: false,
         child: false,
         closed: false,
+        child_binding: None,
         binding_change: None,
         unavailable: None,
         unaffected: Vec::new(),
@@ -93,7 +94,7 @@ fn differential_binding_preflight_refuses_only_new_live_regressions() {
 }
 
 #[test]
-fn a_child_binding_regression_reports_the_count_and_change_without_exact_reopen() {
+fn the_binding_audit_does_not_preempt_child_reopen_qualification() {
     let report = Report {
         compatible: false,
         sessions: vec![Row {
@@ -102,10 +103,12 @@ fn a_child_binding_regression_reports_the_count_and_change_without_exact_reopen(
             ..row("child")
         }],
     };
-    let Err(failure) = finish(None, &report) else {
-        panic!("binding regression was accepted");
+    let mut source = row("child");
+    source.child = true;
+    let source = Report {
+        compatible: true,
+        sessions: vec![source],
     };
-    assert!(failure.message().contains(
-        "host_upgrade_child_reopen_refused: 1 affected child session(s); binding change: provider configuration"
-    ));
+    assert!(finish(None, &report).is_ok());
+    assert!(finish(Some(&source), &report).is_ok());
 }

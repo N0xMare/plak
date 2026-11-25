@@ -11,6 +11,16 @@ use plakous_offline_crash_harness::{
 use std::sync::{Arc, atomic::AtomicU64};
 
 fn spawn_child(fixture: &Fixture, host: &Host) -> (Client, String, NodeAddress) {
+    spawn_child_with_idle(fixture, host, |session| {
+        root_wake::idle_turns(fixture, session, 1);
+    })
+}
+
+fn spawn_child_with_idle(
+    fixture: &Fixture,
+    host: &Host,
+    wait_idle: impl FnOnce(&str),
+) -> (Client, String, NodeAddress) {
     let mut client = Client::connect(host);
     let Outcome::Ok(Answer::Created { session, node, .. }) =
         client.request(1, new_session(&fixture.workspace()))
@@ -19,7 +29,7 @@ fn spawn_child(fixture: &Fixture, host: &Host) -> (Client, String, NodeAddress) 
     };
     let attachment = client.attach(2, &node);
     client.prompt(3, attachment, "spawn a child", ANSWER);
-    root_wake::idle_turns(fixture, &session, 1);
+    wait_idle(&session);
     let paths = PlakPaths::explicit(fixture.home());
     let deadline = Instant::now() + WAIT;
     loop {
@@ -105,6 +115,37 @@ fn child_binding_change_refuses_before_drain() {
 }
 
 #[test]
+fn a_binding_fault_seen_by_both_images_is_not_a_regression() {
+    let Some((fixture, _)) = root_wake::child_fixture(false) else {
+        return;
+    };
+    let _cleanup = HomeHost(fixture.home());
+    let image = replacement_image(&fixture);
+    let both = std::env::join_paths([Path::new(env!("CARGO_BIN_EXE_plakd")), &image])
+        .unwrap()
+        .into_string()
+        .unwrap();
+    let mut host = start_env(
+        &fixture,
+        &[],
+        &[("PLAK_TEST_CHILD_BINDING_CUT_IMAGE", both)],
+    );
+    let (_client, _, node) = spawn_child(&fixture, &host);
+    std::fs::write(fixture.root.join("release-child"), "").unwrap();
+    root_wake::submitted_result(&fixture, &node);
+    let result = upgrade_to(&fixture, &image);
+    require_upgrade(&fixture, &host, "pre-existing child binding", &result);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains(
+            "host_upgrade_child_reopen_pre_existing: 1 affected child session(s); binding_change=1"
+        ),
+        "{stderr}"
+    );
+    stop(&mut host);
+}
+
+#[test]
 fn a_wide_dormant_tree_qualifies_with_one_bounded_probe() {
     const CHILDREN: usize = 96;
     let Some((fixture, _)) = root_wake::child_fixture(false) else {
@@ -177,19 +218,171 @@ fn a_wide_dormant_tree_qualifies_with_one_bounded_probe() {
         "{verdict}"
     );
 
-    // No test cut is active: changing the bytes of the one recorded evaluator
-    // must refuse that branch through the same check as a real exact reopen.
-    std::fs::write(evaluator, b"different evaluator bytes").unwrap();
+    std::fs::write(&evaluator, b"different evaluator bytes").unwrap();
     let changed = output(&fixture, &args, false);
     let verdict: serde_json::Value = serde_json::from_slice(&changed.stdout).unwrap();
-    assert_eq!(verdict["children"]["affected_children"], 1, "{verdict}");
-    assert!(
-        verdict["children"]["binding_change"]
-            .as_str()
-            .unwrap()
-            .contains("recorded evaluator"),
+    assert_eq!(verdict["verdict"], "opens", "{verdict}");
+    let faults = &verdict["child_qualification"]["pre_existing"];
+    assert_eq!(faults["affected_children"], 1, "{verdict}");
+    assert_eq!(
+        faults["by_kind"]["evaluator_artifact_bytes_mismatch"], 1,
         "{verdict}"
     );
+
+    std::fs::remove_file(evaluator).unwrap();
+    let mixed = output_env(
+        &fixture,
+        &args,
+        false,
+        &[(
+            "PLAK_TEST_CHILD_BINDING_CUT_IMAGE",
+            env!("CARGO_BIN_EXE_plakd"),
+        )],
+    );
+    let verdict: serde_json::Value = serde_json::from_slice(&mixed.stdout).unwrap();
+    assert_eq!(verdict["verdict"], "refused", "{verdict}");
+    assert_eq!(
+        verdict["children"]["affected_children"],
+        CHILDREN - 2,
+        "{verdict}"
+    );
+    let faults = &verdict["child_qualification"]["pre_existing"];
+    assert_eq!(faults["affected_children"], 1, "{verdict}");
+    assert_eq!(
+        faults["by_kind"]["evaluator_artifact_missing"], 1,
+        "{verdict}"
+    );
+}
+
+#[test]
+fn a_missing_evaluator_is_reported_and_does_not_refuse() {
+    let Some((fixture, _)) = root_wake::child_fixture(false) else {
+        return;
+    };
+    let image = replacement_image(&fixture);
+    missing_evaluator_upgrade(
+        &fixture,
+        Path::new(env!("CARGO_BIN_EXE_plakd")),
+        &image,
+        |session| {
+            root_wake::idle_turns(&fixture, session, 1);
+        },
+    );
+}
+
+pub(in crate::host_skeleton) fn missing_evaluator_upgrade(
+    fixture: &Fixture,
+    source: &Path,
+    destination: &Path,
+    wait_idle: impl FnOnce(&str),
+) {
+    let _cleanup = HomeHost(fixture.home());
+    let start = || {
+        await_serving_host(spawn_host(
+            image_command(fixture, source)
+                .env("PLAK_TEST_CHILD_BINDING_CUT_IMAGE", destination)
+                .arg("host"),
+        ))
+        .unwrap()
+    };
+    let mut host = start();
+    let (_client, _, node) = spawn_child_with_idle(fixture, &host, wait_idle);
+    std::fs::write(fixture.root.join("release-child"), "").unwrap();
+    root_wake::submitted_result(fixture, &node);
+    stop(&mut host);
+
+    let paths = PlakPaths::explicit(fixture.home());
+    let evaluator = fixture.root.join("saved-evaluator");
+    std::fs::write(&evaluator, b"recorded evaluator").unwrap();
+    let locator = seed_evaluator_child(fixture, &paths, &evaluator);
+    let db = rusqlite::Connection::open(paths.subagents_database()).unwrap();
+    assert_eq!(
+        db.execute(
+            "UPDATE agent_nodes SET session_locator=?1, status='completed', active_turn=0
+             WHERE tree_id=?2 AND parent_agent_id IS NOT NULL",
+            rusqlite::params![locator, node.tree_id],
+        )
+        .unwrap(),
+        1
+    );
+    drop(db);
+    std::fs::remove_file(evaluator).unwrap();
+
+    let mut host = start();
+    let result = upgrade_to(fixture, destination);
+    require_upgrade(fixture, &host, "pre-existing missing evaluator", &result);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("host_upgrade_child_reopen_pre_existing: 1 affected child session(s); evaluator_artifact_missing=1"),
+        "{stderr}"
+    );
+
+    let audit = image_command(fixture, destination)
+        .env("PLAK_TEST_CHILD_BINDING_CUT_IMAGE", destination)
+        .args(["session", "check-binding", "--all"])
+        .output()
+        .unwrap();
+    let audit: serde_json::Value = serde_json::from_slice(&audit.stdout).unwrap();
+    let child = audit["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["child"] == true)
+        .unwrap();
+    assert!(
+        child["child_binding"]["binding_change"].is_string(),
+        "{child}"
+    );
+    assert!(child["binding_change"].is_null(), "{child}");
+
+    stop(&mut host);
+}
+
+fn seed_evaluator_child(fixture: &Fixture, paths: &PlakPaths, evaluator: &Path) -> String {
+    use plakous::sessions::rehearsal::{bootstrap_stopped_runtime, runtime_bootstrap_pending};
+
+    let runtime = paths.runtime_database();
+    let legacy_epoch = runtime_bootstrap_pending(&runtime).unwrap().then(|| {
+        let epoch = rusqlite::Connection::open_with_flags(
+            &runtime,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap()
+        .query_row("SELECT root_codec FROM checkpoints LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+        bootstrap_stopped_runtime(&runtime, |_| {}).unwrap();
+        epoch
+    });
+    let locator = seed_child_branches(fixture, paths, 1, evaluator)
+        .pop()
+        .unwrap();
+    // The fixture writer needs the new DDL; the pinned source needs its old
+    // DDL. The authored checkpoint codec stays the same.
+    if let Some(epoch) = legacy_epoch {
+        runtime_epoch::make_pre_bootstrap(&runtime, epoch);
+    }
+    locator
+}
+
+fn upgrade_to(fixture: &Fixture, image: &Path) -> std::process::Output {
+    let identity = image_command(fixture, image)
+        .args(["version", "--host-upgrade-probe"])
+        .output()
+        .unwrap();
+    let identity: serde_json::Value = serde_json::from_slice(&identity.stdout).unwrap();
+    image_command(fixture, image)
+        .args([
+            "host",
+            "upgrade",
+            "--drain",
+            "0",
+            "--expect-binary",
+            identity["binary_id"].as_str().unwrap(),
+        ])
+        .output()
+        .unwrap()
 }
 
 fn seed_child_branches(
@@ -218,7 +411,7 @@ fn seed_child_branches(
         .block_on(async {
             let mut locators = Vec::with_capacity(count);
             for index in 0..count {
-                let binding = if index == 2 {
+                let binding = if index == (count.min(3) - 1) {
                     scripted_code_mode_runtime_binding(
                         &fixture.workspace(),
                         control.clone(),
@@ -246,7 +439,7 @@ fn seed_child_branches(
                     panic!("child session not created");
                 };
                 let locator = session.release().await.unwrap();
-                if index == 1 {
+                if count > 1 && index == 1 {
                     sessions.archive(locator).await.unwrap();
                 }
                 locators.push(locator.to_string());

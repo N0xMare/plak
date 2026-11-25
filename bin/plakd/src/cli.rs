@@ -513,6 +513,8 @@ enum TopCommand {
         #[arg(long, hide = true, requires = "reopen_probe")]
         host_upgrade_reopen: bool,
         #[arg(long, hide = true, requires = "host_upgrade_reopen")]
+        child_binding_probe: bool,
+        #[arg(long, hide = true, requires = "host_upgrade_reopen")]
         store_probe: Option<std::path::PathBuf>,
         #[arg(long, action = ArgAction::SetTrue, hide = true, conflicts_with = "state_key")]
         export_version: bool,

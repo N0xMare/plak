@@ -315,6 +315,7 @@ pub(crate) enum Command {
     ReopenProbe {
         session: String,
         host_upgrade_reopen: bool,
+        child_binding_probe: bool,
         store_probe: Option<PathBuf>,
     },
     CarryProbe {
