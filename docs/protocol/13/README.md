@@ -200,10 +200,13 @@ recorded template carries null.
 `templates_get` keeps the declared extras in `tools`. The separate
 `resolved_tools` list contains up to 128 model-visible names with an origin
 of `core` or `template_extra`, compiled at the template's declared access
-ceiling and composition (the catalog default if unset). For programmatic
-composition this is the callable menu inside the program. Workspace skills,
-topology grants and MCP listings are bound at runtime, not by this definition
-read. A menu that cannot be compiled is empty with a
+ceiling and composition. For programmatic composition this is the callable
+menu inside the program. The definition read classifies native code mode
+from static provider and model information, not an authenticated catalog.
+It does not apply catalog-based refusals, so a menu can be present even when
+the runtime would refuse the binding. MCP listings, workspace skills and
+topology grants are resolved only at runtime and aren't included. A menu
+that cannot be compiled from the definition is empty with a
 `tool_resolution_unavailable` diagnostic.
 
 The host serves only 13. Use the exact build's schema and pair it with
