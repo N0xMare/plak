@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, Params, Row};
@@ -25,14 +26,33 @@ pub(super) fn configure_reader(db: &Connection) -> CliResult<()> {
     Ok(())
 }
 
-#[derive(Default)]
-pub(super) struct Budget(usize);
+pub(super) struct Budget {
+    facts: usize,
+    deadline: Instant,
+}
+
+impl Default for Budget {
+    fn default() -> Self {
+        Self {
+            facts: 0,
+            deadline: Instant::now() + Duration::from_secs(60),
+        }
+    }
+}
 
 impl Budget {
+    pub(super) const fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
     pub(super) fn take(&mut self) -> CliResult<()> {
-        self.0 += 1;
+        self.facts += 1;
         check(
-            self.0 <= MAX_FACTS,
+            Instant::now() < self.deadline,
+            "preservation exceeded its time bound",
+        )?;
+        check(
+            self.facts <= MAX_FACTS,
             "preservation snapshot exceeds its fact budget",
         )
     }

@@ -1,7 +1,7 @@
 //! Same-user, instance-bound coordination for same-key host handoff.
 
 mod backup;
-mod bindings;
+pub(super) mod bindings;
 pub(super) mod checkpoint;
 pub(super) mod health;
 mod preservation;
@@ -372,8 +372,19 @@ pub(super) fn request(
             inspect_runners: inspection
                 .map_or_else(Vec::new, |inspection| inspection.deploy_inspect_runners),
         },
-    )?;
+    )
+    .map_err(unknown_surrender)?;
     finish_request(paths, expected, &source_binary, &ticket, &stream)
+}
+
+fn unknown_surrender(failure: CliFailure) -> CliFailure {
+    CliFailure::classified(
+        crate::CliFailureKind::RecoveryRequired,
+        format!(
+            "host_upgrade_outcome_unknown: source surrender is unproven; inspect the live owner before retrying ({})",
+            failure.message()
+        ),
+    )
 }
 
 fn connect(paths: &PlakPaths, timeout: Option<Duration>) -> CliResult<UnixStream> {
@@ -395,7 +406,7 @@ fn finish_request(
 ) -> CliResult<ProcessOutcome> {
     let mut replies = std::io::BufReader::new(stream);
     loop {
-        match read_frame::<Answer>(&mut replies)? {
+        match read_frame::<Answer>(&mut replies).map_err(unknown_surrender)? {
             Answer::Progress {
                 detail,
                 qualification,
@@ -427,8 +438,10 @@ fn wait_host(
     ticket: &checkpoint::Ticket,
 ) -> CliResult<()> {
     let deadline = Instant::now() + Duration::from_secs(180);
+    let mut absent_since = None::<Instant>;
     while Instant::now() < deadline {
-        if let Some(failure) = ticket.failure(paths)? {
+        let verdict = ticket.outcome(paths)?;
+        if let Some(checkpoint::Outcome::Failed(failure)) = verdict {
             return Err(failure.fix_forward());
         }
         if let Ok(stream) = crate::wire_transport::hosts::socket_until(
@@ -440,16 +453,30 @@ fn wait_host(
                 && identity.key == crate::home::state::state_key()
                 && ticket.successor(&identity)
             {
-                if identity.binary == binary {
+                if identity.binary == binary
+                    && matches!(&verdict, Some(checkpoint::Outcome::Ready(instance)) if instance == &identity.instance)
+                {
                     return Ok(());
                 }
-                if identity.binary == source_binary {
+                if identity.binary == source_binary && source_binary != binary {
                     return Err(CliFailure::classified(
                         crate::CliFailureKind::Retryable,
                         "host_upgrade_source_restored: destination exec did not take ownership; source is serving again",
                     ));
                 }
             }
+        }
+        // Both re-exec and the existing exec fallback retain this lock.
+        // Leave time for a failing destination to publish its typed verdict.
+        if matches!(
+            crate::wire_transport::hosts::lock_holder(&paths.host_lock()),
+            Ok(None)
+        ) {
+            if absent_since.get_or_insert_with(Instant::now).elapsed() >= Duration::from_secs(1) {
+                break;
+            }
+        } else {
+            absent_since = None;
         }
         std::thread::sleep(Duration::from_millis(25));
     }

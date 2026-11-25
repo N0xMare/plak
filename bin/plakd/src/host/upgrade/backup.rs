@@ -60,6 +60,7 @@ mod tests {
     #[test]
     fn refuses_combined_overflow_and_only_publishes_a_complete_backup() {
         let (_temp, paths) = PlakPaths::isolated_test_home();
+        paths.ensure_layout().unwrap();
         for db in [paths.product_database(), paths.runtime_database()] {
             let connection = rusqlite::Connection::open(db).unwrap();
             connection

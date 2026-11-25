@@ -206,6 +206,9 @@ pub fn copy_snapshot_bounded(
         )
         .map_err(|_| unavailable("could not read backup source size"))?;
     let bytes = u64::try_from(bytes).map_err(|_| unavailable("invalid backup source size"))?;
+    if bytes == 0 {
+        return Ok(0);
+    }
     if bytes > remaining {
         return Err(unavailable("combined SQLite backup exceeds its byte bound"));
     }

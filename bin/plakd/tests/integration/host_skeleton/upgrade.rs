@@ -11,6 +11,7 @@ const DESTINATION: &str = "r999.e999.p999.t999";
 mod drain;
 mod lifecycle;
 mod paired;
+pub(super) mod preservation;
 mod reopen;
 mod retained_jobs;
 mod revisions;
@@ -129,7 +130,7 @@ fn require_upgrade(fixture: &Fixture, host: &Host, stage: &str, result: &std::pr
 }
 
 /// The held guard in this disposable home proves the process belongs to this fixture.
-struct HomeHost(PathBuf);
+pub(super) struct HomeHost(pub(super) PathBuf);
 
 impl Drop for HomeHost {
     fn drop(&mut self) {

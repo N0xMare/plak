@@ -115,8 +115,9 @@ fn production_predecessor_upgrade_preserves_live_work() {
     assert_eq!(gateway_check(&fixture, &candidate), new_service);
 
     paired.advance(&candidate);
-    handoff(&fixture, &mut upgrade, &mut web, new_id);
+    handoff(&fixture, upgrade.arg("--backup-store"), &mut web, new_id);
     assert_host_reexec(&mut host, &socket, pid, inode);
+    assert_private_backup(&fixture);
 
     let mut web = Browser::connect(&socket, &login);
     assert_ne!(web.welcome.host_generation, old_generation);
@@ -141,6 +142,77 @@ fn production_predecessor_upgrade_preserves_live_work() {
     drop(web);
     stop(&mut host);
     assert_child_continued_once(&fixture, &root.node);
+}
+
+fn assert_private_backup(fixture: &Fixture) {
+    let paths = PlakPaths::explicit(fixture.home());
+    let mut backups = std::fs::read_dir(paths.state_dir().join("upgrade-backups")).unwrap();
+    let backup = backups.next().unwrap().unwrap().path();
+    assert!(backups.next().is_none());
+    for name in ["product.sqlite3", "subagents.sqlite3", "runtime.sqlite3"] {
+        let meta = std::fs::symlink_metadata(backup.join(name)).unwrap();
+        assert!(meta.is_file() && meta.permissions().mode() & 0o777 == 0o600);
+    }
+}
+
+#[test]
+fn production_predecessor_never_observes_ready_after_destination_preservation_refusal() {
+    let directory = std::env::var_os("PLAK_INSTALL_PREDECESSOR").unwrap();
+    let old = PathBuf::from(directory).join("plakd");
+    let candidate = PathBuf::from(std::env::var_os("PLAK_TEST_BINARY").unwrap());
+    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
+    let _cleanup = upgrade::HomeHost(fixture.home());
+    let (old_facts, new_facts) = probe_pair(&fixture, &old, &candidate);
+    if old_facts["state_key"] != new_facts["state_key"] {
+        return;
+    }
+    fixture.start_gateway_with(&[]);
+    let id = new_facts["binary_id"].as_str().unwrap();
+    let gate = fixture.root.join("hold-exec");
+    std::fs::write(&gate, []).unwrap();
+    let mut host = await_serving_host(spawn_host(
+        fixture
+            .base_command_from(&old)
+            .env("PLAK_TEST_HOST_BEFORE_PAIRED_EXEC", &gate)
+            .arg("host"),
+    ))
+    .unwrap();
+    let mut child = Child::spawn(
+        fixture
+            .base_command_from(&candidate)
+            .args(["host", "upgrade", "--expect-binary", id, "--drain", "0"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let line = host
+            .lines
+            .recv_timeout(remaining)
+            .expect("source never reached exec");
+        if line.contains("waiting at paired exec gate") {
+            break;
+        }
+    }
+    upgrade::preservation::replace_store_identity(&fixture);
+    std::fs::remove_file(gate).unwrap();
+    eventually("gated requester did not report failure", || {
+        child.try_wait().unwrap().is_some()
+    });
+    let result = child.wait().unwrap();
+    let mut detail = String::new();
+    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut detail).unwrap();
+    assert_eq!(result.code(), Some(5), "{detail}");
+    assert!(
+        detail.contains(
+            "host_upgrade_fix_forward_required: destination preservation failed after surrender"
+        ),
+        "{detail}"
+    );
+    let status = host.child.take().unwrap().wait().unwrap();
+    assert_eq!(status.code(), Some(5));
+    assert!(!fixture.home().join("host/upgrade.sock").exists());
 }
 
 fn assert_host_reexec(host: &mut Host, socket: &Path, pid: u32, inode: u64) {

@@ -50,9 +50,15 @@ impl Failure {
 }
 
 #[derive(Deserialize, Serialize)]
-struct Refused {
+struct Verdict {
     nonce: Uuid,
-    failure: Failure,
+    outcome: Outcome,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(super) enum Outcome {
+    Ready(String),
+    Failed(Failure),
 }
 
 pub(super) fn claim(paths: &PlakPaths) -> CliResult<File> {
@@ -100,15 +106,15 @@ impl Ticket {
 
     pub(super) fn clear(paths: &PlakPaths) {
         let _ = fs::remove_file(baseline(paths));
-        let _ = fs::remove_file(refusal(paths));
+        let _ = fs::remove_file(verdict_path(paths));
     }
 
-    pub(super) fn failure(&self, paths: &PlakPaths) -> CliResult<Option<Failure>> {
-        let Some(file) = open(&refusal(paths), FRAME)? else {
+    pub(super) fn outcome(&self, paths: &PlakPaths) -> CliResult<Option<Outcome>> {
+        let Some(file) = open(&verdict_path(paths), FRAME)? else {
             return Ok(None);
         };
-        let refusal: Refused = decode(file, FRAME)?;
-        Ok((refusal.nonce == self.nonce).then_some(refusal.failure))
+        let verdict: Verdict = decode(file, FRAME)?;
+        Ok((verdict.nonce == self.nonce).then_some(verdict.outcome))
     }
 
     pub(super) fn successor(&self, identity: &Identity) -> bool {
@@ -121,28 +127,38 @@ impl Ticket {
                     .map(HostInstance::pid)
     }
 
-    pub(in crate::host) fn record(&self, paths: &PlakPaths, failure: Failure) {
-        let path = refusal(paths);
-        let saved = stage(&path, FRAME, |out| {
+    pub(in crate::host) fn record_ready(&self, paths: &PlakPaths) -> CliResult<()> {
+        let instance = plakous_recursive_subagents::tree::custody_host()
+            .instance
+            .to_string();
+        self.record(paths, Outcome::Ready(instance))
+    }
+
+    pub(in crate::host) fn record_failure(&self, paths: &PlakPaths, failure: Failure) {
+        if let Err(error) = self.record(paths, Outcome::Failed(failure)) {
+            eprintln!("{}", error.message());
+        }
+    }
+
+    fn record(&self, paths: &PlakPaths, outcome: Outcome) -> CliResult<()> {
+        let path = verdict_path(paths);
+        stage(&path, FRAME, |out| {
             serde_json::to_writer(
                 out,
-                &Refused {
+                &Verdict {
                     nonce: self.nonce,
-                    failure,
+                    outcome,
                 },
             )
             .map_err(error)
         })
-        .and_then(|file| publish(file, &path));
-        if let Err(error) = saved {
-            eprintln!("{}", error.message());
-        }
+        .and_then(|file| publish(file, &path))
     }
 }
 
 pub(in crate::host) struct Checkpoint {
     pub(in crate::host) ticket: Ticket,
-    body: BufReader<File>,
+    body: Option<BufReader<File>>,
 }
 
 impl Checkpoint {
@@ -164,8 +180,12 @@ impl Checkpoint {
             return Err(error("missing checkpoint identity"));
         }
         let ticket: Ticket = serde_json::from_slice(&header).map_err(error)?;
-        Ok((ticket.destination == binary && matches(&ticket.source))
-            .then_some(Self { ticket, body }))
+        Ok(
+            (ticket.destination == binary && matches(&ticket.source)).then_some(Self {
+                ticket,
+                body: Some(body),
+            }),
+        )
     }
 
     pub(super) fn held(paths: &PlakPaths, source: &str, binary: &str) -> CliResult<()> {
@@ -187,7 +207,11 @@ impl Checkpoint {
     }
 
     fn verify(&mut self, paths: &PlakPaths) -> CliResult<Snapshot> {
-        let before: Snapshot = decode(&mut self.body, LIMIT)?;
+        let body = self
+            .body
+            .take()
+            .ok_or_else(|| error("checkpoint already verified"))?;
+        let before: Snapshot = decode(body, LIMIT)?;
         let (after, accepted) = Snapshot::capture(paths, Some(&before))?;
         before.compare(&after, &accepted, paths)?;
         Ok(after)
@@ -202,8 +226,8 @@ fn baseline(paths: &PlakPaths) -> PathBuf {
     root(paths).join("upgrade-checkpoint")
 }
 
-fn refusal(paths: &PlakPaths) -> PathBuf {
-    root(paths).join("upgrade-checkpoint-refused")
+fn verdict_path(paths: &PlakPaths) -> PathBuf {
+    root(paths).join("upgrade-checkpoint-verdict")
 }
 
 fn open(path: &Path, limit: u64) -> CliResult<Option<File>> {
@@ -236,19 +260,42 @@ fn private(file: &File, limit: u64) -> CliResult<()> {
 fn stage(
     path: &Path,
     limit: u64,
-    write: impl FnOnce(&mut BufWriter<&mut File>) -> CliResult<()>,
+    write: impl FnOnce(&mut BufWriter<Capped<'_>>) -> CliResult<()>,
 ) -> CliResult<tempfile::NamedTempFile> {
     let parent = path
         .parent()
         .ok_or_else(|| error("missing checkpoint directory"))?;
     let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(error)?;
     {
-        let mut buffered = BufWriter::new(temp.as_file_mut());
+        let mut buffered = BufWriter::new(Capped {
+            file: temp.as_file_mut(),
+            left: limit,
+        });
         write(&mut buffered)?;
         buffered.flush().map_err(error)?;
     }
     private(temp.as_file(), limit)?;
     Ok(temp)
+}
+
+struct Capped<'a> {
+    file: &'a mut File,
+    left: u64,
+}
+
+impl std::io::Write for Capped<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > self.left {
+            return Err(std::io::Error::other("checkpoint exceeds its byte bound"));
+        }
+        let written = self.file.write(bytes)?;
+        self.left -= written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
 }
 
 fn publish(temp: tempfile::NamedTempFile, path: &Path) -> CliResult<()> {

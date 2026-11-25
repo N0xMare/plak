@@ -18,10 +18,14 @@ impl PreservationReader<'_> {
     /// Returns the usual read-only runtime admission failures.
     pub fn inspect<T>(
         path: &Path,
+        deadline: std::time::Instant,
         read: impl FnOnce(&PreservationReader<'_>) -> T,
     ) -> Result<T, SessionStoreError> {
-        let connection =
+        let mut connection =
             SqliteSessionStore::open_inspection(path)?.ok_or(SessionStoreError::NotFound)?;
+        connection
+            .progress_handler(4096, Some(move || std::time::Instant::now() >= deadline))
+            .map_err(map_sqlite)?;
         let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
         admit_inspection_snapshot(&snapshot)?;
         Ok(read(&PreservationReader(&snapshot)))

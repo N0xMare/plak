@@ -28,6 +28,26 @@ fn probe(
     super::process::run_output(command, INSPECTION_TIME, OUTPUT_BYTES)
 }
 
+pub(in crate::host) fn health(paths: &PlakPaths) -> CliResult<()> {
+    let image = std::env::current_exe().map_err(super::io_failure)?;
+    let output = probe(&image, paths, &crate::home::state::state_key(), None)?;
+    let report = serde_json::from_slice::<Report>(&output.stdout).map_err(|_| {
+        CliFailure::new(
+            "host_upgrade_health_refused: destination binding inspection gave no verdict",
+        )
+    })?;
+    // A working head can be unavailable until planned recovery. The paired
+    // exact-reopen and preservation checks own that case, not a strict fleet
+    // binding audit or a second attempt to open the live session.
+    if regressions(None, &report).is_empty() {
+        Ok(())
+    } else {
+        Err(CliFailure::new(
+            "host_upgrade_health_refused: destination binding compatibility did not pass",
+        ))
+    }
+}
+
 pub(super) fn regressions<'a>(source: Option<&Report>, destination: &'a Report) -> Vec<&'a Row> {
     let comparable = |row: &Row| !row.archived && !row.superseded && !row.closed;
     let source = source.map(|report| {

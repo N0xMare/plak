@@ -182,7 +182,9 @@ fn decode_row(
 ) -> Result<FeedRecord, SessionStoreError> {
     let selector = SessionRef::new(session_id, parse(branch)?);
     let checkpoint = checkpoint.map(parse::<CheckpointId>).transpose()?;
-    if seal(selector, seq, tag, checkpoint, bytes)? != integrity {
+    if bytes.len() > plakous_agent::internal::MAX_FEED_RECORD_BYTES
+        || seal(selector, seq, tag, checkpoint, bytes)? != integrity
+    {
         return Err(SessionStoreError::corrupt());
     }
     let record = FeedRecord::decode(bytes).map_err(codec_error)?;

@@ -22,6 +22,10 @@ fn handoff_cuts(paired: bool) {
     for (flag, cut) in [
         ("PLAK_TEST_HOST_UPGRADE_CUT", "before-answer"),
         ("PLAK_TEST_HOST_UPGRADE_CUT", "after-source-release"),
+        (
+            "PLAK_TEST_HOST_UPGRADE_CUT",
+            "after-destination-verification",
+        ),
         ("PLAK_TEST_HOST_READOPT_CUT", HostCut::Lease.name()),
         ("PLAK_TEST_HOST_READOPT_CUT", HostCut::Transfer.name()),
         ("PLAK_TEST_HOST_READOPT_CUT", HostCut::Terminals.name()),

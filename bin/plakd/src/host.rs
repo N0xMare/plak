@@ -140,7 +140,7 @@ pub(crate) fn run_host_command(
     let outcome = serve_host(services, command, inherited, &mut gate);
     if let (Err(error), Some(checkpoint)) = (&outcome, gate.checkpoint) {
         eprintln!("host upgrade: {}", error.message());
-        checkpoint.ticket.record(paths, gate.stage);
+        checkpoint.ticket.record_failure(paths, gate.stage);
         return Err(gate.stage.fix_forward());
     }
     outcome
@@ -161,6 +161,8 @@ impl UpgradeGate {
         upgrade::health::stores(paths)?;
         self.stage = upgrade::checkpoint::Failure::Preservation;
         checkpoint.verify_destination(paths)?;
+        self.stage = upgrade::checkpoint::Failure::Health;
+        upgrade::bindings::health(paths)?;
         crate::carry::upgrade::crash_cut("after-destination-verification");
         self.stage = upgrade::checkpoint::Failure::Startup;
         Ok(())
@@ -411,9 +413,14 @@ impl RunningHost {
             paths.clone(),
             binary,
         ));
+        let idle = (start == crate::command::HostStart::Detached).then(idle::IdleExit::default);
+        ownership.state.running()?;
+        ownership.home.running()?;
+        if let Some(checkpoint) = &gate.checkpoint {
+            checkpoint.ticket.record_ready(paths)?;
+        }
         // The web endpoint serves beside the control socket and stops with it.
         let web = web.map(|web| runtime.spawn(web.serve()));
-        let idle = (start == crate::command::HostStart::Detached).then(idle::IdleExit::default);
         let upgrades = upgrade::Coordinator::start(
             &runtime,
             upgrade_listener,
@@ -426,11 +433,6 @@ impl RunningHost {
         let pending = upgrades.pending();
         let marker_pending = Arc::clone(&pending);
         let startup_failed = Arc::clone(&startup.failed);
-        ownership.state.running()?;
-        ownership.home.running()?;
-        // Startup failures after this point go through the existing host
-        // lifecycle. The coordinator still waits for continuation inventory.
-        gate.checkpoint = None;
         let stopping = runtime.block_on(listeners.control.serve(
             &host,
             move || {
@@ -467,6 +469,7 @@ impl RunningHost {
         );
         shutdown_runtime(runtime);
         scan_result?;
+        gate.checkpoint = None;
         if paired {
             let ready = ready.ok_or_else(|| CliFailure::new("missing paired host upgrade"))?;
             if stop.stopped() {

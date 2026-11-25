@@ -149,7 +149,7 @@ pub(super) fn capture(paths: &PlakPaths, budget: &mut Budget) -> CliResult<Trees
     let path = paths.subagents_database();
     let registry = schema();
     registry
-        .inspect_existing(&path, |db, status| {
+        .inspect_existing(&path, budget.deadline(), |db, status| {
             super::facts::configure_reader(db)?;
             let schema = identity(db, status)?;
             let mut facts = tables(db, TABLES, budget)?;
@@ -291,17 +291,23 @@ impl Trees {
             )?;
         }
         let intact = schema()
-            .inspect_existing(&path, |db, status| {
-                let backup = identity(db, status)?;
-                let mut query = db
-                    .prepare("PRAGMA quick_check(1)")
-                    .map_err(|_| unreadable("stopped-tree backup"))?;
-                let result: Option<String> = query
-                    .query_row([], |row| row.get(0))
-                    .optional()
-                    .map_err(|_| unreadable("stopped-tree backup"))?;
-                Ok::<_, crate::CliFailure>(backup == self.schema && result.as_deref() == Some("ok"))
-            })
+            .inspect_existing(
+                &path,
+                std::time::Instant::now() + std::time::Duration::from_secs(20),
+                |db, status| {
+                    let backup = identity(db, status)?;
+                    let mut query = db
+                        .prepare("PRAGMA quick_check(1)")
+                        .map_err(|_| unreadable("stopped-tree backup"))?;
+                    let result: Option<String> = query
+                        .query_row([], |row| row.get(0))
+                        .optional()
+                        .map_err(|_| unreadable("stopped-tree backup"))?;
+                    Ok::<_, crate::CliFailure>(
+                        backup == self.schema && result.as_deref() == Some("ok"),
+                    )
+                },
+            )
             .map_err(|_| unreadable("stopped-tree backup"))??;
         check(
             intact,

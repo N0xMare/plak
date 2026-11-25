@@ -102,7 +102,9 @@ pub(super) fn capture(
 ) -> CliResult<(Product, Vec<Admission>)> {
     let [(schema, path), _] = databases(paths);
     schema
-        .inspect_existing(&path, |db, _| capture_product(db, before, budget))
+        .inspect_existing(&path, budget.deadline(), |db, _| {
+            capture_product(db, before, budget)
+        })
         .map_err(|_| unreadable("product store"))?
 }
 

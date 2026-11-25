@@ -5895,7 +5895,7 @@ are closed or retired. These trees use existing store records, so an older
 build would not be rejected by store admission and could route a child to
 its root's runner instead of the child's saved placement.
 
-`plakd host upgrade --expect-binary <id> [--drain <duration|idle>]` is an
+`plakd host upgrade --expect-binary <id> [--drain <duration|idle>] [--backup-store]` is an
 explicit same-user operation, invoked using the destination executable and
 its binary ID. It discovers exactly one live source host across keys and
 echoes that host's key and instance on its private upgrade control socket.
@@ -5910,7 +5910,25 @@ invocation. Destination service preflight parses those arguments and validates
 the home configuration and user templates that startup requires. For a web
 listener it also verifies web access settings, UI/CSP assets and any existing
 cookie key without binding a listener or creating a key. A known
-service-configuration failure refuses before draining sessions.
+service-configuration or store-health failure refuses before draining sessions.
+The optional store backup is off by default. The requester takes private
+read-only SQLite copies of the existing product, runtime and tree stores,
+under one size and time budget, before requesting surrender. Each copy pins
+its own SQLite snapshot; this is not a cross-store transaction. It publishes
+the backup only after syncing the complete set. A refusal or incomplete copy
+does not drain the source. Upgrade never restores these copies.
+
+The requester binds a bounded hash-only preservation baseline to the source
+instance and destination image. It survives requester loss during handoff
+without changing the coordinator frames or client wire version. A source
+that supports the checkpoint compares again under its admission and step
+holds; a definite mismatch there refuses surrender. The destination compares
+under stand-alone writer exclusion after any stopped-store revisions and
+before serving. It checks store identities, retained branch and history
+ancestry, queued prefixes (a loss needs exact durable admission evidence),
+tree state and revisions, and durable job and retention evidence. Registered
+tree revisions require the stopped-store backup of the prior revision.
+Intentional tree retirement must be disabled for the comparison.
 
 The host exposes `resolve_paused_drafts(pause, deadline)` for an upgrade
 coordinator to call before planned surrender. The pause must belong to that
@@ -5972,7 +5990,11 @@ binary identity and captured tool PATH and HOME. If the last check or the exec
 fails, the source re-execs its own image with the retained listeners and locks.
 A successor that refuses inherited transport exits without keeping ownership;
 an ordinary start can then acquire the locks and replace stale socket paths.
-The destination still checks gateway availability and stores before serving.
+The destination checks gateway availability, store health, known retained
+binding incompatibilities, and preservation before serving. A working head
+whose binding inspection is unavailable still follows planned recovery.
+The requester requires both the destination's checkpoint verdict and its
+live, fresh same-PID coordinator identity.
 It answers Welcome and the in-memory directory while
 it finds and loads owed sessions; startup admission remains paused until the
 continuation inventory is captured.
@@ -6057,7 +6079,10 @@ publishing its result prevents a completed freeze. Dormant-root trees with live
 children participate too. Each source runtime, tree and outer-owner gate is
 reopened on precommit error; tree admission reopens before driver holds. Caller
 EOF or hangup cancels preparation before surrender, including the verdict
-barrier. After Ready, requester loss cannot cancel the committed transfer.
+barrier. Source Ready is the surrender boundary, not destination readiness.
+After source Ready, requester loss cannot cancel the transfer. Before that
+boundary, definite failures reopen the source gates and reschedule owed work.
+They do not undo already-committed commands or native job promotion.
 The home and source leases never move on a hold.
 
 Both modes request a yield from observation and foreground process waits as
@@ -6167,9 +6192,12 @@ link to the matching immutable snapshot first. A mismatch refuses before
 drain; installation does not advance the link.
 
 Reloading a client does not run this command, acquire custody or resend an
-ambiguously accepted submission. Upgrade reports success after the same-key
-destination acknowledges readiness. A timeout names an unknown outcome and
-directs the operator to start the destination if the host stopped.
+ambiguously accepted submission. After exec, a definite destination startup,
+health or preservation refusal is `host_upgrade_fix_forward_required`;
+it neither reverses custody nor restores a backup. A lost response or timeout
+without proof is `host_upgrade_outcome_unknown`. Inspect the live owner and
+logs before starting a destination; do not infer rollback from a missing
+readiness response.
 
 Native login, introduced in protocol 7 (current client protocol 12), runs in
 a dedicated account-service worker, never the

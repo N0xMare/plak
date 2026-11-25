@@ -72,6 +72,7 @@ struct Horizon {
 
 #[derive(Deserialize, Serialize)]
 pub(super) struct Runtime {
+    instance: Key,
     sessions: Map<Key>,
     checkpoints: Map<Checkpoint>,
     branches: Map<Branch>,
@@ -86,7 +87,7 @@ pub(super) fn capture(
     candidates: Vec<Admission>,
     budget: &mut Budget,
 ) -> CliResult<(Option<Runtime>, BTreeSet<Key>)> {
-    match PreservationReader::inspect(&paths.runtime_database(), |reader| {
+    match PreservationReader::inspect(&paths.runtime_database(), budget.deadline(), |reader| {
         super::facts::configure_reader(reader.connection())?;
         let accepted = admissions(reader, candidates)?;
         let runtime = capture_runtime(reader, budget)?;
@@ -107,6 +108,13 @@ pub(super) fn capture(
 
 fn capture_runtime(reader: &PreservationReader<'_>, budget: &mut Budget) -> CliResult<Runtime> {
     let db = reader.connection();
+    let instance = db
+        .query_row(
+            "SELECT lease_domain FROM store_meta WHERE id=1",
+            [],
+            |row| row.get::<_, [u8; 48]>(0),
+        )
+        .map_err(|_| unreadable("runtime store identity"))?;
     let mut sessions = Map::new();
     scan(
         db,
@@ -154,6 +162,7 @@ fn capture_runtime(reader: &PreservationReader<'_>, budget: &mut Budget) -> CliR
     let (horizons, pruned) = read_retention(reader, &checkpoints, budget)?;
     let bookkeeping = tables(db, BOOKKEEPING, budget)?;
     Ok(Runtime {
+        instance: crate::shipping_artifact::digest(&instance),
         sessions,
         checkpoints,
         branches,
@@ -347,6 +356,10 @@ fn admissions(
 
 impl Runtime {
     pub(super) fn compare(&self, after: &Self) -> CliResult<()> {
+        check(
+            self.instance == after.instance,
+            "preservation changed the runtime store identity",
+        )?;
         subset(&self.sessions, &after.sessions, "runtime sessions")?;
         for (branch, before) in &self.horizons {
             check(

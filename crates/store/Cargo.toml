@@ -30,7 +30,7 @@ futures-channel = { workspace = true, optional = true }
 plakous-agent.workspace = true
 # Keep fresh consumer resolutions on the engine admitted by the runtime source pin.
 libsqlite3-sys = { workspace = true, optional = true }
-rusqlite = { workspace = true, optional = true, features = ["backup"] }
+rusqlite = { workspace = true, optional = true, features = ["backup", "hooks"] }
 
 # The lease clock reads the boot clock, and the SQLite holder files use
 # descriptor-relative opens and flock; no other target has either.

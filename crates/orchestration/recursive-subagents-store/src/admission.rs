@@ -126,11 +126,15 @@ impl Schema {
     pub fn inspect_existing<T>(
         &self,
         path: &Path,
+        deadline: std::time::Instant,
         read: impl FnOnce(&Connection, Status) -> T,
     ) -> Result<T, AdmissionError> {
-        let connection = self
+        let mut connection = self
             .open_reader(path)?
             .ok_or_else(|| self.unavailable("is not initialized"))?;
+        connection
+            .progress_handler(4096, Some(move || std::time::Instant::now() >= deadline))
+            .map_err(|_| self.unavailable("inspection work bound could not be configured"))?;
         let snapshot = connection
             .unchecked_transaction()
             .map_err(|_| self.unavailable("inspection could not start"))?;
