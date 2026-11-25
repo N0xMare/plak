@@ -575,6 +575,24 @@ pub struct RunnerStreams {
     pub input: Pin<Box<dyn AsyncWrite + Send>>,
     /// From the runner.
     pub output: Pin<Box<dyn AsyncRead + Send>>,
+    link_closed: CancellationToken,
+}
+
+impl RunnerStreams {
+    /// Creates streams owned by one link connection. The link cancels
+    /// `link_closed` when that connection ends, even if a new one replaces it.
+    #[must_use]
+    pub const fn new(
+        input: Pin<Box<dyn AsyncWrite + Send>>,
+        output: Pin<Box<dyn AsyncRead + Send>>,
+        link_closed: CancellationToken,
+    ) -> Self {
+        Self {
+            input,
+            output,
+            link_closed,
+        }
+    }
 }
 
 impl std::fmt::Debug for RunnerStreams {

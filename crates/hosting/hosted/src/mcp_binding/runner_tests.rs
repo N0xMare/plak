@@ -252,68 +252,88 @@ async fn wait_for(path: &Path) {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn mcp_on_a_runner_runs_there_and_restarts_after_the_runner_does() {
+#[test]
+fn mcp_on_a_runner_runs_there_and_restarts_after_the_runner_does() {
+    let link_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let mcp_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir(workspace(directory.path())).unwrap();
     let runner = spawn("mcp_runner_daemon_process", DAEMON, directory.path());
-    let (client, backend) = bind(directory.path(), "instance-1").await;
+    let (client, backend) = link_runtime.block_on(bind(directory.path(), "instance-1"));
 
     // The server runs on the runner with the runner's secret: the fixture
     // exits at once on any other value.
-    let (pool, lease, environment) = lease_on_runner(directory.path(), backend).await;
-    assert!(
-        lease
-            .listed_tool_names()
-            .await
-            .unwrap()
-            .contains(&"echo".to_owned())
-    );
+    let (pool, lease, environment) = mcp_runtime.block_on(async {
+        let (pool, lease, environment) = lease_on_runner(directory.path(), backend).await;
+        assert!(
+            lease
+                .listed_tool_names()
+                .await
+                .unwrap()
+                .contains(&"echo".to_owned())
+        );
+        (pool, lease, environment)
+    });
     let first = server_pid(directory.path());
     assert!(alive(&first));
 
-    // The runner dies, and its server with it.
+    // Let the link observe EOF without driving the MCP stream pumps.
     kill(runner);
-    wait_gone(&first).await;
-    // With no link, a lease fails at once; nothing is started anywhere.
-    std::fs::remove_file(pid_file(directory.path())).unwrap();
-    let asked = Instant::now();
-    let spec = lease.spec().clone();
-    drop(lease);
-    assert!(
-        pool.lease(spec.clone(), Arc::clone(&environment))
+    link_runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(20), client.closed())
             .await
-            .is_err()
-    );
-    assert!(
-        asked.elapsed() < Duration::from_secs(10),
-        "{:?}",
-        asked.elapsed()
-    );
-    assert!(!pid_file(directory.path()).exists());
+            .expect("the runner link never closed");
+        wait_gone(&first).await;
+    });
+    std::fs::remove_file(pid_file(directory.path())).unwrap();
+    let spec = mcp_runtime.block_on(async {
+        // The lease must refuse even before the cached MCP client sees EOF.
+        let spec = lease.spec().clone();
+        drop(lease);
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            pool.lease(spec.clone(), Arc::clone(&environment)),
+        )
+        .await
+        .expect("the lease waited for a disconnected runner");
+        assert_eq!(result.unwrap_err().kind(), McpErrorKind::Startup);
+        assert!(!pid_file(directory.path()).exists());
+        spec
+    });
 
     // A new runner takes the link back, and the next lease starts the
     // server there.
     let runner = spawn("mcp_runner_daemon_process", DAEMON, directory.path());
-    client
-        .reconnect(connect_socket(directory.path()).await)
-        .await
-        .unwrap();
-    let lease = pool.lease(spec, environment).await.unwrap();
-    assert!(
-        lease
-            .listed_tool_names()
+    link_runtime.block_on(async {
+        client
+            .reconnect(connect_socket(directory.path()).await)
             .await
-            .unwrap()
-            .contains(&"echo".to_owned())
-    );
-    let second = server_pid(directory.path());
-    assert_ne!(first, second);
-    assert!(alive(&second));
-    drop(lease);
-    pool.shutdown().await;
-    wait_gone(&second).await;
-    kill(runner);
+            .unwrap();
+    });
+    mcp_runtime.block_on(async {
+        let lease = pool.lease(spec, environment).await.unwrap();
+        assert!(
+            lease
+                .listed_tool_names()
+                .await
+                .unwrap()
+                .contains(&"echo".to_owned())
+        );
+        let second = server_pid(directory.path());
+        assert_ne!(first, second);
+        assert!(alive(&second));
+        drop(lease);
+        pool.shutdown().await;
+        wait_gone(&second).await;
+        kill(runner);
+    });
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -7,6 +7,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use plakous_model::CancellationToken;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -66,9 +67,14 @@ struct TerminatedWire {
 pub(in crate::environment::backend) struct RunnerServiceOwner {
     link: Option<Arc<dyn RunnerLink>>,
     service: u64,
+    link_closed: CancellationToken,
 }
 
 impl RunnerServiceOwner {
+    pub(in crate::environment::backend) fn link_is_closed(&self) -> bool {
+        self.link_closed.is_cancelled()
+    }
+
     pub(in crate::environment::backend) async fn terminate(
         mut self,
         grace: Duration,
@@ -77,6 +83,9 @@ impl RunnerServiceOwner {
         let Some(link) = self.link.take() else {
             return Ok(());
         };
+        if self.link_is_closed() {
+            return Ok(());
+        }
         let answer = link.call(terminate_call(self.service, grace)?).await;
         let terminated: TerminatedWire = from_value(answer.map_err(failure_error)?)?;
         tail.push(terminated.stderr_tail.as_bytes());
@@ -88,6 +97,9 @@ impl Drop for RunnerServiceOwner {
     /// Dropping a service unterminated kills it, as a host service is
     /// killed: the runner terminates it with no grace.
     fn drop(&mut self) {
+        if self.link_is_closed() {
+            return;
+        }
         let Some(link) = self.link.take() else {
             return;
         };
@@ -111,7 +123,7 @@ fn terminate_call(service: u64, grace: Duration) -> Result<RunnerCall, Execution
     Ok(RunnerCall::new(
         RunnerVerb::ServiceTerminate,
         payload,
-        &OperationContext::new(plakous_model::CancellationToken::new()),
+        &OperationContext::new(CancellationToken::new()),
     ))
 }
 
@@ -161,6 +173,7 @@ pub(super) fn spawn(
         let owner = RunnerServiceOwner {
             link: Some(link),
             service: spawned.stream,
+            link_closed: streams.link_closed,
         };
         Ok(ServiceProcess::new(
             streams.input,

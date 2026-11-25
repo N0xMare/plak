@@ -551,6 +551,12 @@ impl Connection {
                     return Err(error);
                 }
             };
+            if handle.runner_link_is_closed() {
+                return Err(McpError::new(
+                    McpErrorKind::Startup,
+                    format!("mcp server {server} lost its runner link during startup"),
+                ));
+            }
             Ok((client, handler, Some(handle), listing))
         })
         .await?;
@@ -640,6 +646,9 @@ impl Connection {
 
     fn is_closed(&self) -> bool {
         self.peer.is_transport_closed()
+            || lock(&self.process)
+                .as_ref()
+                .is_some_and(ServiceHandle::runner_link_is_closed)
     }
 
     fn stderr_tail(&self) -> String {

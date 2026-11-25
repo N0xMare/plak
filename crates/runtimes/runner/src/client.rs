@@ -1127,6 +1127,12 @@ impl Inner {
     }
 
     async fn call(&self, call: RunnerCall) -> Result<Value, RunnerFailure> {
+        self.call_with_connection(call)
+            .await
+            .map(|(value, _)| value)
+    }
+
+    async fn call_with_connection(&self, call: RunnerCall) -> Result<(Value, u64), RunnerFailure> {
         self.check_qualification(&call)?;
         let gate = self.foreground.call_gate(&call);
         let foreground_guard = match &gate {
@@ -1193,9 +1199,11 @@ impl Inner {
         loop {
             tokio::select! {
                 answer = &mut answered => {
-                    return answer.unwrap_or_else(|_| Err(RunnerFailure::OutcomeUnknown(
-                        "the call was abandoned".into(),
-                    )));
+                    return answer
+                        .unwrap_or_else(|_| Err(RunnerFailure::OutcomeUnknown(
+                            "the call was abandoned".into(),
+                        )))
+                        .map(|value| (value, sent_on));
                 }
                 () = cancellation.cancelled(), if !cancel_sent => {
                     cancel_sent = true;
@@ -1401,7 +1409,7 @@ impl Inner {
                 "qualification does not open streams".into(),
             ));
         }
-        let value = self.call(call).await?;
+        let (value, connection) = self.call_with_connection(call).await?;
         let Some(stream) = value.get("stream").and_then(Value::as_u64) else {
             return Err(RunnerFailure::Refused(
                 "the runner's answer names no stream".into(),
@@ -1412,18 +1420,20 @@ impl Inner {
         let (chunks, received) = mpsc::unbounded_channel();
         let credit = Credit::new(INITIAL_CREDIT);
         let window = Window::new(INITIAL_CREDIT);
-        let weak = Arc::downgrade(&self);
-        let out = Outbound::new(stream, move |frame: StreamFrame| {
-            weak.upgrade()
-                .is_some_and(|inner| inner.send(HostFrame::Stream(frame)))
-        });
-        {
+        let (out, link_closed) = {
             let mut state = lock(&self.state);
-            if state.sender.is_none() {
+            let Some(sender) = state
+                .sender
+                .clone()
+                .filter(|_| state.connection == connection && !state.closer.is_cancelled())
+            else {
                 return Err(RunnerFailure::OutcomeUnknown(
                     "the link was lost as the stream opened".into(),
                 ));
-            }
+            };
+            let out = Outbound::new(stream, move |frame: StreamFrame| {
+                sender.send(HostFrame::Stream(frame)).is_ok()
+            });
             state.streams.insert(
                 stream,
                 StreamEnds::new(
@@ -1433,7 +1443,8 @@ impl Inner {
                     Arc::clone(&out),
                 ),
             );
-        }
+            (out, state.closer.clone())
+        };
         tokio::spawn(send_stream(input_pump, credit, Arc::clone(&out)));
         out.send(StreamEvent::Credit {
             bytes: INITIAL_CREDIT,
@@ -1441,10 +1452,7 @@ impl Inner {
         tokio::spawn(receive_stream(output_pump, received, window, out));
         Ok((
             value,
-            RunnerStreams {
-                input: Box::pin(input),
-                output: Box::pin(output),
-            },
+            RunnerStreams::new(Box::pin(input), Box::pin(output), link_closed),
         ))
     }
 }

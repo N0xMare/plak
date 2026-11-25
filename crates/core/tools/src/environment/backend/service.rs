@@ -423,6 +423,12 @@ impl ServiceHandle {
         self.stderr_tail.sanitized()
     }
 
+    /// Whether the runner connection that owns this service has ended.
+    #[must_use]
+    pub fn runner_link_is_closed(&self) -> bool {
+        matches!(&self.owner, ServiceOwner::Runner(runner) if runner.link_is_closed())
+    }
+
     /// Terminates the service and joins its process group.
     ///
     /// Sends SIGTERM to the owned process group, waits up to `grace`, then
