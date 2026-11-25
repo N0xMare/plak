@@ -12,6 +12,8 @@ use crate::lifecycle::HostLifecycleTarget;
 
 mod directory;
 pub use directory::*;
+mod schema;
+pub use schema::schema;
 mod service_tier;
 pub use service_tier::*;
 mod shared;

@@ -1,10 +1,7 @@
 use serde_json::Value;
 
-const SCHEMA: &str =
-    include_str!("../../../../../bin/plakd/tests/fixtures/protocol-13-wire-schema.json");
-
 pub(super) fn validate(direction: &str, fixture: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let document: Value = serde_json::from_str(SCHEMA)?;
+    let document = plakd_wire_types::v13::schema(None);
     let schema = &document[direction];
     for (index, line) in fixture.lines().enumerate() {
         let frame: Value = serde_json::from_str(line)?;
