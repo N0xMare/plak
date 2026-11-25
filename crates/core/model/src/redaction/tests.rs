@@ -162,3 +162,45 @@ fn a_private_key_without_its_end_is_redacted_to_the_end() {
     assert_eq!(redacted, "[redacted]\nkept\n[redacted]");
     assert_eq!(text(&redacted), redacted);
 }
+
+#[test]
+fn gateway_keys_cookies_and_oauth_params_are_redacted_idempotently() {
+    let cases = [
+        (
+            "plak-gateway-key: plakgw1.host.secretvalue123",
+            "plak-gateway-key: [redacted]",
+        ),
+        (
+            "Set-Cookie: sid=topsecret; HttpOnly",
+            "Set-Cookie: [redacted]",
+        ),
+        (
+            "caller key plakgw1.host-a.BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc leaked",
+            "caller key [redacted] leaked",
+        ),
+        (
+            "https://example.invalid/cb?code=oauthcode123&state=ok",
+            "https://example.invalid/cb?code=[redacted]&state=ok",
+        ),
+        (
+            "grant_type=refresh_token&refresh_token=rt123&client_secret=cs456",
+            "grant_type=refresh_token&refresh_token=[redacted]&client_secret=[redacted]",
+        ),
+        (
+            "code=authcode99&grant_type=authorization_code",
+            "code=[redacted]&grant_type=authorization_code",
+        ),
+        (
+            "refresh_token=short1&client_secret=sec2",
+            "refresh_token=[redacted]&client_secret=[redacted]",
+        ),
+    ];
+    for (input, expected) in cases {
+        let redacted = text(input);
+        assert_eq!(redacted, expected, "{input}");
+        assert_eq!(text(&redacted), redacted, "idempotent: {input}");
+    }
+    // Plain status prose is not misclassified as an OAuth code.
+    let prose = "exit code=1 status=200";
+    assert_eq!(text(prose), prose);
+}

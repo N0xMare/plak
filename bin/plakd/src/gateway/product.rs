@@ -4,8 +4,8 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
 
 use plakous::gateway::protocol::Endpoint;
 use plakous::gateway::protocol::GatewayAccount;
@@ -29,7 +29,6 @@ pub(crate) struct ProductGateway {
     state: Arc<GatewayState>,
     home: PlakPaths,
     custody: Arc<plakous::gateway::server::LocalCustody>,
-    notes: Mutex<HashMap<String, RelayNote>>,
 }
 
 #[derive(Clone)]
@@ -38,9 +37,15 @@ pub(crate) struct Authed {
     scopes: Option<plakous::gateway::protocol::scope::ScopeSet>,
 }
 
-struct RelayNote {
-    principal: Principal,
-    release: bool,
+struct RelayCutGuard {
+    state: Arc<GatewayState>,
+    id: u64,
+}
+
+impl Drop for RelayCutGuard {
+    fn drop(&mut self) {
+        lock_relays(&self.state).remove(&self.id);
+    }
 }
 
 struct CallHold {
@@ -59,7 +64,6 @@ impl ProductGateway {
             state,
             home: home.clone(),
             custody,
-            notes: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -69,13 +73,20 @@ impl CallHold {
         if state.draining.load(Ordering::Relaxed) {
             return Err(busy(1000));
         }
-        if state.inflight.load(Ordering::Relaxed) >= state.config.max_inflight {
+        let max = state.config.max_inflight;
+        if state
+            .inflight
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                (current < max).then_some(current + 1)
+            })
+            .is_err()
+        {
             return Err(busy(1000));
         }
         if !dispatch::admit_caller(state, principal) {
+            state.inflight.fetch_sub(1, Ordering::AcqRel);
             return Err(busy(500));
         }
-        state.inflight.fetch_add(1, Ordering::Relaxed);
         Ok(Self {
             state: Arc::clone(state),
             principal: principal.clone(),
@@ -85,7 +96,7 @@ impl CallHold {
 
 impl Drop for CallHold {
     fn drop(&mut self) {
-        self.state.inflight.fetch_sub(1, Ordering::Relaxed);
+        self.state.inflight.fetch_sub(1, Ordering::AcqRel);
         dispatch::release_caller(&self.state, &self.principal);
     }
 }
@@ -104,13 +115,18 @@ impl GatewayService for ProductGateway {
         if self.state.inflight.load(Ordering::Relaxed) >= self.state.config.max_inflight {
             return Err(busy(1000));
         }
-        let request = key_request(key)?;
+        let presented = match key {
+            Some(bytes) => {
+                Some(std::str::from_utf8(bytes).map_err(|_| GatewayRefusal::Unauthenticated {})?)
+            }
+            None => None,
+        };
         let (principal, scopes) = {
             let callers = match self.state.callers.lock() {
                 Ok(guard) => guard,
                 Err(poisoned) => poisoned.into_inner(),
             };
-            let (principal, record) = auth::authenticate(&callers, &map_peer(peer), &request)?;
+            let (principal, record) = auth::authenticate_key(&callers, &map_peer(peer), presented)?;
             (principal, record.map(|record| record.scopes.clone()))
         };
         // Every relay, facts and refresh path checks the switch again; the
@@ -123,6 +139,14 @@ impl GatewayService for ProductGateway {
         Ok(Authed { principal, scopes })
     }
 
+    fn admit_relay(
+        &self,
+        principal: &Authed,
+    ) -> Result<Option<Box<dyn std::any::Any + Send>>, GatewayRefusal> {
+        let hold = CallHold::acquire(&self.state, &principal.principal)?;
+        Ok(Some(Box::new(hold)))
+    }
+
     fn inject<'a>(
         &'a self,
         principal: &'a Authed,
@@ -130,14 +154,9 @@ impl GatewayService for ProductGateway {
         envelope: &'a RelayEnvelope,
     ) -> ServiceFuture<'a, Injection> {
         Box::pin(async move {
-            self.begin_relay(principal, envelope);
             if self.state.draining.load(Ordering::Relaxed) {
                 return Err(busy(1000));
             }
-            if !dispatch::admit_caller(&self.state, &principal.principal) {
-                return Err(busy(500));
-            }
-            self.mark_release(envelope);
             dispatch::gate_relay(
                 &self.state,
                 &principal.principal,
@@ -145,28 +164,30 @@ impl GatewayService for ProductGateway {
                 &envelope.account,
             )?;
             let injection = self.custody.inject(version, envelope).await?;
-            let key = note_key(&envelope.operation, envelope.attempt);
+            let relay_id = self.state.next_relay_id.fetch_add(1, Ordering::Relaxed);
             let token = plakous::gateway::server::CancellationToken::new();
             lock_relays(&self.state).insert(
-                key.clone(),
+                relay_id,
                 dispatch::RelayCut {
                     principal: principal.principal.clone(),
                     account: envelope.account.clone(),
                     token: token.clone(),
                 },
             );
+            let cut_guard = RelayCutGuard {
+                state: Arc::clone(&self.state),
+                id: relay_id,
+            };
             // A disable saves its flag before it cuts: one that landed while
             // this relay registered is seen here, so no relay escapes a cut.
-            if let Err(refusal) = dispatch::gate_relay(
+            // On refusal, `cut_guard` drops and removes `relay_id`.
+            dispatch::gate_relay(
                 &self.state,
                 &principal.principal,
                 principal.scopes.as_ref(),
                 &envelope.account,
-            ) {
-                lock_relays(&self.state).remove(&key);
-                return Err(refusal);
-            }
-            Ok(injection.cut_by(token))
+            )?;
+            Ok(injection.cut_by(token).guarded_by(Box::new(cut_guard)))
         })
     }
 
@@ -188,17 +209,13 @@ impl GatewayService for ProductGateway {
     }
 
     fn audit(&self, record: RelayRecord) {
-        let note = self.take_note(&record);
-        if note.is_some() {
-            self.state.inflight.fetch_sub(1, Ordering::Relaxed);
-        }
-        if let Some(note) = note.as_ref().filter(|note| note.release) {
-            dispatch::release_caller(&self.state, &note.principal);
-        }
-        let caller = note
-            .as_ref()
-            .map(|note| note.principal.audit_name())
-            .unwrap_or_else(|| "unknown".to_owned());
+        self.state
+            .audit
+            .record(&relay_event(&self.state, "unknown", &record));
+    }
+
+    fn audit_for(&self, principal: &Authed, record: RelayRecord) {
+        let caller = principal.principal.audit_name();
         self.state
             .audit
             .record(&relay_event(&self.state, &caller, &record));
@@ -371,6 +388,7 @@ impl ProductGateway {
         let request = Request {
             method: "POST".to_owned(),
             path: endpoint.path(version),
+            #[cfg(test)]
             headers: std::collections::BTreeMap::new(),
             body: body.to_vec(),
         };
@@ -389,32 +407,6 @@ impl ProductGateway {
         .await
         .map_err(|_| GatewayRefusal::Internal {})?;
         from_response(response)
-    }
-
-    fn begin_relay(&self, principal: &Authed, envelope: &RelayEnvelope) {
-        self.state.inflight.fetch_add(1, Ordering::Relaxed);
-        let mut notes = lock_notes(&self.notes);
-        notes.insert(
-            note_key(&envelope.operation, envelope.attempt),
-            RelayNote {
-                principal: principal.principal.clone(),
-                release: false,
-            },
-        );
-    }
-
-    fn mark_release(&self, envelope: &RelayEnvelope) {
-        let mut notes = lock_notes(&self.notes);
-        if let Some(note) = notes.get_mut(&note_key(&envelope.operation, envelope.attempt)) {
-            note.release = true;
-        }
-    }
-
-    fn take_note(&self, record: &RelayRecord) -> Option<RelayNote> {
-        let (operation, attempt) = record.operation.clone()?;
-        let key = note_key(&operation, attempt);
-        lock_relays(&self.state).remove(&key);
-        lock_notes(&self.notes).remove(&key)
     }
 
     fn record(
@@ -506,43 +498,13 @@ fn relay_error(outcome: &RelayOutcome) -> Option<String> {
     }
 }
 
-fn note_key(operation: &plakous::gateway::protocol::UuidText, attempt: u32) -> String {
-    format!("{}:{attempt}", operation.as_str())
-}
-
-fn lock_notes(
-    notes: &Mutex<HashMap<String, RelayNote>>,
-) -> std::sync::MutexGuard<'_, HashMap<String, RelayNote>> {
-    match notes.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
-}
-
 fn lock_relays(
     state: &GatewayState,
-) -> std::sync::MutexGuard<'_, HashMap<String, dispatch::RelayCut>> {
+) -> std::sync::MutexGuard<'_, HashMap<u64, dispatch::RelayCut>> {
     match state.relays.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     }
-}
-
-fn key_request(key: Option<&[u8]>) -> Result<Request, GatewayRefusal> {
-    let mut headers = std::collections::BTreeMap::new();
-    if let Some(key) = key {
-        let text = std::str::from_utf8(key).map_err(|_| GatewayRefusal::Unauthenticated {})?;
-        headers.insert(
-            plakous::gateway::protocol::KEY_HEADER.to_owned(),
-            text.to_owned(),
-        );
-    }
-    Ok(Request {
-        method: "POST".to_owned(),
-        path: String::new(),
-        headers,
-        body: Vec::new(),
-    })
 }
 
 fn map_peer(peer: &ServerPeer) -> Peer {

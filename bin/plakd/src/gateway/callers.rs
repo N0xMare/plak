@@ -93,9 +93,10 @@ impl Callers {
         if self.records.iter().any(|record| record.caller == caller) {
             return Err(CallerError::Exists);
         }
-        let secret = random_secret().map_err(|error| CallerError::Io(error.to_string()))?;
-        let key = CallerKey::from_secret(caller.clone(), secret);
-        self.records.push(CallerRecord {
+        let secret = random_secret()?;
+        let key = CallerKey::from_secret(caller.clone(), *secret);
+        let mut next = self.records.clone();
+        next.push(CallerRecord {
             caller,
             scopes,
             sources,
@@ -103,24 +104,29 @@ impl Callers {
             secret_sha256: hash_secret(key.secret()),
             revoked_at_unix_ms: None,
         });
-        self.store()?;
+        store_records(&self.path, &next)?;
+        self.records = next;
         Ok(key)
     }
 
     pub(crate) fn rotate(&mut self, caller: &CallerId) -> Result<CallerKey, CallerError> {
-        let record = self.live_mut(caller)?;
-        let secret = random_secret().map_err(|error| CallerError::Io(error.to_string()))?;
-        let key = CallerKey::from_secret(caller.clone(), secret);
-        record.secret_sha256 = hash_secret(key.secret());
-        record.issued_at_unix_ms = now_ms();
-        self.store()?;
+        let index = self.live_index(caller)?;
+        let secret = random_secret()?;
+        let key = CallerKey::from_secret(caller.clone(), *secret);
+        let mut next = self.records.clone();
+        next[index].secret_sha256 = hash_secret(key.secret());
+        next[index].issued_at_unix_ms = now_ms();
+        store_records(&self.path, &next)?;
+        self.records = next;
         Ok(key)
     }
 
     pub(crate) fn remove(&mut self, caller: &CallerId) -> Result<(), CallerError> {
-        let record = self.live_mut(caller)?;
-        record.revoked_at_unix_ms = Some(now_ms());
-        self.store()?;
+        let index = self.live_index(caller)?;
+        let mut next = self.records.clone();
+        next[index].revoked_at_unix_ms = Some(now_ms());
+        store_records(&self.path, &next)?;
+        self.records = next;
         Ok(())
     }
 
@@ -147,22 +153,22 @@ impl Callers {
             .collect()
     }
 
-    fn live_mut(&mut self, caller: &CallerId) -> Result<&mut CallerRecord, CallerError> {
+    fn live_index(&self, caller: &CallerId) -> Result<usize, CallerError> {
         self.records
-            .iter_mut()
-            .find(|record| record.caller == *caller && record.revoked_at_unix_ms.is_none())
+            .iter()
+            .position(|record| record.caller == *caller && record.revoked_at_unix_ms.is_none())
             .ok_or(CallerError::Unknown)
     }
+}
 
-    fn store(&self) -> Result<(), CallerError> {
-        let file = StoredFile {
-            version: 1,
-            callers: self.records.iter().map(encode_stored).collect(),
-        };
-        let bytes = serde_json::to_vec_pretty(&file)
-            .map_err(|error| CallerError::Malformed(error.to_string()))?;
-        write_private(&self.path, &bytes).map_err(|error| CallerError::Io(error.to_string()))
-    }
+fn store_records(path: &Path, records: &[CallerRecord]) -> Result<(), CallerError> {
+    let file = StoredFile {
+        version: 1,
+        callers: records.iter().map(encode_stored).collect(),
+    };
+    let bytes = serde_json::to_vec_pretty(&file)
+        .map_err(|error| CallerError::Malformed(error.to_string()))?;
+    write_private(path, &bytes).map_err(|error| CallerError::Io(error.to_string()))
 }
 
 #[derive(serde::Serialize)]
@@ -208,17 +214,13 @@ fn hash_secret(secret: &[u8; 32]) -> [u8; 32] {
 }
 
 fn constant_eq(left: &[u8; 32], right: &[u8; 32]) -> bool {
-    let mut diff = 0_u8;
-    for (one, other) in left.iter().zip(right.iter()) {
-        diff |= one ^ other;
-    }
-    diff == 0
+    use subtle::ConstantTimeEq as _;
+    bool::from(left.ct_eq(right))
 }
 
-fn random_secret() -> std::io::Result<[u8; 32]> {
-    let mut bytes = [0_u8; 32];
-    let mut file = std::fs::File::open("/dev/urandom")?;
-    std::io::Read::read_exact(&mut file, &mut bytes)?;
+fn random_secret() -> Result<zeroize::Zeroizing<[u8; 32]>, CallerError> {
+    let mut bytes = zeroize::Zeroizing::new([0_u8; 32]);
+    getrandom::fill(&mut *bytes).map_err(|error| CallerError::Io(error.to_string()))?;
     Ok(bytes)
 }
 

@@ -18,7 +18,11 @@ use plakous::gateway::protocol::admin::{AdminRefusal, AdminRequest, AdminRespons
 use plakous::gateway::protocol::admin::{LoginMethod, LoginPhase};
 use plakous::gateway::protocol::facts::{AccountFacts, RefreshRequest};
 use plakous::gateway::protocol::refusal::GatewayRefusal;
+#[cfg(test)]
+use plakous::gateway::protocol::scope::Capability;
+use plakous::gateway::protocol::scope::ScopeSet;
 
+use super::auth::Principal;
 use super::holder::HolderLock;
 
 pub(crate) const MAX_PENDING_LOGINS: usize = 3;
@@ -26,7 +30,15 @@ const LOGIN_LIFETIME: Duration = Duration::from_secs(15 * 60);
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(crate) trait AccountBridge: Send {
-    fn call(&mut self, local_admin: bool, request: AdminRequest) -> AdminResponse;
+    fn call(
+        &mut self,
+        caller: &Principal,
+        scopes: Option<&ScopeSet>,
+        request: AdminRequest,
+    ) -> AdminResponse;
+    fn attempt_info(&mut self, _attempt: &UuidText) -> Option<(Principal, GatewayAccount)> {
+        None
+    }
     fn facts(&mut self, accounts: &[GatewayAccount]) -> Result<Vec<AccountFacts>, GatewayRefusal>;
     fn refresh(&mut self, request: &RefreshRequest) -> Result<AccountFacts, GatewayRefusal>;
 }
@@ -101,11 +113,24 @@ impl AccountWorker {
 }
 
 impl AccountBridge for AccountWorker {
-    fn call(&mut self, local_admin: bool, request: AdminRequest) -> AdminResponse {
-        self.run(move |bridge| bridge.call(local_admin, request))
+    fn call(
+        &mut self,
+        caller: &Principal,
+        scopes: Option<&ScopeSet>,
+        request: AdminRequest,
+    ) -> AdminResponse {
+        let caller = caller.clone();
+        let scopes = scopes.cloned();
+        self.run(move |bridge| bridge.call(&caller, scopes.as_ref(), request))
             .unwrap_or(AdminResponse::Refused {
                 refusal: AdminRefusal::Unavailable {},
             })
+    }
+
+    fn attempt_info(&mut self, attempt: &UuidText) -> Option<(Principal, GatewayAccount)> {
+        let attempt = attempt.clone();
+        self.run(move |bridge| bridge.attempt_info(&attempt))
+            .flatten()
     }
 
     fn facts(&mut self, accounts: &[GatewayAccount]) -> Result<Vec<AccountFacts>, GatewayRefusal> {
@@ -167,9 +192,14 @@ fn panicking_bridge_call_refuses_then_serves_status() {
     struct PanicOnList(MemoryBridge);
 
     impl AccountBridge for PanicOnList {
-        fn call(&mut self, local_admin: bool, request: AdminRequest) -> AdminResponse {
+        fn call(
+            &mut self,
+            caller: &Principal,
+            scopes: Option<&ScopeSet>,
+            request: AdminRequest,
+        ) -> AdminResponse {
             assert!(!matches!(request, AdminRequest::List {}), "fixture panic");
-            self.0.call(local_admin, request)
+            self.0.call(caller, scopes, request)
         }
 
         fn facts(
@@ -191,14 +221,15 @@ fn panicking_bridge_call_refuses_then_serves_status() {
     )
     .unwrap();
     assert_eq!(
-        worker.call(true, AdminRequest::List {}),
+        worker.call(&Principal::LocalAdmin, None, AdminRequest::List {}),
         AdminResponse::Refused {
             refusal: AdminRefusal::Unavailable {}
         },
     );
     assert!(matches!(
         worker.call(
-            true,
+            &Principal::LocalAdmin,
+            None,
             AdminRequest::Status {
                 accounts: Vec::new()
             }
@@ -211,6 +242,7 @@ fn panicking_bridge_call_refuses_then_serves_status() {
 
 pub(crate) struct Attempt<T> {
     pub id: UuidText,
+    pub owner: Principal,
     pub account: GatewayAccount,
     pub started: Instant,
     pub last_poll: Option<Instant>,
@@ -248,6 +280,7 @@ impl<T> AttemptBook<T> {
 
     pub(crate) fn begin(
         &mut self,
+        owner: Principal,
         account: GatewayAccount,
         payload: T,
     ) -> Result<UuidText, AdminRefusal> {
@@ -257,6 +290,7 @@ impl<T> AttemptBook<T> {
         };
         self.entries.push(Attempt {
             id: id.clone(),
+            owner,
             account,
             started: Instant::now(),
             last_poll: None,
@@ -265,26 +299,46 @@ impl<T> AttemptBook<T> {
         Ok(id)
     }
 
-    pub(crate) fn get_mut(&mut self, id: &UuidText) -> Result<&mut Attempt<T>, AdminRefusal> {
+    pub(crate) fn info(&mut self, id: &UuidText) -> Option<(Principal, GatewayAccount)> {
+        self.expire();
+        self.entries
+            .iter()
+            .find(|attempt| attempt.id == *id)
+            .map(|attempt| (attempt.owner.clone(), attempt.account.clone()))
+    }
+
+    pub(crate) fn get_mut_for(
+        &mut self,
+        owner: &Principal,
+        id: &UuidText,
+    ) -> Result<&mut Attempt<T>, AdminRefusal> {
         self.expire();
         self.entries
             .iter_mut()
-            .find(|attempt| attempt.id == *id)
+            .find(|attempt| attempt.id == *id && attempt.owner == *owner)
             .ok_or(AdminRefusal::AttemptUnknown {})
     }
 
-    pub(crate) fn take(&mut self, id: &UuidText) -> Result<Attempt<T>, AdminRefusal> {
+    pub(crate) fn take_for(
+        &mut self,
+        owner: &Principal,
+        id: &UuidText,
+    ) -> Result<Attempt<T>, AdminRefusal> {
         self.expire();
         let index = self
             .entries
             .iter()
-            .position(|attempt| attempt.id == *id)
+            .position(|attempt| attempt.id == *id && attempt.owner == *owner)
             .ok_or(AdminRefusal::AttemptUnknown {})?;
         Ok(self.entries.remove(index))
     }
 
-    pub(crate) fn poll_allowed(&mut self, id: &UuidText) -> Result<(), AdminRefusal> {
-        let attempt = self.get_mut(id)?;
+    pub(crate) fn poll_allowed_for(
+        &mut self,
+        owner: &Principal,
+        id: &UuidText,
+    ) -> Result<(), AdminRefusal> {
+        let attempt = self.get_mut_for(owner, id)?;
         if attempt
             .last_poll
             .is_some_and(|last| last.elapsed() < POLL_INTERVAL)
@@ -342,17 +396,26 @@ impl MemoryBridge {
 
 #[cfg(test)]
 impl AccountBridge for MemoryBridge {
-    fn call(&mut self, local_admin: bool, request: AdminRequest) -> AdminResponse {
+    fn call(
+        &mut self,
+        caller: &Principal,
+        scopes: Option<&ScopeSet>,
+        request: AdminRequest,
+    ) -> AdminResponse {
         match request {
             AdminRequest::List {} => AdminResponse::Accounts {
                 accounts: self
                     .slots
                     .keys()
                     .filter_map(|account| GatewayAccount::new(account.clone()).ok())
+                    .filter(|account| {
+                        caller.is_local_admin()
+                            || scopes.is_some_and(|set| set.allows(Capability::Relay, account))
+                    })
                     .collect(),
             },
             AdminRequest::Status { accounts } => {
-                status_rows(&self.instance, &self.slots, &accounts)
+                status_rows(&self.instance, &self.slots, caller, scopes, &accounts)
             }
             AdminRequest::KeySet { account, secret } => {
                 if secret.expose().is_empty() {
@@ -381,13 +444,13 @@ impl AccountBridge for MemoryBridge {
                 self.slots.remove(account.as_str());
                 changed(account)
             }
-            AdminRequest::LoginStart { account, .. } => self.login_start(local_admin, account),
+            AdminRequest::LoginStart { account, .. } => self.login_start(caller, account),
             AdminRequest::LoginComplete { attempt, pasted } => {
-                self.login_complete(local_admin, &attempt, pasted.expose())
+                self.login_complete(caller, &attempt, pasted.expose())
             }
-            AdminRequest::LoginPoll { attempt } => self.login_poll(&attempt),
+            AdminRequest::LoginPoll { attempt } => self.login_poll(caller, &attempt),
             AdminRequest::LoginCancel { attempt } => {
-                let Ok(attempt) = self.attempts.take(&attempt) else {
+                let Ok(attempt) = self.attempts.take_for(caller, &attempt) else {
                     return refused(AdminRefusal::AttemptUnknown {});
                 };
                 progress(attempt.id, LoginPhase::Cancelled)
@@ -406,6 +469,10 @@ impl AccountBridge for MemoryBridge {
             | AdminRequest::CallerRemove { .. }
             | AdminRequest::Drain {} => refused(AdminRefusal::Unavailable {}),
         }
+    }
+
+    fn attempt_info(&mut self, attempt: &UuidText) -> Option<(Principal, GatewayAccount)> {
+        self.attempts.info(attempt)
     }
 
     fn facts(&mut self, accounts: &[GatewayAccount]) -> Result<Vec<AccountFacts>, GatewayRefusal> {
@@ -430,13 +497,13 @@ impl AccountBridge for MemoryBridge {
 
 #[cfg(test)]
 impl MemoryBridge {
-    fn login_start(&mut self, local_admin: bool, account: GatewayAccount) -> AdminResponse {
+    fn login_start(&mut self, caller: &Principal, account: GatewayAccount) -> AdminResponse {
         if account.kind() == "none" {
             return refused(AdminRefusal::DeviceLoginUnavailable {});
         }
         let signed_in = self.slot(&account).signed_in;
         let replacement = signed_in && account.name() == Some("replace");
-        if replacement && !local_admin {
+        if replacement && !caller.is_local_admin() {
             return refused(AdminRefusal::LocalAdminRequired {});
         }
         let method = if account.kind() == "codex" {
@@ -445,6 +512,7 @@ impl MemoryBridge {
             LoginMethod::Paste
         };
         let Ok(id) = self.attempts.begin(
+            caller.clone(),
             account,
             MemoryAttempt {
                 method,
@@ -473,34 +541,34 @@ impl MemoryBridge {
 
     fn login_complete(
         &mut self,
-        local_admin: bool,
+        caller: &Principal,
         attempt: &UuidText,
         pasted: &str,
     ) -> AdminResponse {
-        let Ok(found) = self.attempts.get_mut(attempt) else {
+        let Ok(found) = self.attempts.get_mut_for(caller, attempt) else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
         if found.payload.method != LoginMethod::Paste {
             return refused(AdminRefusal::PasteInvalid {});
         }
-        if pasted == "replace-other" && !local_admin {
+        if pasted == "replace-other" && !caller.is_local_admin() {
             return refused(AdminRefusal::LocalAdminRequired {});
         }
         if pasted != "fixture-ok" && pasted != "replace-other" {
             return refused(AdminRefusal::PasteInvalid {});
         }
-        let Ok(finished) = self.attempts.take(attempt) else {
+        let Ok(finished) = self.attempts.take_for(caller, attempt) else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
         self.slot(&finished.account).signed_in = true;
         progress(finished.id, LoginPhase::Succeeded)
     }
 
-    fn login_poll(&mut self, attempt: &UuidText) -> AdminResponse {
-        if self.attempts.poll_allowed(attempt).is_err() {
-            return refused(AdminRefusal::AttemptLimit {});
+    fn login_poll(&mut self, caller: &Principal, attempt: &UuidText) -> AdminResponse {
+        if let Err(refusal) = self.attempts.poll_allowed_for(caller, attempt) {
+            return refused(refusal);
         }
-        let Ok(found) = self.attempts.get_mut(attempt) else {
+        let Ok(found) = self.attempts.get_mut_for(caller, attempt) else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
         if found.payload.method == LoginMethod::DeviceCode {
@@ -519,12 +587,18 @@ impl MemoryBridge {
 fn status_rows(
     instance: &UuidText,
     slots: &HashMap<String, Slot>,
+    caller: &Principal,
+    scopes: Option<&ScopeSet>,
     accounts: &[GatewayAccount],
 ) -> AdminResponse {
     let selected: Vec<GatewayAccount> = if accounts.is_empty() {
         slots
             .keys()
             .filter_map(|account| GatewayAccount::new(account.clone()).ok())
+            .filter(|account| {
+                caller.is_local_admin()
+                    || scopes.is_some_and(|set| set.allows(Capability::Relay, account))
+            })
             .collect()
     } else {
         accounts.to_vec()

@@ -221,6 +221,8 @@ pub(crate) fn inline_image(
     data: &str,
     inline_so_far: usize,
 ) -> Result<Option<ImageBlock>, ToolRuntimeError> {
+    use base64::Engine as _;
+
     let decoded = base64_decoded_len(data);
     if inline_so_far >= MAX_INLINE_IMAGES
         || !INLINE_IMAGE_TYPES.contains(&mime_type)
@@ -228,6 +230,19 @@ pub(crate) fn inline_image(
         || u64::try_from(decoded).unwrap_or(u64::MAX) > MAX_STANDARD_IMAGE_BYTES
         || !is_base64(data)
     {
+        return Ok(None);
+    }
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) else {
+        return Ok(None);
+    };
+    if bytes.is_empty() || u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_STANDARD_IMAGE_BYTES
+    {
+        return Ok(None);
+    }
+    let Ok(header) = plakous_tools::sniff_image(&bytes) else {
+        return Ok(None);
+    };
+    if header.media_type() != mime_type {
         return Ok(None);
     }
     let source = MediaSource::data_url(format!("data:{mime_type};base64,{data}"))

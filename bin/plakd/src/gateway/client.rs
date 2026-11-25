@@ -112,6 +112,10 @@ pub(crate) fn decode_call<T: serde::de::DeserializeOwned>(call: Call) -> Result<
     call::decode(&call.body).map_err(|error| error.to_string())
 }
 
+const MAX_RESPONSE_HEAD_BYTES: usize = 64 * 1024;
+/// Bound on the raw HTTP response (head + call body + chunked framing overhead).
+const MAX_RAW_RESPONSE_BYTES: usize = MAX_RESPONSE_HEAD_BYTES + call::MAX_CALL_BYTES + 16 * 1024;
+
 fn write_and_read<S: Read + Write>(
     mut stream: S,
     key: Option<&str>,
@@ -126,9 +130,14 @@ fn write_and_read<S: Read + Write>(
         .and_then(|()| stream.write_all(body))
         .map_err(|_| GatewayUnavailable::Unreachable(address).failure())?;
     let mut raw = Vec::new();
+    let max_read = u64::try_from(MAX_RAW_RESPONSE_BYTES.saturating_add(1)).unwrap_or(u64::MAX);
     stream
+        .take(max_read)
         .read_to_end(&mut raw)
         .map_err(|_| GatewayUnavailable::Unreachable(address).failure())?;
+    if raw.len() > MAX_RAW_RESPONSE_BYTES {
+        return Err("gateway response exceeds size limit".to_owned().into());
+    }
     if raw.is_empty() {
         return Err(GatewayUnavailable::Unreachable(address).failure());
     }
@@ -140,10 +149,10 @@ pub(crate) fn request_head(
     method: &str,
     path: &str,
     length: usize,
-) -> Result<String, String> {
-    let mut head = format!(
+) -> Result<zeroize::Zeroizing<String>, String> {
+    let mut head = zeroize::Zeroizing::new(format!(
         "{method} {path} HTTP/1.1\r\nhost: plak-gateway\r\ncontent-length: {length}\r\nconnection: close\r\n",
-    );
+    ));
     if let Some(key) = key {
         if key.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0)) {
             return Err("caller key is not a header value".to_owned());
@@ -162,6 +171,9 @@ pub(crate) fn parse_response(raw: &[u8]) -> Result<Call, String> {
         .windows(4)
         .position(|mark| mark == b"\r\n\r\n")
         .ok_or_else(|| "gateway response has no body".to_owned())?;
+    if split > MAX_RESPONSE_HEAD_BYTES {
+        return Err("gateway response head exceeds size limit".to_owned());
+    }
     let head = std::str::from_utf8(&raw[..split])
         .map_err(|_| "gateway response head is not utf-8".to_owned())?;
     let rest = &raw[split + 4..];
@@ -194,10 +206,16 @@ pub(crate) fn parse_response(raw: &[u8]) -> Result<Call, String> {
     let body = if chunked {
         decode_chunks(rest)?
     } else if let Some(length) = content_length {
+        if length > call::MAX_CALL_BYTES {
+            return Err("gateway response body exceeds size limit".to_owned());
+        }
         rest.get(..length)
             .ok_or_else(|| "gateway body is shorter than content-length".to_owned())?
             .to_vec()
     } else {
+        if rest.len() > call::MAX_CALL_BYTES {
+            return Err("gateway response body exceeds size limit".to_owned());
+        }
         rest.to_vec()
     };
     Ok(Call {
@@ -224,10 +242,20 @@ fn decode_chunks(mut rest: &[u8]) -> Result<Vec<u8>, String> {
         if size == 0 {
             return Ok(body);
         }
-        if rest.len() < size + 2 || &rest[size..size + 2] != b"\r\n" {
+        let Some(chunk_end) = size.checked_add(2) else {
+            return Err("chunk size overflows".to_owned());
+        };
+        if body
+            .len()
+            .checked_add(size)
+            .is_none_or(|total| total > call::MAX_CALL_BYTES)
+        {
+            return Err("gateway response body exceeds size limit".to_owned());
+        }
+        if rest.len() < chunk_end || &rest[size..chunk_end] != b"\r\n" {
             return Err("chunk is truncated".to_owned());
         }
         body.extend_from_slice(&rest[..size]);
-        rest = &rest[size + 2..];
+        rest = &rest[chunk_end..];
     }
 }

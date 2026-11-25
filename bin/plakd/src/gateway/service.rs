@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use plakous::gateway::server::{Peer, RelayServer};
 use tokio::net::{TcpListener, UnixListener};
+use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use super::audit::Audit;
@@ -74,6 +75,7 @@ impl Gateway {
             draining: std::sync::atomic::AtomicBool::new(false),
             listeners: Mutex::new(Vec::new()),
             shutdown: tokio::sync::Notify::new(),
+            next_relay_id: std::sync::atomic::AtomicU64::new(1),
             relays: Mutex::new(std::collections::HashMap::new()),
         });
         let product = Arc::new(ProductGateway::new(home, Arc::clone(&state)));
@@ -95,6 +97,7 @@ impl Gateway {
     /// account worker joins.
     pub(crate) fn serve_foreground(self) -> Result<(), String> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(GATEWAY_WORKER_THREADS)
             .enable_all()
             .build()
             .map_err(|error| error.to_string())?;
@@ -149,6 +152,15 @@ fn finish_accounts(
     Err("gateway account worker did not stop before the shutdown deadline".to_owned())
 }
 
+/// Bounded Tokio worker pool for `plakd gateway serve` so idle servers do not
+/// spin up one thread per host CPU core.
+const GATEWAY_WORKER_THREADS: usize = 4;
+
+/// Concurrent connection caps, split between Unix and TCP so a TCP connection
+/// flood cannot lock out `local-admin` on the Unix socket.
+const MAX_UNIX_CONNECTIONS: usize = 256;
+const MAX_TCP_CONNECTIONS: usize = 256;
+
 /// How long in-flight relays, refresh claims and admin calls may take to
 /// settle once the service stops accepting.
 const DRAIN_DEADLINE: Duration = Duration::from_secs(30);
@@ -192,6 +204,8 @@ async fn run(
             listeners.push(format!("tcp:{addr}"));
         }
     }
+    let unix_connections = Arc::new(Semaphore::new(MAX_UNIX_CONNECTIONS));
+    let tcp_connections = Arc::new(Semaphore::new(MAX_TCP_CONNECTIONS));
     let mut connections = JoinSet::new();
     tokio::pin!(stop);
     loop {
@@ -206,19 +220,29 @@ async fn run(
             _ = connections.join_next(), if !connections.is_empty() => {}
             accepted = unix.accept() => {
                 let Ok((stream, _)) = accepted else { continue; };
+                let Ok(permit) = Arc::clone(&unix_connections).try_acquire_owned() else {
+                    drop(stream);
+                    continue;
+                };
                 let same_user = stream.peer_cred().map(|cred| cred.uid()).ok()
                     == Some(rustix::process::geteuid().as_raw());
                 let peer = Peer::Unix { same_user };
                 let task = server.clone();
                 connections.spawn(async move {
+                    let _permit = permit;
                     let _ = task.serve(stream, peer).await;
                 });
             }
             accepted = accept_tcp(tcp.as_ref()), if tcp.is_some() => {
                 let Ok((stream, peer_addr)) = accepted else { continue; };
+                let Ok(permit) = Arc::clone(&tcp_connections).try_acquire_owned() else {
+                    drop(stream);
+                    continue;
+                };
                 let peer = Peer::Tcp(peer_addr);
                 let task = server.clone();
                 connections.spawn(async move {
+                    let _permit = permit;
                     let _ = task.serve(stream, peer).await;
                 });
             }
@@ -309,7 +333,12 @@ mod tests {
     }
 
     impl AccountBridge for HeldCall {
-        fn call(&mut self, _local_admin: bool, _request: AdminRequest) -> AdminResponse {
+        fn call(
+            &mut self,
+            _caller: &super::super::auth::Principal,
+            _scopes: Option<&plakous::gateway::protocol::scope::ScopeSet>,
+            _request: AdminRequest,
+        ) -> AdminResponse {
             self.started.send(()).unwrap();
             self.release.recv_timeout(Duration::from_secs(10)).unwrap();
             AdminResponse::Accounts {
@@ -477,7 +506,13 @@ mod tests {
             Arc::clone(&lock),
         )
         .unwrap();
-        let call = std::thread::spawn(move || worker.call(true, AdminRequest::List {}));
+        let call = std::thread::spawn(move || {
+            worker.call(
+                &crate::gateway::auth::Principal::LocalAdmin,
+                None,
+                AdminRequest::List {},
+            )
+        });
         entered.recv_timeout(Duration::from_secs(2)).unwrap();
         accounts.close();
         assert!(finish_accounts(accounts, lock, Instant::now()).is_err());

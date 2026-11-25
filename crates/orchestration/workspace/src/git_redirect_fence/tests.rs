@@ -2321,3 +2321,194 @@ fn reclamation_accepts_the_regenerated_guarded_shim() {
     std::fs::write(child.join(".plak/bin/git"), "#!/bin/sh\nexit 0\n").unwrap();
     assert!(crate::occupancy_vcs::maintenance::check_reclaimable(&child, None).is_err());
 }
+
+/// Regression tests for all 5 M5 `git_shim.sh` fence bypass vectors:
+/// 1) pathname globbing (`set -f`),
+/// 2) unquoted word-splitting in `symbolic-ref` / `branch`,
+/// 3) uncreated-path `..` traversal in `--work-tree`, `--git-dir`, and `clone`,
+/// 4) glued `-C?*` clobbering `cwd` on non-existent dirs,
+/// 5) `-c include.path=...` / `-c includeif.*=...` config injections.
+#[test]
+fn shim_blocks_globbing_word_splitting_traversal_glued_c_and_include_injections() {
+    let parent = git_repo();
+    git_ok(
+        parent.path(),
+        &["config", "user.email", "plak@example.test"],
+    );
+    git_ok(parent.path(), &["config", "user.name", "plak"]);
+    std::fs::write(parent.path().join("seed"), "seed\n").unwrap();
+    git_ok(parent.path(), &["add", "seed"]);
+    git_ok(parent.path(), &["commit", "-qm", "seed"]);
+    let head = git_stdout(parent.path(), &["rev-parse", "HEAD"]);
+    let head = head.trim().to_owned();
+    git_ok(parent.path(), &["update-ref", "refs/plak/pin", &head]);
+    let child = mint_child(parent.path(), "c1");
+    let shim = install(&child).unwrap();
+    let canonical_child = std::fs::canonicalize(&child).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+
+    // Vector 1 & 2: globbing + word-splitting in symbolic-ref.
+    // Create files matching a wildcard so unguarded globbing would expand `*`
+    // and try to confuse the ref count or protected-ref check.
+    std::fs::write(child.join("aaa"), "x").unwrap();
+    std::fs::write(child.join("bbb"), "x").unwrap();
+    let glob_symref = output_retrying(
+        Command::new(&shim)
+            .args(["symbolic-ref", "refs/plak/*", "HEAD"])
+            .current_dir(&child),
+    );
+    assert_eq!(
+        glob_symref.status.code(),
+        Some(128),
+        "stderr: {}",
+        String::from_utf8_lossy(&glob_symref.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&glob_symref.stderr).contains("git-guard refused"),
+        "{}",
+        String::from_utf8_lossy(&glob_symref.stderr)
+    );
+    // Space-containing arg in symbolic-ref must not split into two separate refs
+    // that evade single-ref checks or fabricate extra counts.
+    let space_symref = output_retrying(
+        Command::new(&shim)
+            .args(["symbolic-ref", "-d", "refs/plak/pin"])
+            .current_dir(&child),
+    );
+    assert_eq!(space_symref.status.code(), Some(128));
+
+    // Vector 3: Non-existent `$ALLOWED/missing/../../outside` traversal on
+    // `--work-tree`, `--git-dir`, and `clone`.
+    let traversal_worktree = format!("{}/missing/../../outside", canonical_child.display());
+    for args in [
+        vec![
+            "--work-tree".to_owned(),
+            traversal_worktree.clone(),
+            "status".to_owned(),
+        ],
+        vec![
+            format!("--work-tree={traversal_worktree}"),
+            "status".to_owned(),
+        ],
+        vec![
+            "--git-dir".to_owned(),
+            traversal_worktree.clone(),
+            "status".to_owned(),
+        ],
+        vec![
+            format!("--git-dir={traversal_worktree}"),
+            "status".to_owned(),
+        ],
+        vec![
+            "clone".to_owned(),
+            parent.path().to_str().unwrap().to_owned(),
+            traversal_worktree,
+        ],
+        vec![
+            "clone".to_owned(),
+            parent.path().to_str().unwrap().to_owned(),
+            outside.path().join("cloned").to_str().unwrap().to_owned(),
+        ],
+    ] {
+        let denied = output_retrying(Command::new(&shim).args(&args).current_dir(&child));
+        assert_eq!(
+            denied.status.code(),
+            Some(128),
+            "args={args:?} stderr={}",
+            String::from_utf8_lossy(&denied.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&denied.stderr).contains("git-redirect refused"),
+            "args={args:?} stderr={}",
+            String::from_utf8_lossy(&denied.stderr)
+        );
+    }
+
+    // Vector 4: Glued `-C?*` on a non-existent dir must not clobber `cwd` to empty
+    // or allow traversal.
+    let glued_escape = format!("-C{}/missing/../../outside", canonical_child.display());
+    let glued_missing_outside = format!("-C{}/does-not-exist", outside.path().display());
+    for flag in [glued_escape, glued_missing_outside] {
+        let denied = output_retrying(
+            Command::new(&shim)
+                .args([flag.as_str(), "status"])
+                .current_dir(&child),
+        );
+        assert_eq!(
+            denied.status.code(),
+            Some(128),
+            "flag={flag} stderr={}",
+            String::from_utf8_lossy(&denied.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&denied.stderr).contains("git-redirect refused"),
+            "flag={flag} stderr={}",
+            String::from_utf8_lossy(&denied.stderr)
+        );
+    }
+
+    // Vector 5: `-c include.path=...` and `-c includeif.*=...` injections
+    // across `-c`, glued `-c?*`, `--config-env`, `GIT_CONFIG_PARAMETERS`, and `GIT_CONFIG_COUNT`.
+    let evil_cfg = outside.path().join("evil.gitconfig");
+    std::fs::write(
+        &evil_cfg,
+        format!("[core]\n\tworktree = {}\n", parent.path().display()),
+    )
+    .unwrap();
+    let evil_cfg_str = evil_cfg.to_str().unwrap();
+    for args in [
+        vec![
+            "-c".to_owned(),
+            format!("include.path={evil_cfg_str}"),
+            "status".to_owned(),
+        ],
+        vec![
+            format!("-cinclude.path={evil_cfg_str}"),
+            "status".to_owned(),
+        ],
+        vec![
+            "-c".to_owned(),
+            format!("includeIf.gitdir:/.path={evil_cfg_str}"),
+            "status".to_owned(),
+        ],
+        vec![
+            format!("-cincludeif.onbranch:*.path={evil_cfg_str}"),
+            "status".to_owned(),
+        ],
+    ] {
+        let denied = output_retrying(Command::new(&shim).args(&args).current_dir(&child));
+        assert_eq!(
+            denied.status.code(),
+            Some(128),
+            "args={args:?} stderr={}",
+            String::from_utf8_lossy(&denied.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&denied.stderr).contains("include config escapes"),
+            "args={args:?} stderr={}",
+            String::from_utf8_lossy(&denied.stderr)
+        );
+    }
+    // Also via GIT_CONFIG_PARAMETERS and GIT_CONFIG_COUNT/KEY_0:
+    let denied_param = output_retrying(
+        Command::new(&shim)
+            .arg("status")
+            .env(
+                "GIT_CONFIG_PARAMETERS",
+                format!("'include.path={evil_cfg_str}'"),
+            )
+            .current_dir(&child),
+    );
+    assert_eq!(denied_param.status.code(), Some(128));
+    assert!(String::from_utf8_lossy(&denied_param.stderr).contains("include config escapes"));
+    let denied_indexed = output_retrying(
+        Command::new(&shim)
+            .arg("status")
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "includeIf.gitdir:/.path")
+            .env("GIT_CONFIG_VALUE_0", evil_cfg_str)
+            .current_dir(&child),
+    );
+    assert_eq!(denied_indexed.status.code(), Some(128));
+    assert!(String::from_utf8_lossy(&denied_indexed.stderr).contains("include config escapes"));
+}

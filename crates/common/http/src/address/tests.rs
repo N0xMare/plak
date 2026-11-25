@@ -87,7 +87,7 @@ const IPV6_CASES: &[(&str, &[&str], &[&str])] = &[
     (
         "RFC 4291 deprecated IPv4-compatible",
         &["::2", "::8.8.8.8", "::ffff:ffff"],
-        &["::1:0:0:0"],
+        &[],
     ),
     (
         "RFC 4291 IPv4-mapped",
@@ -97,6 +97,11 @@ const IPV6_CASES: &[(&str, &[&str], &[&str])] = &[
             "::ffff:169.254.169.254",
         ],
         &["::ffff:8.8.8.8"],
+    ),
+    (
+        "RFC 2765 IPv4-translated (SIIT)",
+        &["::ffff:0:127.0.0.1", "::ffff:0:8.8.8.8"],
+        &[],
     ),
     (
         "RFC 6052 NAT64 well-known prefix",
@@ -115,7 +120,7 @@ const IPV6_CASES: &[(&str, &[&str], &[&str])] = &[
     (
         "RFC 6666 discard-only",
         &["100::", "100::ffff:ffff:ffff:ffff"],
-        &["100:0:0:1::"],
+        &[],
     ),
     (
         "RFC 2928 IETF protocol assignments",
@@ -137,10 +142,11 @@ const IPV6_CASES: &[(&str, &[&str], &[&str])] = &[
         &["3fff::1", "3fff:fff::"],
         &["3fff:1000::1"],
     ),
+    ("RFC 9602 SRv6 SIDs", &["5f00::1", "5f00:ffff::1"], &[]),
     (
         "RFC 4193 unique local (cloud metadata fd00:ec2::254)",
         &["fc00::1", "fd00:ec2::254", "fdff::"],
-        &["fbff:ffff::1"],
+        &[],
     ),
     ("RFC 4291 link-local", &["fe80::1", "febf:ffff::"], &[]),
     (
@@ -250,5 +256,24 @@ fn host_name_literals_are_refused_before_resolution() {
         "metadata.google.internal.example",
     ] {
         assert!(!policy.refuses_host_name(host), "{host}");
+    }
+}
+
+#[test]
+fn non_global_reserved_ipv6_ranges_are_refused() {
+    let policy = AddressPolicy::public_only();
+    for address in [
+        "::1:0:0:0",
+        "::ffff:0:127.0.0.1",
+        "::ffff:0:8.8.8.8",
+        "::ffff:0:0:127.0.0.1",
+        "100:0:0:1::",
+        "4000::1",
+        "5f00::1",
+        "8000::1",
+        "fbff:ffff::1",
+        "fe00::1",
+    ] {
+        assert!(!policy.admits(address.parse().unwrap()), "{address}");
     }
 }

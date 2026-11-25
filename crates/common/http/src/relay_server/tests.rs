@@ -1212,3 +1212,266 @@ async fn gateway_hop_faults_after_the_send_may_have_transmitted() {
     assert_eq!(body_chunks(response).await.unwrap().concat(), b"ok");
     assert_eq!(fixture.accepted.load(Ordering::SeqCst), before + 1);
 }
+
+#[test]
+fn untrusted_deadline_unix_ms_clamps_without_panic() {
+    let envelope = RelayEnvelope {
+        account: GatewayAccount::new(ACCOUNT).unwrap(),
+        operation: UuidText::new("0b9e5f4c-7d3a-4e21-9f80-1a2b3c4d5e6f").unwrap(),
+        attempt: 0,
+        method: "POST".to_owned(),
+        url: format!("{LOGICAL}/v1/x"),
+        headers: Vec::new(),
+        expected: plakous_gateway_protocol::envelope::ExpectedFence {
+            account_binding: binding(),
+            generation: 7,
+        },
+        limits: plakous_gateway_protocol::envelope::RelayLimits {
+            head_timeout_ms: 1000,
+            body_idle_timeout_ms: 1000,
+            max_response_bytes: 1024,
+            max_chunk_bytes: 1024,
+        },
+        deadline_unix_ms: Some(u64::MAX),
+        body_len: 0,
+    };
+    let before = Instant::now();
+    let deadline = super::envelope_deadline(&envelope);
+    let max_expected = before + super::MAX_RELAY_DURATION + Duration::from_secs(5);
+    assert!(deadline >= before);
+    assert!(
+        deadline <= max_expected,
+        "deadline {deadline:?} exceeded cap {max_expected:?}"
+    );
+}
+
+#[tokio::test]
+async fn header_read_timeout_and_body_timeout_bound_stalled_callers() {
+    let fixture = upstream(Script::Reply(ok_reply("text/plain", b"ok"))).await;
+    let server = RelayServer::new(
+        Service::new(),
+        Client::new_http1(Limits::default()).unwrap(),
+        super::new_instance().unwrap(),
+    )
+    .with_dial_override(LOGICAL, fixture.origin.clone())
+    .with_header_read_timeout(Duration::from_millis(80))
+    .with_request_body_timeout(Duration::from_millis(80));
+
+    // Stalled header (Slowloris): connection closes within header_read_timeout.
+    let (mut client_io, server_io) = tokio::io::duplex(4096);
+    let serving = server.clone();
+    let task = tokio::spawn(async move { serving.serve(server_io, Peer::InProcess).await });
+    client_io
+        .write_all(b"POST /v1/relay HTTP/1.1\r\nhost: g\r\n")
+        .await
+        .unwrap();
+    let mut buf = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), client_io.read_to_end(&mut buf))
+        .await
+        .expect("stalled headers must time out promptly")
+        .unwrap();
+    let _ = task.await.unwrap();
+
+    // Stalled chunked body: returns refusal within request_body_timeout and never over-reserves budget.
+    let (mut client_io, server_io) = tokio::io::duplex(4096);
+    let serving = server.clone();
+    let task = tokio::spawn(async move { serving.serve(server_io, Peer::InProcess).await });
+    client_io
+        .write_all(
+            b"POST /v1/relay HTTP/1.1\r\nhost: g\r\ncontent-type: application/vnd.plak.relay\r\ntransfer-encoding: chunked\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    // While stalled with 0 body bytes sent, the shared 512 MiB budget must not lose 32 MiB.
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(
+        server.inner.request_budget.available_permits(),
+        super::RELAY_BUFFER_BUDGET_BYTES,
+        "chunked body must not reserve 32 MiB before bytes arrive"
+    );
+    let mut reply = vec![0_u8; 4096];
+    let n = tokio::time::timeout(Duration::from_secs(2), client_io.read(&mut reply))
+        .await
+        .expect("stalled chunked body must time out promptly")
+        .unwrap();
+    let text = String::from_utf8_lossy(&reply[..n]);
+    assert!(
+        text.contains("422") && text.contains("envelope_invalid"),
+        "expected refusal on body timeout, got: {text}"
+    );
+    drop(client_io);
+    let _ = task.await.unwrap();
+}
+
+#[tokio::test]
+async fn connection_cap_drops_excess_connections_and_recovers() {
+    let fixture = upstream(Script::Reply(ok_reply("text/plain", b"ok"))).await;
+    let server = RelayServer::new(
+        Service::new(),
+        Client::new_http1(Limits::default()).unwrap(),
+        super::new_instance().unwrap(),
+    )
+    .with_dial_override(LOGICAL, fixture.origin.clone())
+    .with_max_connections(1);
+
+    let (mut first_client, first_server) = tokio::io::duplex(4096);
+    let s1 = server.clone();
+    let t1 = tokio::spawn(async move { s1.serve(first_server, Peer::InProcess).await });
+    // Keep the first connection open via /versions keep-alive.
+    first_client
+        .write_all(b"GET /versions HTTP/1.1\r\nhost: g\r\n\r\n")
+        .await
+        .unwrap();
+    let mut buf = [0_u8; 1024];
+    let n = first_client.read(&mut buf).await.unwrap();
+    assert!(String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200"));
+
+    // Second concurrent connection hits cap=1 and closes immediately with 0 bytes.
+    let (mut second_client, second_server) = tokio::io::duplex(4096);
+    let s2 = server.clone();
+    let t2 = tokio::spawn(async move { s2.serve(second_server, Peer::InProcess).await });
+    let mut overflow = Vec::new();
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        second_client.read_to_end(&mut overflow),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(overflow.is_empty(), "excess connection must be closed");
+    t2.await.unwrap().unwrap();
+
+    // Closing the first connection frees the slot.
+    drop(first_client);
+    t1.await.unwrap().unwrap();
+    let (mut third_client, third_server) = tokio::io::duplex(4096);
+    let s3 = server.clone();
+    let t3 = tokio::spawn(async move { s3.serve(third_server, Peer::InProcess).await });
+    third_client
+        .write_all(b"GET /versions HTTP/1.1\r\nhost: g\r\nconnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut reply = Vec::new();
+    third_client.read_to_end(&mut reply).await.unwrap();
+    assert!(String::from_utf8_lossy(&reply).starts_with("HTTP/1.1 200"));
+    t3.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn admit_relay_runs_before_request_budget_and_buffer_hold_releases_before_streaming() {
+    struct GatedService {
+        inner: Arc<Service>,
+        admit_calls: AtomicUsize,
+        allow_admit: AtomicBool,
+    }
+    impl GatewayService for GatedService {
+        type Principal = ();
+        fn authenticate(&self, peer: &Peer, key: Option<&[u8]>) -> Result<(), GatewayRefusal> {
+            self.inner.authenticate(peer, key)
+        }
+        fn admit_relay(
+            &self,
+            _principal: &(),
+        ) -> Result<Option<Box<dyn std::any::Any + Send>>, GatewayRefusal> {
+            self.admit_calls.fetch_add(1, Ordering::SeqCst);
+            if !self.allow_admit.load(Ordering::SeqCst) {
+                return Err(GatewayRefusal::Busy {
+                    retry_after_ms: 500,
+                });
+            }
+            Ok(None)
+        }
+        fn inject<'a>(
+            &'a self,
+            principal: &'a (),
+            version: u16,
+            envelope: &'a RelayEnvelope,
+        ) -> ServiceFuture<'a, Injection> {
+            self.inner.inject(principal, version, envelope)
+        }
+        fn call<'a>(
+            &'a self,
+            principal: &'a (),
+            version: u16,
+            endpoint: Endpoint,
+            body: &'a [u8],
+        ) -> ServiceFuture<'a, Vec<u8>> {
+            self.inner.call(principal, version, endpoint, body)
+        }
+        fn audit(&self, record: super::RelayRecord) {
+            self.inner.audit(record);
+        }
+    }
+
+    let head = b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: 1\n\n".to_vec();
+    let fixture = upstream(Script::HangAfter(head)).await;
+    let service = Arc::new(GatedService {
+        inner: Service::new(),
+        admit_calls: AtomicUsize::new(0),
+        allow_admit: AtomicBool::new(false),
+    });
+    let server = RelayServer::new(
+        Arc::clone(&service),
+        Client::new_http1(Limits::default()).unwrap(),
+        super::new_instance().unwrap(),
+    )
+    .with_dial_override(LOGICAL, fixture.origin.clone());
+
+    // Refuse at admit_relay before reserving budget or reading a stalled chunked body.
+    let (mut client_io, server_io) = tokio::io::duplex(4096);
+    let serving = server.clone();
+    let task = tokio::spawn(async move { serving.serve(server_io, Peer::InProcess).await });
+    client_io
+        .write_all(
+            b"POST /v1/relay HTTP/1.1\r\nhost: g\r\ncontent-type: application/vnd.plak.relay\r\ntransfer-encoding: chunked\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut buf = [0_u8; 1024];
+    let n = tokio::time::timeout(Duration::from_secs(1), client_io.read(&mut buf))
+        .await
+        .unwrap()
+        .unwrap();
+    let text = String::from_utf8_lossy(&buf[..n]);
+    assert!(text.contains("503") && text.contains("busy"), "{text}");
+    assert_eq!(service.admit_calls.load(Ordering::SeqCst), 1);
+    drop(client_io);
+    let _ = task.await.unwrap();
+
+    // Now allow admit_relay and send a large-ish body to a streaming upstream that hangs after head:
+    // once response head arrives, buffer_hold MUST already be released even while body is streaming!
+    service.allow_admit.store(true, Ordering::SeqCst);
+    let gw = GatewayEndpoint::InMemory(InMemoryGateway::new({
+        let server = server.clone();
+        move |io| {
+            let server = server.clone();
+            tokio::spawn(async move {
+                let _ = server.serve(io, Peer::InProcess).await;
+            });
+        }
+    }));
+    let client = relayed(gw);
+    let big_body = crate::Bytes::from(vec![b'a'; 128 * 1024]);
+    let req = Request::new(
+        Origin::parse(&format!("{LOGICAL}/")).unwrap(),
+        Method::POST,
+        "/v1/stream",
+        headers(placeholder(7)),
+        big_body,
+        &Limits::default(),
+    )
+    .unwrap();
+    let response = client.execute(req, control()).await.unwrap();
+    let mut body = response.into_body();
+    assert_eq!(
+        body.next_chunk().await.unwrap().unwrap().as_ref(),
+        b"data: 1\n\n"
+    );
+    // While the response stream is still open and hanging, request_budget must be fully restored!
+    assert_eq!(
+        server.inner.request_budget.available_permits(),
+        super::RELAY_BUFFER_BUDGET_BYTES,
+        "buffer_hold must be released before response streaming completes"
+    );
+    drop(body);
+}

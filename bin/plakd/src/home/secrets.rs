@@ -291,26 +291,64 @@ fn fingerprint(secret: &str) -> String {
 pub(crate) mod observation;
 
 fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), ApiKeyWriteError> {
-    use std::fs::OpenOptions;
-    #[cfg(unix)]
+    if let Ok(meta) = fs::symlink_metadata(path)
+        && meta.file_type().is_symlink()
     {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|_| "could not write API key file".to_owned())?;
-        file.write_all(bytes)
-            .map_err(|_| ApiKeyWriteError::OutcomeUnknown("could not write API key file".into()))?;
+        return Err("refusing to write API key through a symlink"
+            .to_owned()
+            .into());
     }
-    #[cfg(not(unix))]
-    {
-        fs::write(path, bytes)
-            .map_err(|_| ApiKeyWriteError::OutcomeUnknown("could not write API key file".into()))?;
+    let staging =
+        random_staging_path(path).map_err(|_| "could not write API key file".to_owned())?;
+    if write_new_private_file(&staging, bytes).is_err() {
+        let _ = fs::remove_file(&staging);
+        return Err("could not write API key file".to_owned().into());
+    }
+    if fs::rename(&staging, path).is_err() {
+        let _ = fs::remove_file(&staging);
+        return Err("could not write API key file".to_owned().into());
+    }
+    if let Some(parent) = path.parent() {
+        #[cfg(unix)]
+        {
+            use rustix::fs::{Mode, OFlags, open};
+            open(
+                parent,
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map(fs::File::from)
+            .map_err(std::io::Error::from)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|_| {
+                ApiKeyWriteError::OutcomeUnknown("could not sync the secrets directory".into())
+            })?;
+        }
+        #[cfg(not(unix))]
+        {
+            fs::File::open(parent)
+                .and_then(|dir| dir.sync_all())
+                .map_err(|_| {
+                    ApiKeyWriteError::OutcomeUnknown("could not sync the secrets directory".into())
+                })?;
+        }
     }
     Ok(())
+}
+
+fn random_staging_path(path: &Path) -> Result<PathBuf, String> {
+    let mut entropy = [0_u8; 16];
+    getrandom::fill(&mut entropy).map_err(|error| error.to_string())?;
+    let mut suffix = String::with_capacity(entropy.len() * 2);
+    for byte in entropy {
+        use std::fmt::Write as _;
+        let _ = write!(suffix, "{byte:02x}");
+    }
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("secret");
+    Ok(path.with_file_name(format!(".{name}.{suffix}.tmp")))
 }
 
 /// One named secret's value: zeroized on drop, never cloned or serialized,
@@ -449,10 +487,15 @@ fn store_shelf_secret(
     }
     paths.ensure_secret_shelf_dir(shelf)?;
     let path = paths.secret_shelf_file(shelf, name);
-    let staging = paths
-        .secret_shelf_dir(shelf)
-        .join(format!(".{name}.secret.{}.tmp", std::process::id()));
-    let _ = fs::remove_file(&staging);
+    if let Ok(meta) = fs::symlink_metadata(&path)
+        && meta.file_type().is_symlink()
+    {
+        return Err("refusing to write secret through a symlink"
+            .to_owned()
+            .into());
+    }
+    let staging =
+        random_staging_path(&path).map_err(|_| "could not store the secret".to_owned())?;
     let written = write_new_private_file(&staging, value.as_bytes()).and_then(|()| {
         if replace {
             return fs::rename(&staging, &path)
@@ -579,19 +622,28 @@ pub fn read_shelf_secret(
     private_read::read(&directory, std::ffi::OsStr::new(&format!("{name}.secret")))
 }
 
-/// Exclusively creates `path` 0600 and writes and syncs `bytes`.
+/// Exclusively creates `path` 0600 (`O_CREAT | O_EXCL | O_NOFOLLOW`) and writes and syncs `bytes`.
 fn write_new_private_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    use std::fs::OpenOptions;
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(path)
-        .map_err(|_| "could not store the secret".to_owned())?;
+    let mut file = {
+        use rustix::fs::{Mode, OFlags, open};
+        open(
+            path,
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::from_raw_mode(0o600),
+        )
+        .map(fs::File::from)
+        .map_err(|_| "could not store the secret".to_owned())?
+    };
+    #[cfg(not(unix))]
+    let mut file = {
+        use std::fs::OpenOptions;
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|_| "could not store the secret".to_owned())?
+    };
     file.write_all(bytes)
         .and_then(|()| file.sync_all())
         .map_err(|_| "could not store the secret".to_owned())

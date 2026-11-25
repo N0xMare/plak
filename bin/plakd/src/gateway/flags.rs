@@ -71,37 +71,45 @@ impl Flags {
     }
 
     pub(crate) fn disable_all(&mut self) -> Result<(), String> {
-        self.disabled_all = true;
-        self.store()
+        self.update(|next| next.disabled_all = true)
     }
 
     pub(crate) fn disable_account(&mut self, account: GatewayAccount) -> Result<(), String> {
-        if !self.accounts.contains(&account) {
-            self.accounts.push(account);
-        }
-        self.store()
+        self.update(|next| {
+            if !next.accounts.contains(&account) {
+                next.accounts.push(account);
+            }
+        })
     }
 
     pub(crate) fn disable_caller(&mut self, caller: CallerId) -> Result<(), String> {
-        if !self.callers.contains(&caller) {
-            self.callers.push(caller);
-        }
-        self.store()
+        self.update(|next| {
+            if !next.callers.contains(&caller) {
+                next.callers.push(caller);
+            }
+        })
     }
 
     pub(crate) fn enable_all(&mut self) -> Result<(), String> {
-        self.disabled_all = false;
-        self.store()
+        self.update(|next| next.disabled_all = false)
     }
 
     pub(crate) fn enable_account(&mut self, account: &GatewayAccount) -> Result<(), String> {
-        self.accounts.retain(|disabled| disabled != account);
-        self.store()
+        self.update(|next| next.accounts.retain(|disabled| disabled != account))
     }
 
     pub(crate) fn enable_caller(&mut self, caller: &CallerId) -> Result<(), String> {
-        self.callers.retain(|disabled| disabled != caller);
-        self.store()
+        self.update(|next| next.callers.retain(|disabled| disabled != caller))
+    }
+
+    /// Persist-before-commit: mutate a clone, write and fsync to disk, and
+    /// swap in-memory state only on success so I/O failures never desync.
+    fn update(&mut self, change: impl FnOnce(&mut Self)) -> Result<(), String> {
+        let mut next = self.clone();
+        change(&mut next);
+        next.store()?;
+        *self = next;
+        Ok(())
     }
 
     pub(crate) fn summary(&self) -> String {

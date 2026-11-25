@@ -21,7 +21,7 @@ use serde_json::Value;
 /// What a redacted value or span reads as.
 pub const MARKER: &str = "[redacted]";
 const INDENT_PAD: &str = "                                                                ";
-const NAME: &str = r"(?i)^[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd)$";
+const NAME: &str = r"(?i)^[A-Za-z0-9_.-]*(?:(?:api|gateway)[_-]?key|token|secret|password|passwd)$";
 
 static CREDENTIAL_NAME: LazyLock<Regex> = LazyLock::new(|| compile(NAME));
 static RULES: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
@@ -30,14 +30,17 @@ static RULES: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
         // A key whose END a cut or a bound left out: every whole key is gone
         // by now, so the rest of the text is the key's.
         (r"(?s)-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*", MARKER),
-        (r#"(?im)(\b(?:Authorization|Proxy-Authorization|X-Api-Key|Cookie)[ \t]*:[ \t]*)([^\s"'\[\r\n][^\r\n"']*)"#, "${1}[redacted]"),
+        (r#"(?im)(\b(?:Authorization|Proxy-Authorization|X-Api-Key|Plak-Gateway-Key|Cookie|Set-Cookie)[ \t]*:[ \t]*)([^\s"'\[\r\n][^\r\n"']*)"#, "${1}[redacted]"),
         (r"((?i:\bBearer|\bBasic)[ \t]+)[A-Za-z0-9._~+/-]{16,}=*", "${1}[redacted]"),
         (r"\bsk-[A-Za-z0-9_-]{20,}", MARKER),
         (r"\bAKIA[0-9A-Z]{16}\b", MARKER),
         (r"\b(?:gh[posur]_|github_pat_|glpat-|AIza|xox[abprs]-)[A-Za-z0-9_-]{20,}", MARKER),
+        (r"\bplakgw1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", MARKER),
         (r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", MARKER),
         (r"(\b[A-Za-z][A-Za-z0-9+.-]*://[^\s/:@]+:)[^\s@/\[]+(@)", "${1}[redacted]${2}"),
-        (r#"(?i)([?&](?:token|key|api_key|access_token|password|secret|sig)=)[^\s&#"'\[\]]+"#, "${1}[redacted]"),
+        (r#"(?i)([?&](?:token|key|api_key|access_token|refresh_token|client_secret|code|password|secret|sig)=)[^\s&#"'\[\]]+"#, "${1}[redacted]"),
+        (r#"(?im)((?:^|[\s&])(?:refresh_token|client_secret)=)[^\s&#"'\[\]]+"#, "${1}[redacted]"),
+        (r#"(?im)(^code=)[^\s&#"'\[\]]+(&)"#, "${1}[redacted]${2}"),
     ]
     .into_iter()
     .map(|(pattern, replacement)| (compile(pattern), replacement))

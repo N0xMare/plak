@@ -1,12 +1,14 @@
 //! The buffered call the dispatcher and its tests share. The listener's relay
 //! server owns the HTTP connection; this is not a second codec.
 
+#[cfg(test)]
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Request {
     pub method: String,
     pub path: String,
+    #[cfg(test)]
     pub headers: BTreeMap<String, String>,
     pub body: Vec<u8>,
 }

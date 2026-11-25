@@ -33,7 +33,7 @@ pub(crate) struct GatewayLink {
 /// Where admin verbs go. This does not connect.
 pub(crate) struct AdminLink {
     pub(crate) address: GatewayAddress,
-    key: Option<String>,
+    key: Option<zeroize::Zeroizing<String>>,
 }
 
 impl AdminLink {
@@ -74,12 +74,12 @@ impl AdminLink {
         &self,
         request: &impl serde::Serialize,
     ) -> Result<plakous::gateway::protocol::admin::AdminResponse, String> {
-        super::client::admin(&self.address, self.key.as_deref(), request)
+        super::client::admin(&self.address, self.key(), request)
             .map_err(|failure| failure.to_string())
     }
 
     pub(crate) fn key(&self) -> Option<&str> {
-        self.key.as_deref()
+        self.key.as_deref().map(String::as_str)
     }
 
     /// One subscription account's credential posture from the gateway's
@@ -179,7 +179,7 @@ impl HostCustody {
         let relay_key = admin
             .key
             .as_ref()
-            .map(|text| SensitiveBytes::new(text.clone().into_bytes()));
+            .map(|text| SensitiveBytes::new(text.as_bytes().to_vec()));
         let custody = GatewayCustody::connect(endpoint, relay_key, credential_headers)
             .map_err(|error| format!("credential gateway: {error}"))?;
         Ok(Self::Gateway(Arc::new(GatewayLink { admin, custody })))
@@ -382,7 +382,7 @@ fn caller_key(
     home: &PlakPaths,
     address: &GatewayAddress,
     key_file: Option<&str>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<zeroize::Zeroizing<String>>, String> {
     let path = match (address, key_file) {
         (_, Some(path)) => PathBuf::from(path),
         (GatewayAddress::Tcp(_), None) => home.secrets_dir().join("gateway.key"),

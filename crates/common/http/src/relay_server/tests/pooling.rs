@@ -421,3 +421,104 @@ async fn each_gateway_protocol_version_reuses_only_its_own_socket() {
     }
     assert_eq!(peer.counts(), (2, 4));
 }
+
+#[tokio::test]
+async fn typed_terminal_cutoff_drains_clean_eof_and_reuses_pooled_tls_socket() {
+    // Upstream sends the terminal SSE event, pauses 15ms, then finishes with
+    // chunked EOF (0\r\n\r\n) on a keep-alive TLS connection. The caller drops
+    // the body immediately upon reading the terminal event (simulating
+    // typed_terminal_cutoff). The relay server must drain EOF within its
+    // bounded window, park the TLS connection, and audit Complete (not Abandoned).
+    let Endpoint {
+        listener,
+        acceptor,
+        client: config,
+        origin,
+    } = endpoint_with_versions(b"http/1.1", &[&rustls::version::TLS13])
+        .await
+        .unwrap();
+    let accepts = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(AtomicUsize::new(0));
+    let (accepted, seen) = (accepts.clone(), requests.clone());
+    tokio::spawn(async move {
+        while let Ok((socket, _)) = listener.accept().await {
+            accepted.fetch_add(1, Ordering::SeqCst);
+            let (acceptor, seen) = (acceptor.clone(), seen.clone());
+            tokio::spawn(async move {
+                let Ok(mut socket) = acceptor.accept(socket).await else {
+                    return;
+                };
+                loop {
+                    let req = read_request(&mut socket).await;
+                    if !super::complete_message(&req) {
+                        return;
+                    }
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    let chunk = format!(
+                        "{:x}\r\n{}\r\n",
+                        EVENT.len(),
+                        std::str::from_utf8(EVENT).unwrap()
+                    );
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n{chunk}"
+                    );
+                    if socket.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                    if socket.write_all(b"0\r\n\r\n").await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+
+    let service = Service::new();
+    let upstream = Client::with_tls_config(Limits::default(), config).unwrap();
+    let server = RelayServer::new(
+        service.clone(),
+        upstream,
+        super::super::new_instance().unwrap(),
+    )
+    .with_dial_override(LOGICAL, origin);
+    let client = via(&server);
+
+    // First turn: caller reads the terminal event and immediately drops the body!
+    let mut body = send(&client, LOGICAL, "/v1/stream", placeholder(7))
+        .await
+        .unwrap()
+        .into_body();
+    assert_eq!(body.next_chunk().await.unwrap().unwrap().as_ref(), EVENT);
+    drop(body);
+
+    // Wait for the server pump to finish EOF drain, park socket, and audit Complete.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while service.audited.lock().unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        *service.audited.lock().unwrap(),
+        [super::super::RelayOutcome::Complete],
+        "clean EOF after caller cutoff must audit Complete, not Abandoned"
+    );
+    assert_eq!(
+        server.inner.upstream_pool.idle_count(),
+        1,
+        "upstream TLS socket must return cleanly to the pool"
+    );
+
+    // Second turn must reuse that exact TLS handshake!
+    drain(&client, LOGICAL, "/v1/stream", placeholder(7)).await;
+    assert_eq!(
+        (
+            accepts.load(Ordering::SeqCst),
+            requests.load(Ordering::SeqCst)
+        ),
+        (1, 2),
+        "second turn after terminal cutoff must reuse the pooled TLS connection"
+    );
+}

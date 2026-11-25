@@ -1,6 +1,6 @@
 //! Git CLI snapshots, adopts, excludes, and worktree registration.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{Command, Output};
 
 use super::{
@@ -98,9 +98,10 @@ pub(super) fn git_worktree_registered(launch: &Path, path: &Path) -> Result<bool
 /// Repository-controlled code never runs inside Plak's own git steps: the
 /// inherited `GIT_*` steering variables are dropped (a caller re-adds only the
 /// ones it sets deliberately), hooks resolve under `/dev/null` and so never exist,
-/// and the fsmonitor daemon hook is off. `git` never prompts: no terminal
-/// prompt and no askpass helper, so a remote or credential question fails
-/// instead of waiting for input nobody can give.
+/// fsmonitor, ext protocol, external diff, credential helpers, ssh helpers, and
+/// repo clean/smudge/process filters are disabled, and auto-gc/pagers are off.
+/// `git` never prompts: no terminal prompt and no askpass helper, so a remote
+/// or credential question fails instead of waiting for input nobody can give.
 pub(super) fn git_command(cwd: &Path) -> Command {
     let mut command = Command::new("git");
     strip_git_environment(&mut command);
@@ -111,9 +112,44 @@ pub(super) fn git_command(cwd: &Path) -> Command {
             "core.fsmonitor=false",
             "-c",
             "core.hooksPath=/dev/null",
+            "-c",
+            "protocol.ext.allow=never",
+            "-c",
+            "core.pager=cat",
+            "-c",
+            "gc.auto=0",
+            "-c",
+            "diff.external=",
+            "-c",
+            "core.sshCommand=false",
+            "-c",
+            "credential.helper=",
+            "-c",
+            "core.attributesFile=/dev/null",
+            "-c",
+            "filter.lfs.clean=",
+            "-c",
+            "filter.lfs.smudge=",
+            "-c",
+            "filter.lfs.process=",
+            "-c",
+            "filter.lfs.required=false",
         ])
+        .env("GIT_ATTR_NOSYSTEM", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "");
+    for filter_name in repo_configured_filters(cwd) {
+        command.args([
+            "-c",
+            &format!("filter.{filter_name}.clean="),
+            "-c",
+            &format!("filter.{filter_name}.smudge="),
+            "-c",
+            &format!("filter.{filter_name}.process="),
+            "-c",
+            &format!("filter.{filter_name}.required=false"),
+        ]);
+    }
     // Without this, an unconfigured identity makes git resolve the host's
     // FQDN for every reflog entry; musl's resolver waits out its full timeout
     // when there is no network. Configured `user.email` still takes precedence.
@@ -121,6 +157,90 @@ pub(super) fn git_command(cwd: &Path) -> Command {
         command.env("EMAIL", FALLBACK_EMAIL);
     }
     command
+}
+
+/// Scans the nearest repo `.git/config` (and worktree commondir `config`) for
+/// `[filter "<name>"]` sections so `git_command` can blank their clean, smudge
+/// and process drivers without spawning a subprocess.
+fn repo_configured_filters(cwd: &Path) -> Vec<String> {
+    const MAX_CONFIG_BYTES: u64 = 256 * 1024;
+    let Some(config_path) = nearest_git_config_path(cwd) else {
+        return Vec::new();
+    };
+    let Ok(file) = std::fs::File::open(config_path) else {
+        return Vec::new();
+    };
+    let mut raw = Vec::new();
+    if Read::take(file, MAX_CONFIG_BYTES)
+        .read_to_end(&mut raw)
+        .is_err()
+    {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&raw);
+    let mut names = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let Some(inner) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) else {
+            continue;
+        };
+        let inner = inner.trim();
+        let Some((section, rest)) = inner.split_once(|ch: char| ch.is_ascii_whitespace()) else {
+            continue;
+        };
+        if !section.eq_ignore_ascii_case("filter") {
+            continue;
+        }
+        let rest = rest.trim();
+        let Some(name) = rest.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
+            continue;
+        };
+        if !name.is_empty()
+            && !name.eq_ignore_ascii_case("lfs")
+            && !name.contains(['\0', '\n', '\r', '='])
+            && !names.iter().any(|existing| existing == name)
+        {
+            names.push(name.to_owned());
+        }
+    }
+    names
+}
+
+fn nearest_git_config_path(cwd: &Path) -> Option<std::path::PathBuf> {
+    for ancestor in cwd.ancestors() {
+        let dot_git = ancestor.join(".git");
+        if dot_git.is_dir() {
+            return Some(dot_git.join("config"));
+        }
+        if dot_git.is_file() {
+            let text = std::fs::read_to_string(&dot_git).ok()?;
+            let raw = text
+                .lines()
+                .find_map(|line| line.strip_prefix("gitdir:"))?
+                .trim();
+            if raw.is_empty() {
+                return None;
+            }
+            let git_dir = if Path::new(raw).is_absolute() {
+                std::path::PathBuf::from(raw)
+            } else {
+                ancestor.join(raw)
+            };
+            if let Ok(commondir) = std::fs::read_to_string(git_dir.join("commondir")) {
+                let common = commondir.trim();
+                if !common.is_empty() {
+                    let common_path = if Path::new(common).is_absolute() {
+                        std::path::PathBuf::from(common)
+                    } else {
+                        git_dir.join(common)
+                    };
+                    return Some(common_path.join("config"));
+                }
+            }
+            return Some(git_dir.join("config"));
+        }
+    }
+    None
 }
 
 /// Identity fallback for reflog entries Plak's git steps write when neither
@@ -246,6 +366,16 @@ fn git_query_stdin(
 /// `git` with the snapshot's temp index bound. Every index-writing step of
 /// `snapshot` runs through here so the real index is never touched.
 fn git_run_indexed(cwd: &Path, index: &Path, args: &[&str]) -> Result<Output, std::io::Error> {
+    let mut command = git_command(cwd);
+    command.args(args).env("GIT_INDEX_FILE", index);
+    output_within(command, GIT_WRITE_TIMEOUT)
+}
+
+fn git_run_indexed_os(
+    cwd: &Path,
+    index: &Path,
+    args: &[&std::ffi::OsStr],
+) -> Result<Output, std::io::Error> {
     let mut command = git_command(cwd);
     command.args(args).env("GIT_INDEX_FILE", index);
     output_within(command, GIT_WRITE_TIMEOUT)
@@ -1175,36 +1305,60 @@ pub(crate) fn is_secret_git_path(path: &str) -> bool {
 
 /// Keeps a snapshot commit from pinning a secret the tool policy already
 /// excludes. Runs against the snapshot's temp index, never the
-/// real one.
+/// real one. Uses `-z` NUL-delimited output so non-ASCII and C-quoted paths
+/// (such as `café/.env`) can never evade `is_secret_git_path`.
 fn unstage_secret_paths(child: &Path, index: &Path) -> Result<(), VcsError> {
-    let listed = git_run_indexed(child, index, &["diff", "--cached", "--name-only"])
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let listed = git_run_indexed(child, index, &["diff", "--cached", "--name-only", "-z"])
         .map_err(|_| mint_error("git diff --cached failed on the snapshot index"))?;
-    let listed = if listed.status.success() {
-        String::from_utf8_lossy(&listed.stdout).into_owned()
+    let raw_bytes = if listed.status.success() {
+        listed.stdout
     } else {
         // No HEAD to diff against: every staged path is new.
-        let all = git_run_indexed(child, index, &["ls-files", "--cached"])
+        let all = git_run_indexed(child, index, &["ls-files", "--cached", "-z"])
             .map_err(|_| mint_error("git ls-files failed on the snapshot index"))?;
         if !all.status.success() {
             return Err(mint_error("snapshot index could not be listed"));
         }
-        String::from_utf8_lossy(&all.stdout).into_owned()
+        all.stdout
     };
-    for path in listed.lines() {
-        let path = path.trim();
-        if path.is_empty() || !is_secret_git_path(path) {
+    for raw_path in raw_bytes
+        .split(|byte| *byte == 0)
+        .filter(|part| !part.is_empty())
+    {
+        let lossy = String::from_utf8_lossy(raw_path);
+        if !is_secret_git_path(&lossy) {
             continue;
         }
-        let reset = git_run_indexed(child, index, &["reset", "-q", "--", path])
-            .map_err(|_| mint_error("git reset failed on the snapshot index"))?;
+        let path_os = OsStr::from_bytes(raw_path);
+        let reset = git_run_indexed_os(
+            child,
+            index,
+            &[
+                OsStr::new("reset"),
+                OsStr::new("-q"),
+                OsStr::new("--"),
+                path_os,
+            ],
+        )
+        .map_err(|_| mint_error("git reset failed on the snapshot index"))?;
         if reset.status.success() {
             continue;
         }
         // Unborn HEAD: there is nothing to reset the entry back to.
-        let removed = git_run_indexed(
+        let removed = git_run_indexed_os(
             child,
             index,
-            &["rm", "--cached", "--force", "-q", "--", path],
+            &[
+                OsStr::new("rm"),
+                OsStr::new("--cached"),
+                OsStr::new("--force"),
+                OsStr::new("-q"),
+                OsStr::new("--"),
+                path_os,
+            ],
         )
         .map_err(|_| mint_error("git rm --cached failed on the snapshot index"))?;
         if !removed.status.success() {

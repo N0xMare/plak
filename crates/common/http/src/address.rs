@@ -155,6 +155,12 @@ const IPV6_RULES: &[Ipv6Row] = &[
         "RFC 4291 IPv4-mapped",
     ),
     v6(
+        0x0000_0000_0000_0000_ffff_0000_0000_0000,
+        96,
+        Ipv6Rule::Refuse,
+        "RFC 2765 IPv4-translated (SIIT)",
+    ),
+    v6(
         0x0064_ff9b_0000_0000_0000_0000_0000_0000,
         96,
         Ipv6Rule::EmbeddedLow32,
@@ -197,6 +203,12 @@ const IPV6_RULES: &[Ipv6Row] = &[
         "RFC 9637 documentation",
     ),
     v6(
+        0x5f00_0000_0000_0000_0000_0000_0000_0000,
+        16,
+        Ipv6Rule::Refuse,
+        "RFC 9602 SRv6 SIDs",
+    ),
+    v6(
         0xfc00_0000_0000_0000_0000_0000_0000_0000,
         7,
         Ipv6Rule::Refuse,
@@ -222,6 +234,10 @@ const IPV6_RULES: &[Ipv6Row] = &[
     ),
 ];
 
+/// IANA IPv6 Global Unicast space (`2000::/3`).
+const IPV6_GLOBAL_UNICAST: Ipv6Addr =
+    Ipv6Addr::from_bits(0x2000_0000_0000_0000_0000_0000_0000_0000);
+
 /// The reference of the range that refuses `address`, or `None` when the
 /// address is admitted as public.
 fn refused_range(address: IpAddr) -> Option<&'static str> {
@@ -239,19 +255,27 @@ fn refused_v4(address: Ipv4Addr) -> Option<&'static str> {
 }
 
 fn refused_v6(address: Ipv6Addr) -> Option<&'static str> {
-    let row = IPV6_RULES
+    if let Some(row) = IPV6_RULES
         .iter()
-        .find(|row| prefix_matches_v6(address, row.network, row.prefix))?;
-    let octets = address.octets();
-    let low32 = Ipv4Addr::new(octets[12], octets[13], octets[14], octets[15]);
-    match row.rule {
-        Ipv6Rule::EmbeddedLow32 => refused_v4(low32),
-        Ipv6Rule::Embedded6to4 => {
-            refused_v4(Ipv4Addr::new(octets[2], octets[3], octets[4], octets[5]))
-        }
-        Ipv6Rule::LocalNat64 if octets[6..12].iter().all(|octet| *octet == 0) => refused_v4(low32),
-        Ipv6Rule::Refuse | Ipv6Rule::LocalNat64 => Some(row.reference),
+        .find(|row| prefix_matches_v6(address, row.network, row.prefix))
+    {
+        let octets = address.octets();
+        let low32 = Ipv4Addr::new(octets[12], octets[13], octets[14], octets[15]);
+        return match row.rule {
+            Ipv6Rule::EmbeddedLow32 => refused_v4(low32),
+            Ipv6Rule::Embedded6to4 => {
+                refused_v4(Ipv4Addr::new(octets[2], octets[3], octets[4], octets[5]))
+            }
+            Ipv6Rule::LocalNat64 if octets[6..12].iter().all(|octet| *octet == 0) => {
+                refused_v4(low32)
+            }
+            Ipv6Rule::Refuse | Ipv6Rule::LocalNat64 => Some(row.reference),
+        };
     }
+    if !prefix_matches_v6(address, IPV6_GLOBAL_UNICAST, 3) {
+        return Some("RFC 4291 reserved (non-global unicast)");
+    }
+    None
 }
 
 fn prefix_matches_v4(address: Ipv4Addr, network: Ipv4Addr, prefix: u8) -> bool {

@@ -354,20 +354,48 @@ pub(crate) fn validate_client_config(
     Ok(())
 }
 
-/// Reads the caller key file, which must be a regular file only its owner
-/// can read or write. The value is not logged.
-pub(crate) fn read_key_file(path: &std::path::Path) -> Result<String, String> {
-    use std::os::unix::fs::PermissionsExt as _;
-    let meta = std::fs::metadata(path).map_err(|error| error.to_string())?;
-    if !meta.is_file() || meta.permissions().mode() & 0o077 != 0 {
-        return Err("the gateway key file must be a regular file with mode 0600".to_owned());
+/// Reads the caller key file, which must be a single-link regular file owned
+/// by the current user that only its owner can read or write, opened with
+/// `O_NOFOLLOW`. The value is zeroized on drop and never logged.
+pub(crate) fn read_key_file(path: &std::path::Path) -> Result<zeroize::Zeroizing<String>, String> {
+    use std::io::Read as _;
+
+    use rustix::fs::{FileType, Mode, OFlags, fstat, open};
+
+    const MAX_KEY_FILE_BYTES: usize = 16 * 1024;
+    let fd = open(
+        path,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map_err(|error| std::io::Error::from(error).to_string())?;
+    let file = std::fs::File::from(fd);
+    let stat = fstat(&file).map_err(|error| std::io::Error::from(error).to_string())?;
+    let euid = rustix::process::geteuid().as_raw();
+    if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile
+        || stat.st_uid != euid
+        || stat.st_mode & 0o077 != 0
+        || stat.st_nlink != 1
+    {
+        return Err(
+            "the gateway key file must be a single-link regular file owned by the current user with mode 0600"
+                .to_owned(),
+        );
     }
-    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let mut raw = zeroize::Zeroizing::new(Vec::new());
+    file.take((MAX_KEY_FILE_BYTES + 1) as u64)
+        .read_to_end(&mut raw)
+        .map_err(|error| error.to_string())?;
+    if raw.len() > MAX_KEY_FILE_BYTES {
+        return Err("the gateway key file is too large".to_owned());
+    }
+    let text =
+        std::str::from_utf8(&raw).map_err(|_| "the gateway key file is not UTF-8".to_owned())?;
     let key = text.trim();
     if key.is_empty() {
         return Err("the gateway key file is empty".to_owned());
     }
-    Ok(key.to_owned())
+    Ok(zeroize::Zeroizing::new(key.to_owned()))
 }
 
 #[cfg(test)]

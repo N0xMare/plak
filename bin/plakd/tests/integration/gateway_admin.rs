@@ -983,9 +983,8 @@ fn gateway_cli_rosters_print_successful_and_refused_rows() {
         let rows = String::from_utf8(output.stdout).unwrap();
         assert!(rows.lines().any(|row| row == healthy), "{rows}");
         assert!(
-            rows.lines()
-                .any(|row| row == "codex: error=gateway refused the call (scope_denied)"),
-            "{rows}"
+            !rows.contains("codex") && !rows.contains("grok") && !rows.contains("claude/work"),
+            "out-of-scope accounts must not be enumerated in roster: {rows}"
         );
     }
     let usage = command(gateway.root.path())
@@ -994,15 +993,29 @@ fn gateway_cli_rosters_print_successful_and_refused_rows() {
         .unwrap();
     assert!(usage.status.success(), "{usage:?}");
     let limits = String::from_utf8(usage.stdout).unwrap();
+    assert!(limits.contains("rate-limited"), "{limits}");
     assert!(
-        limits.contains("rate-limited") && limits.contains("scope_denied"),
-        "{limits}"
+        !limits.contains("codex") && !limits.contains("grok"),
+        "out-of-scope accounts must not appear in usage roster: {limits}"
     );
     let single = command(gateway.root.path())
         .args(["status", "codex"])
         .output()
         .unwrap();
     assert!(!single.status.success(), "{single:?}");
+    assert!(
+        String::from_utf8_lossy(&single.stderr).contains("scope_denied"),
+        "{single:?}"
+    );
+    let single_usage = command(gateway.root.path())
+        .args(["usage", "--account", "codex"])
+        .output()
+        .unwrap();
+    assert!(!single_usage.status.success(), "{single_usage:?}");
+    assert!(
+        String::from_utf8_lossy(&single_usage.stderr).contains("scope_denied"),
+        "{single_usage:?}"
+    );
     gateway.finish();
 }
 

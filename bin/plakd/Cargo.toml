@@ -47,6 +47,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha2.workspace = true
 shell-words = "1.1"
+subtle.workspace = true
+getrandom.workspace = true
 zeroize.workspace = true
 tempfile = { workspace = true }
 time = { version = "0.3", features = ["formatting", "parsing"] }

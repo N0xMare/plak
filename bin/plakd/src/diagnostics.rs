@@ -1,7 +1,9 @@
 //! Optional file diagnostics (`PLAK_LOG`); never writes to protocol stdout.
 
 use std::fmt;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(not(unix))]
+use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -68,9 +70,11 @@ impl OpenLog {
         if ours.len() <= ROTATE_AT_BYTES {
             return;
         }
-        let current = std::fs::metadata(&self.path).ok();
-        if current.is_some_and(|current| (current.dev(), current.ino()) == (ours.dev(), ours.ino()))
-        {
+        let current = std::fs::symlink_metadata(&self.path).ok();
+        if current.is_some_and(|current| {
+            current.file_type().is_file()
+                && (current.dev(), current.ino()) == (ours.dev(), ours.ino())
+        }) {
             let _ = std::fs::rename(&self.path, rotated_path(&self.path));
         }
         if let Ok(file) = open_append_log(&self.path) {
@@ -202,20 +206,62 @@ fn ensure_log_directory(paths: &PlakPaths) -> Result<(), DiagnosticsError> {
 }
 
 fn open_append_log(path: &Path) -> Result<File, DiagnosticsError> {
-    if std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > ROTATE_AT_BYTES) {
-        let _ = std::fs::rename(path, rotated_path(path));
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(DiagnosticsError::Io(
+                "diagnostics log path is not a regular file".to_owned(),
+            ));
+        }
+        Ok(metadata) if metadata.len() > ROTATE_AT_BYTES => {
+            let _ = std::fs::rename(path, rotated_path(path));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(DiagnosticsError::Io(format!(
+                "could not inspect diagnostics log: {error}"
+            )));
+        }
     }
 
-    let mut options = OpenOptions::new();
-    options.append(true).create(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
+        use rustix::fs::{FileType, Mode, OFlags, fstat, open};
+        let fd = open(
+            path,
+            OFlags::WRONLY | OFlags::APPEND | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::from_raw_mode(0o600),
+        )
+        .map_err(|error| {
+            DiagnosticsError::Io(format!(
+                "could not open diagnostics log: {}",
+                io::Error::from(error)
+            ))
+        })?;
+        let file = File::from(fd);
+        let stat = fstat(&file).map_err(|error| {
+            DiagnosticsError::Io(format!(
+                "could not inspect diagnostics log: {}",
+                io::Error::from(error)
+            ))
+        })?;
+        if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile
+            || stat.st_uid != rustix::process::geteuid().as_raw()
+        {
+            return Err(DiagnosticsError::Io(
+                "diagnostics log path is not a regular file owned by the current user".to_owned(),
+            ));
+        }
+        Ok(file)
     }
-    options
-        .open(path)
-        .map_err(|error| DiagnosticsError::Io(format!("could not open diagnostics log: {error}")))
+    #[cfg(not(unix))]
+    {
+        let mut options = OpenOptions::new();
+        options.append(true).create(true);
+        options.open(path).map_err(|error| {
+            DiagnosticsError::Io(format!("could not open diagnostics log: {error}"))
+        })
+    }
 }
 
 #[cfg(test)]
@@ -277,5 +323,21 @@ mod tests {
         );
         LogFile(Arc::clone(&second)).write_all(b"after\n").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"after\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_append_log_refuses_symlinks_and_non_regular_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let victim = directory.path().join("victim.txt");
+        std::fs::write(&victim, "untouched").unwrap();
+        let link = directory.path().join("plak.log");
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+        assert!(open_append_log(&link).is_err());
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "untouched");
+
+        let sub = directory.path().join("dir.log");
+        std::fs::create_dir(&sub).unwrap();
+        assert!(open_append_log(&sub).is_err());
     }
 }

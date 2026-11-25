@@ -12,6 +12,7 @@ use plakous::gateway::protocol::facts::{
     WireIdentity,
 };
 use plakous::gateway::protocol::refusal::GatewayRefusal;
+use plakous::gateway::protocol::scope::{Capability, ScopeSet};
 use plakous::gateway::protocol::{BoundedText, UuidText};
 use plakous::gateway::protocol::{GatewayAccount, SecretText};
 use plakous::subscriptions::{
@@ -20,6 +21,7 @@ use plakous::subscriptions::{
 use plakous_hosted::account::AccountRef;
 use tokio::sync::oneshot;
 
+use super::auth::Principal;
 use super::bridge::{AccountBridge, AttemptBook};
 use crate::commands::application::host::{
     HostAccountError, logout_host_account, prepare_host_login,
@@ -130,12 +132,32 @@ impl OpsBridge {
             .collect()
     }
 
+    fn authorized_accounts(
+        &mut self,
+        caller: &Principal,
+        scopes: Option<&ScopeSet>,
+    ) -> Result<Vec<GatewayAccount>, AdminRefusal> {
+        let all = self.accounts()?;
+        if caller.is_local_admin() {
+            return Ok(all);
+        }
+        let Some(scopes) = scopes else {
+            return Ok(Vec::new());
+        };
+        Ok(all
+            .into_iter()
+            .filter(|account| scopes.allows(Capability::Relay, account))
+            .collect())
+    }
+
     fn status(
         &mut self,
+        caller: &Principal,
+        scopes: Option<&ScopeSet>,
         accounts: Vec<GatewayAccount>,
     ) -> Result<Vec<AccountStatusRow>, AdminRefusal> {
         let selected = if accounts.is_empty() {
-            self.accounts()?
+            self.authorized_accounts(caller, scopes)?
         } else {
             accounts
         };
@@ -157,13 +179,18 @@ impl OpsBridge {
 }
 
 impl AccountBridge for OpsBridge {
-    fn call(&mut self, local_admin: bool, request: AdminRequest) -> AdminResponse {
+    fn call(
+        &mut self,
+        caller: &Principal,
+        scopes: Option<&ScopeSet>,
+        request: AdminRequest,
+    ) -> AdminResponse {
         match request {
             AdminRequest::List {} => self
-                .accounts()
+                .authorized_accounts(caller, scopes)
                 .map_or_else(refused, |accounts| AdminResponse::Accounts { accounts }),
             AdminRequest::Status { accounts } => self
-                .status(accounts)
+                .status(caller, scopes, accounts)
                 .map_or_else(refused, |rows| AdminResponse::Status { rows }),
             AdminRequest::KeySet { account, secret } => self.key_set(&account, secret.expose()),
             AdminRequest::KeyClear { account } => self.key_clear(&account),
@@ -174,17 +201,12 @@ impl AccountBridge for OpsBridge {
                 account,
                 notice_revision,
                 replace_newer,
-            } => self.login_start(
-                local_admin,
-                account,
-                notice_revision.as_str(),
-                replace_newer,
-            ),
+            } => self.login_start(caller, account, notice_revision.as_str(), replace_newer),
             AdminRequest::LoginComplete { attempt, pasted } => {
-                self.login_complete(&attempt, pasted.expose())
+                self.login_complete(caller, &attempt, pasted.expose())
             }
-            AdminRequest::LoginPoll { attempt } => self.login_poll(&attempt),
-            AdminRequest::LoginCancel { attempt } => self.login_cancel(&attempt),
+            AdminRequest::LoginPoll { attempt } => self.login_poll(caller, &attempt),
+            AdminRequest::LoginCancel { attempt } => self.login_cancel(caller, &attempt),
             AdminRequest::Allowance { account } => self.allowance(&account),
             AdminRequest::Disable { .. }
             | AdminRequest::Enable { .. }
@@ -194,6 +216,10 @@ impl AccountBridge for OpsBridge {
             | AdminRequest::CallerRemove { .. }
             | AdminRequest::Drain {} => refused(AdminRefusal::Unavailable {}),
         }
+    }
+
+    fn attempt_info(&mut self, attempt: &UuidText) -> Option<(Principal, GatewayAccount)> {
+        self.attempts.info(attempt)
     }
 
     fn facts(&mut self, accounts: &[GatewayAccount]) -> Result<Vec<AccountFacts>, GatewayRefusal> {
@@ -325,7 +351,7 @@ impl OpsBridge {
 
     fn login_start(
         &mut self,
-        local_admin: bool,
+        caller: &Principal,
         account: GatewayAccount,
         notice_revision: &str,
         replace_newer: bool,
@@ -338,7 +364,7 @@ impl OpsBridge {
         }
         // Captured before the login can retire an unusable record: a remote
         // admin may only re-login the account this slot held (spec 04 §2.11).
-        let keep_account = !local_admin && self.signed_in(&parsed);
+        let keep_account = !caller.is_local_admin() && self.signed_in(&parsed);
         if let Err(error) =
             prepare_host_login(&mut self.app, &parsed, notice_revision, replace_newer)
         {
@@ -388,6 +414,7 @@ impl OpsBridge {
             (Some(challenge.pending), None)
         };
         let id = match self.attempts.begin(
+            caller.clone(),
             account,
             LiveLogin {
                 method,
@@ -408,8 +435,13 @@ impl OpsBridge {
         }
     }
 
-    fn login_complete(&mut self, attempt: &UuidText, pasted: &str) -> AdminResponse {
-        let Ok(found) = self.attempts.get_mut(attempt) else {
+    fn login_complete(
+        &mut self,
+        caller: &Principal,
+        attempt: &UuidText,
+        pasted: &str,
+    ) -> AdminResponse {
+        let Ok(found) = self.attempts.get_mut_for(caller, attempt) else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
         if found.payload.method != LoginMethod::Paste {
@@ -421,7 +453,7 @@ impl OpsBridge {
         if pending.validate_remote_input(pasted).is_err() {
             return refused(AdminRefusal::PasteInvalid {});
         }
-        let Ok(found) = self.attempts.take(attempt) else {
+        let Ok(found) = self.attempts.take_for(caller, attempt) else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
         let Some(pending) = found.payload.pending else {
@@ -442,11 +474,11 @@ impl OpsBridge {
         }
     }
 
-    fn login_poll(&mut self, attempt: &UuidText) -> AdminResponse {
-        if let Err(refusal) = self.attempts.poll_allowed(attempt) {
+    fn login_poll(&mut self, caller: &Principal, attempt: &UuidText) -> AdminResponse {
+        if let Err(refusal) = self.attempts.poll_allowed_for(caller, attempt) {
             return refused(refusal);
         }
-        let Ok(found) = self.attempts.get_mut(attempt) else {
+        let Ok(found) = self.attempts.get_mut_for(caller, attempt) else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
         if let Some(outcome) = found
@@ -455,14 +487,14 @@ impl OpsBridge {
             .as_mut()
             .and_then(|device| device.outcome(attempt))
         {
-            let _ = self.attempts.take(attempt);
+            let _ = self.attempts.take_for(caller, attempt);
             return outcome;
         }
         progress(found.id.clone(), LoginPhase::AwaitingInput)
     }
 
-    fn login_cancel(&mut self, attempt: &UuidText) -> AdminResponse {
-        let Ok(mut found) = self.attempts.take(attempt) else {
+    fn login_cancel(&mut self, caller: &Principal, attempt: &UuidText) -> AdminResponse {
+        let Ok(mut found) = self.attempts.take_for(caller, attempt) else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
         if let Some(outcome) = found
@@ -608,6 +640,7 @@ mod tests {
         let attempt = bridge
             .attempts
             .begin(
+                Principal::LocalAdmin,
                 GatewayAccount::new("codex".to_owned()).unwrap(),
                 LiveLogin {
                     method: LoginMethod::DeviceCode,
@@ -618,7 +651,7 @@ mod tests {
             .unwrap();
         send.send(Ok(NativeAuthStatus::Ready)).unwrap();
         assert_eq!(
-            bridge.login_cancel(&attempt),
+            bridge.login_cancel(&Principal::LocalAdmin, &attempt),
             progress(attempt, LoginPhase::Succeeded)
         );
     }

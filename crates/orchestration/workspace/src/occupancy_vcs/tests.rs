@@ -1779,7 +1779,12 @@ fn a_stalled_git_is_killed_at_its_ceiling() {
     let output = output_within(fake_git("fast"), GIT_QUERY_TIMEOUT).unwrap();
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        "prompt=0 askpass=[] -c core.fsmonitor=false -c core.hooksPath=/dev/null fast"
+        "prompt=0 askpass=[] \
+         -c core.fsmonitor=false -c core.hooksPath=/dev/null \
+         -c protocol.ext.allow=never -c core.pager=cat -c gc.auto=0 \
+         -c diff.external= -c core.sshCommand=false -c credential.helper= \
+         -c core.attributesFile=/dev/null -c filter.lfs.clean= \
+         -c filter.lfs.smudge= -c filter.lfs.process= -c filter.lfs.required=false fast"
     );
 }
 
@@ -2438,4 +2443,120 @@ fn system_presence_questions_answer_an_uninspectable_path_with_an_error() {
         present.is_err(),
         "an unsearchable parent answered {present:?}"
     );
+}
+
+/// Non-ASCII secret paths (such as `café/.env`) are C-quoted by git unless
+/// `-z` is passed. `git_snapshot` must unstage and exclude them on both a
+/// normal HEAD and an unborn HEAD while keeping ordinary non-ASCII files.
+#[test]
+fn git_snapshot_unstages_non_ascii_secret_paths_with_nul_delimiters() {
+    // 1. Repo with an existing HEAD commit.
+    let repo = git_repo();
+    let dir = repo.path().join("café");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".env"), "API_KEY=topsecret\n").unwrap();
+    std::fs::write(dir.join("notes.txt"), "ordinary\n").unwrap();
+
+    let snapshot = git_snapshot(repo.path(), "non-ascii").unwrap();
+    let listed = git_query(
+        repo.path(),
+        &["ls-tree", "-r", "--name-only", "-z", &snapshot.content],
+    )
+    .unwrap();
+    assert!(listed.status.success());
+    let paths: Vec<String> = listed
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|part| !part.is_empty())
+        .map(|part| String::from_utf8_lossy(part).into_owned())
+        .collect();
+    assert!(
+        paths.iter().any(|path| path == "café/notes.txt"),
+        "non-secret file must stay: {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|path| path.contains(".env")),
+        "non-ASCII secret path leaked into snapshot: {paths:?}"
+    );
+
+    // 2. Repo with an unborn HEAD (uses `git ls-files --cached -z` + `git rm --cached`).
+    let unborn = tempdir().unwrap();
+    assert!(
+        Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(unborn.path())
+            .status()
+            .unwrap()
+            .success()
+    );
+    let unborn_dir = unborn.path().join("café");
+    std::fs::create_dir_all(&unborn_dir).unwrap();
+    std::fs::write(unborn_dir.join(".env"), "API_KEY=unborn-secret\n").unwrap();
+    std::fs::write(unborn_dir.join("keep.txt"), "keep\n").unwrap();
+    let unborn_snap = git_snapshot(unborn.path(), "unborn-non-ascii").unwrap();
+    let unborn_listed = git_query(
+        unborn.path(),
+        &["ls-tree", "-r", "--name-only", "-z", &unborn_snap.content],
+    )
+    .unwrap();
+    assert!(unborn_listed.status.success());
+    let unborn_paths: Vec<String> = unborn_listed
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|part| !part.is_empty())
+        .map(|part| String::from_utf8_lossy(part).into_owned())
+        .collect();
+    assert!(
+        unborn_paths.iter().any(|path| path == "café/keep.txt"),
+        "{unborn_paths:?}"
+    );
+    assert!(
+        !unborn_paths.iter().any(|path| path.contains(".env")),
+        "unborn non-ASCII secret path leaked: {unborn_paths:?}"
+    );
+}
+
+/// Host `git_command` neutralizes hostile repo config: clean/smudge/process
+/// filters, `diff.external`, and `protocol.ext.allow`.
+#[test]
+fn git_command_neutralizes_repo_filters_external_diff_and_ext_protocol() {
+    let repo = git_repo();
+    let marker = repo.path().join("PWNED");
+    let evil_cmd = format!("sh -c 'touch {} && cat'", marker.display());
+    for args in [
+        vec!["config", "filter.evil.clean", &evil_cmd],
+        vec!["config", "filter.evil.smudge", &evil_cmd],
+        vec!["config", "filter.evil.process", &evil_cmd],
+        vec!["config", "diff.external", &evil_cmd],
+        vec!["config", "protocol.ext.allow", "always"],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(&args)
+                .current_dir(repo.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    std::fs::write(repo.path().join(".gitattributes"), "*.txt filter=evil\n").unwrap();
+    std::fs::write(repo.path().join("hello.txt"), "hello\n").unwrap();
+
+    // Snapshotting must not execute the clean/smudge/process filter.
+    let _snap = git_snapshot(repo.path(), "filter-test").unwrap();
+    assert!(!marker.exists(), "repo filter executed during git_snapshot");
+
+    // `git diff` via git_query must not execute `diff.external`.
+    let diff = git_query(repo.path(), &["diff", "HEAD"]).unwrap();
+    assert!(diff.status.success());
+    assert!(!marker.exists(), "diff.external executed during git_query");
+
+    // `protocol.ext.allow` must resolve to `never`.
+    let proto = git_text(
+        repo.path(),
+        &["config", "--get", "protocol.ext.allow"],
+        "ext",
+    )
+    .unwrap();
+    assert_eq!(proto, "never");
 }

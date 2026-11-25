@@ -210,8 +210,9 @@ fn text(value: impl Into<String>) -> CallToolResponse {
     CallToolResponse::Complete(CallToolResult::success(vec![ContentBlock::text(value)]))
 }
 
-/// Eight zero bytes, base64: a tiny PNG-typed payload.
-const TINY_PNG: &str = "AAAAAAAAAAA=";
+/// Minimal valid 1x1 PNG, base64.
+const TINY_PNG: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIAAAUAAeImBZsAAAAASUVORK5CYII=";
 
 /// The resources a server with resources enabled lists.
 #[must_use]

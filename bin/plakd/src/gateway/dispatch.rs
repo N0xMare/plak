@@ -3,7 +3,7 @@
 //! and the policy the tests call. It cannot stream a relay, so a decoded relay
 //! here is refused `internal` and nothing is dialed.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use plakous::gateway::protocol::admin::{AdminRefusal, AdminRequest, AdminResponse, DisableTarget};
@@ -36,9 +36,12 @@ pub(crate) struct GatewayState {
     pub draining: AtomicBool,
     pub listeners: Mutex<Vec<String>>,
     pub shutdown: tokio::sync::Notify,
-    /// Each streaming relay's cut, by its operation and attempt, for
-    /// `disable --cut`.
-    pub relays: Mutex<std::collections::HashMap<String, RelayCut>>,
+    /// Server-generated monotonic relay id for `relays`, never derived from
+    /// untrusted caller envelope fields.
+    pub next_relay_id: AtomicU64,
+    /// Each streaming relay's cut, keyed by its unique server-generated id,
+    /// for `disable --cut`.
+    pub relays: Mutex<std::collections::HashMap<u64, RelayCut>>,
 }
 
 /// Who one in-flight relay runs for and how to end it.
@@ -100,6 +103,18 @@ pub(crate) fn handle(state: &Arc<GatewayState>, peer: &Peer, request: &Request) 
     serve_authed(state, &principal, record_scopes.as_ref(), request, started)
 }
 
+struct ServeHold<'a> {
+    state: &'a GatewayState,
+    principal: &'a Principal,
+}
+
+impl Drop for ServeHold<'_> {
+    fn drop(&mut self) {
+        self.state.inflight.fetch_sub(1, Ordering::AcqRel);
+        release_caller(self.state, self.principal);
+    }
+}
+
 /// Runs one call for a principal the gateway has already authenticated.
 pub(crate) fn serve_authed(
     state: &Arc<GatewayState>,
@@ -108,23 +123,31 @@ pub(crate) fn serve_authed(
     request: &Request,
     started: std::time::Instant,
 ) -> Response {
-    if state.draining.load(Ordering::Relaxed)
-        || state.inflight.load(Ordering::Relaxed) >= state.config.max_inflight
+    if state.draining.load(Ordering::Relaxed) {
+        return refusal(&GatewayRefusal::Busy {
+            retry_after_ms: 1000,
+        });
+    }
+    let max = state.config.max_inflight;
+    if state
+        .inflight
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            (current < max).then_some(current + 1)
+        })
+        .is_err()
     {
         return refusal(&GatewayRefusal::Busy {
             retry_after_ms: 1000,
         });
     }
     if !admit_caller(state, principal) {
+        state.inflight.fetch_sub(1, Ordering::AcqRel);
         return refusal(&GatewayRefusal::Busy {
             retry_after_ms: 500,
         });
     }
-    state.inflight.fetch_add(1, Ordering::Relaxed);
-    let response = dispatch(state, principal, scopes, request, started);
-    state.inflight.fetch_sub(1, Ordering::Relaxed);
-    release_caller(state, principal);
-    response
+    let _hold = ServeHold { state, principal };
+    dispatch(state, principal, scopes, request, started)
 }
 
 pub(crate) fn admit_caller(state: &GatewayState, principal: &Principal) -> bool {
@@ -232,7 +255,16 @@ fn admin(
         Err(error) => return call_error(error),
     };
     let verb = admin_verb(&call);
-    let account = admin_account(&call);
+    // Resolve pending-login attempt ownership and account before scope & flag
+    // checks so cross-caller hijack and account-disable bypass are impossible.
+    let attempt_meta = match &call {
+        AdminRequest::LoginComplete { attempt, .. }
+        | AdminRequest::LoginPoll { attempt }
+        | AdminRequest::LoginCancel { attempt } => lock_bridge(state).attempt_info(attempt),
+        _ => None,
+    };
+    let account =
+        admin_account(&call).or_else(|| attempt_meta.as_ref().map(|(_, account)| account.clone()));
     if !principal.is_local_admin() && local_only(&call) {
         audit(
             state,
@@ -269,6 +301,23 @@ fn admin(
         );
         return refusal_response(&refusal);
     }
+    if let Some((owner, attempt_account)) = attempt_meta.as_ref() {
+        let owner_ok = owner == principal;
+        let scope_ok = principal.is_local_admin()
+            || scopes.is_some_and(|set| set.allows(Capability::Admin, attempt_account));
+        if !owner_ok || !scope_ok {
+            let refusal = GatewayRefusal::ScopeDenied {};
+            audit(
+                state,
+                &principal.audit_name(),
+                verb,
+                Some(attempt_account),
+                Some(refusal.code()),
+                started,
+            );
+            return refusal_response(&refusal);
+        }
+    }
     // A flag verb names its target; that account's flag does not block it.
     let flag_verb = matches!(
         call,
@@ -288,23 +337,27 @@ fn admin(
             return refusal_response(&refusal);
         }
     }
-    let response = match &call {
+    let response = match call {
         AdminRequest::CallerAdd {
             caller,
             scopes,
             sources,
-        } => caller_add(state, caller, scopes, sources),
+        } => caller_add(state, &caller, &scopes, &sources),
         AdminRequest::CallerList {} => caller_list(state),
-        AdminRequest::CallerRotate { caller } => caller_rotate(state, caller),
-        AdminRequest::CallerRemove { caller } => caller_remove(state, caller),
-        AdminRequest::Disable { target, cut } => disable(state, target, *cut),
-        AdminRequest::Enable { target } => enable(state, target),
+        AdminRequest::CallerRotate { caller } => caller_rotate(state, &caller),
+        AdminRequest::CallerRemove { caller } => caller_remove(state, &caller),
+        AdminRequest::Disable { target, cut } => disable(state, &target, cut),
+        AdminRequest::Enable { target } => enable(state, &target),
         AdminRequest::Drain {} => {
             state.draining.store(true, Ordering::Relaxed);
             state.shutdown.notify_one();
             AdminResponse::Draining {}
         }
-        other => bridge_call(state, principal.is_local_admin(), other.clone_request()),
+        other => filter_admin_response(
+            principal,
+            scopes,
+            bridge_call(state, principal, scopes, other),
+        ),
     };
     let error = match &response {
         AdminResponse::Refused { refusal } => Some(refusal_name(refusal)),
@@ -319,6 +372,33 @@ fn admin(
         started,
     );
     json_ok(&response)
+}
+
+fn filter_admin_response(
+    principal: &Principal,
+    scopes: Option<&ScopeSet>,
+    response: AdminResponse,
+) -> AdminResponse {
+    if principal.is_local_admin() {
+        return response;
+    }
+    match response {
+        AdminResponse::Accounts { accounts } => AdminResponse::Accounts {
+            accounts: accounts
+                .into_iter()
+                .filter(|account| scopes.is_some_and(|set| set.allows(Capability::Relay, account)))
+                .collect(),
+        },
+        AdminResponse::Status { rows } => AdminResponse::Status {
+            rows: rows
+                .into_iter()
+                .filter(|row| {
+                    scopes.is_some_and(|set| set.allows(Capability::Relay, &row.facts.account))
+                })
+                .collect(),
+        },
+        other => other,
+    }
 }
 
 fn facts(
@@ -462,16 +542,24 @@ fn admin_scope(
     if principal.is_local_admin() {
         return None;
     }
-    let scopes = scopes?;
+    let Some(scopes) = scopes else {
+        return Some(GatewayRefusal::ScopeDenied {});
+    };
     let needed = match request {
         AdminRequest::List {} => return list_scope(scopes),
-        AdminRequest::Status { .. } | AdminRequest::Allowance { .. } => {
-            let accounts = match request {
-                AdminRequest::Status { accounts } => accounts.clone(),
-                AdminRequest::Allowance { account } => vec![account.clone()],
-                _ => Vec::new(),
-            };
-            return accounts_scope(principal, Some(scopes), Capability::Relay, &accounts);
+        AdminRequest::Status { accounts } => {
+            if accounts.is_empty() {
+                return list_scope(scopes);
+            }
+            return accounts_scope(principal, Some(scopes), Capability::Relay, accounts);
+        }
+        AdminRequest::Allowance { account } => {
+            return accounts_scope(
+                principal,
+                Some(scopes),
+                Capability::Relay,
+                std::slice::from_ref(account),
+            );
         }
         AdminRequest::CallerAdd { .. }
         | AdminRequest::CallerList {}
@@ -479,7 +567,7 @@ fn admin_scope(
         | AdminRequest::CallerRemove { .. }
         | AdminRequest::Enable { .. }
         | AdminRequest::Drain {} => return None,
-        AdminRequest::Disable { target, .. } => return disable_scope(scopes, target),
+        AdminRequest::Disable { target, .. } => return disable_scope(principal, scopes, target),
         AdminRequest::KeySet { account, .. }
         | AdminRequest::KeyClear { account }
         | AdminRequest::Logout { account, .. }
@@ -518,25 +606,28 @@ fn list_scope(scopes: &ScopeSet) -> Option<GatewayRefusal> {
     }
 }
 
-fn disable_scope(scopes: &ScopeSet, target: &DisableTarget) -> Option<GatewayRefusal> {
+fn disable_scope(
+    principal: &Principal,
+    scopes: &ScopeSet,
+    target: &DisableTarget,
+) -> Option<GatewayRefusal> {
+    let has_any_admin = scopes.scopes().iter().any(|scope| {
+        scope.capability == Capability::Admin
+            && matches!(
+                scope.accounts,
+                plakous::gateway::protocol::scope::AccountGlob::Any
+            )
+    });
     match target {
         DisableTarget::Account { account } if scopes.allows(Capability::Admin, account) => None,
-        DisableTarget::All {}
-            if scopes.scopes().iter().any(|scope| {
-                scope.capability == Capability::Admin
-                    && matches!(
-                        scope.accounts,
-                        plakous::gateway::protocol::scope::AccountGlob::Any
-                    )
-            }) =>
-        {
-            None
-        }
-        DisableTarget::Caller { .. }
-            if scopes
-                .scopes()
-                .iter()
-                .any(|scope| scope.capability == Capability::Admin) =>
+        DisableTarget::All {} if has_any_admin => None,
+        DisableTarget::Caller { caller }
+            if has_any_admin
+                || (scopes
+                    .scopes()
+                    .iter()
+                    .any(|scope| scope.capability == Capability::Admin)
+                    && matches!(principal, Principal::Caller(self_id) if self_id == caller)) =>
         {
             None
         }
@@ -553,7 +644,9 @@ fn accounts_scope(
     if principal.is_local_admin() {
         return None;
     }
-    let scopes = scopes?;
+    let Some(scopes) = scopes else {
+        return Some(GatewayRefusal::ScopeDenied {});
+    };
     if accounts
         .iter()
         .all(|account| scopes.allows(capability, account))
@@ -723,9 +816,14 @@ fn enable(state: &GatewayState, target: &DisableTarget) -> AdminResponse {
     }
 }
 
-fn bridge_call(state: &GatewayState, local_admin: bool, request: AdminRequest) -> AdminResponse {
+fn bridge_call(
+    state: &GatewayState,
+    principal: &Principal,
+    scopes: Option<&ScopeSet>,
+    request: AdminRequest,
+) -> AdminResponse {
     let mut bridge = lock_bridge(state);
-    bridge.call(local_admin, request)
+    bridge.call(principal, scopes, request)
 }
 
 fn lock_callers(state: &GatewayState) -> std::sync::MutexGuard<'_, Callers> {
@@ -957,19 +1055,4 @@ fn refusal_name(refusal: &AdminRefusal) -> String {
         AdminRefusal::CallerUnknown {} => "caller_unknown",
     }
     .to_owned()
-}
-
-trait CloneRequest {
-    fn clone_request(&self) -> AdminRequest;
-}
-
-impl CloneRequest for AdminRequest {
-    fn clone_request(&self) -> AdminRequest {
-        // AdminRequest is not Clone because secrets are not cloned by derive.
-        // Re-encode the value the gateway already accepted.
-        match call::encode(self).and_then(|bytes| call::decode(&bytes)) {
-            Ok(request) => request,
-            Err(_) => AdminRequest::List {},
-        }
-    }
 }

@@ -24,6 +24,7 @@ fn home() -> (tempfile::TempDir, PlakPaths) {
     let dir = tempfile::tempdir().unwrap();
     let paths = PlakPaths::explicit(dir.path().join("plak"));
     std::fs::create_dir_all(paths.home()).unwrap();
+    std::fs::set_permissions(paths.home(), std::fs::Permissions::from_mode(0o700)).unwrap();
     (dir, paths)
 }
 
@@ -50,6 +51,7 @@ pub(super) fn state_for(paths: &PlakPaths) -> Arc<GatewayState> {
         draining: std::sync::atomic::AtomicBool::new(false),
         listeners: Mutex::new(Vec::new()),
         shutdown: tokio::sync::Notify::new(),
+        next_relay_id: std::sync::atomic::AtomicU64::new(1),
         relays: Mutex::new(std::collections::HashMap::new()),
     })
 }
@@ -880,8 +882,11 @@ fn disable_cut_ends_only_the_matching_relays_in_flight() {
     let second = GatewayAccount::new("anthropic").unwrap();
     let relay = |principal: super::auth::Principal, account: &GatewayAccount| {
         let token = plakous::gateway::server::CancellationToken::new();
+        let id = state
+            .next_relay_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         state.relays.lock().unwrap().insert(
-            format!("{}-{}", principal.audit_name(), account),
+            id,
             dispatch::RelayCut {
                 principal,
                 account: account.clone(),
@@ -1107,4 +1112,679 @@ fn model_commands_run_in_process_under_a_configured_gateway_without_the_store() 
         !state.join("plak/subscriptions").exists(),
         "a gateway process must not create its subscription store"
     );
+}
+
+#[tokio::test]
+async fn concurrent_identical_operation_and_attempt_relays_preserve_cut_inflight_and_audit() {
+    use plakous::gateway::protocol::envelope::{ExpectedFence, RelayEnvelope, RelayLimits};
+    use plakous::gateway::protocol::header::RequestHeader;
+    use plakous::gateway::server::{
+        GatewayService as _, Peer as ServerPeer, RelayOutcome, RelayRecord,
+    };
+
+    let (_dir, paths) = home();
+    let state = state_for(&paths);
+    let account = GatewayAccount::new("openai/h1-test").unwrap();
+    crate::home::secrets::set_api_key(
+        &paths,
+        account.as_str(),
+        zeroize::Zeroizing::new("sk-test-h1-synthetic-key".to_owned()),
+    )
+    .unwrap();
+    let key1 = mint(&state, "caller-one", "relay:*", "127.0.0.1");
+    let key2 = mint(&state, "caller-two", "relay:*", "127.0.0.1");
+    let gateway = super::product::ProductGateway::new(&paths, Arc::clone(&state));
+    let peer = ServerPeer::Tcp("127.0.0.1:4000".parse().unwrap());
+    let authed1 = gateway.authenticate(&peer, Some(key1.as_bytes())).unwrap();
+    let authed2 = gateway.authenticate(&peer, Some(key2.as_bytes())).unwrap();
+
+    // Fetch exact fence facts for the custodied account.
+    let facts_body = call::encode(&FactsRequest {
+        accounts: vec![account.clone()],
+    })
+    .unwrap();
+    let facts_raw = gateway
+        .call(&authed1, 2, Endpoint::Facts, &facts_body)
+        .await
+        .unwrap();
+    let facts_reply: FactsReply = call::decode(&facts_raw).unwrap();
+    let fact = &facts_reply.facts[0];
+    let binding = fact.identity.as_ref().unwrap().account_binding.clone();
+    let generation = fact.credential.generation.unwrap();
+
+    let shared_op = UuidText::new("11111111-1111-4111-8111-111111111111".to_owned()).unwrap();
+    let make_envelope = |url: &str| RelayEnvelope {
+        account: account.clone(),
+        operation: shared_op.clone(),
+        attempt: 1,
+        method: "POST".to_owned(),
+        url: url.to_owned(),
+        headers: vec![RequestHeader::custodied("authorization").unwrap()],
+        expected: ExpectedFence {
+            account_binding: binding.clone(),
+            generation,
+        },
+        limits: RelayLimits {
+            head_timeout_ms: 5000,
+            body_idle_timeout_ms: 5000,
+            max_response_bytes: 1024 * 1024,
+            max_chunk_bytes: 64 * 1024,
+        },
+        deadline_unix_ms: None,
+        body_len: 0,
+    };
+
+    // Relay 1 starts and stays in flight.
+    let admission1 = gateway.admit_relay(&authed1).unwrap();
+    let env1 = make_envelope("https://api.openai.com/v1/responses");
+    let injection1 = gateway.inject(&authed1, 2, &env1).await.unwrap();
+    let token1 = {
+        let relays = state.relays.lock().unwrap();
+        assert_eq!(relays.len(), 1);
+        relays.values().next().unwrap().token.clone()
+    };
+
+    // Relay 2a uses the IDENTICAL (operation, attempt) and fails fast (unpinned path).
+    let fast_fail_admission = gateway.admit_relay(&authed2).unwrap();
+    let fast_fail_env = make_envelope("https://api.openai.com/v1/unpinned-fast-fail");
+    let err = gateway
+        .inject(&authed2, 2, &fast_fail_env)
+        .await
+        .unwrap_err();
+    assert_eq!(err, GatewayRefusal::UpstreamNotPinned {});
+    drop(fast_fail_admission);
+    gateway.audit_for(
+        &authed2,
+        RelayRecord {
+            account: Some(account.clone()),
+            operation: Some((shared_op.clone(), 1)),
+            upstream: None,
+            method: Some("POST".to_owned()),
+            upstream_status: None,
+            bytes_down: 0,
+            upstream_failure: None,
+            duration: std::time::Duration::from_millis(1),
+            outcome: RelayOutcome::Refused(err.code()),
+        },
+    );
+
+    // Relay 2b also uses the IDENTICAL (operation, attempt), succeeds inject, and finishes fast.
+    let fast_ok_admission = gateway.admit_relay(&authed2).unwrap();
+    let fast_ok_injection = gateway.inject(&authed2, 2, &env1).await.unwrap();
+    assert_eq!(state.relays.lock().unwrap().len(), 2);
+    drop(fast_ok_injection);
+    drop(fast_ok_admission);
+    gateway.audit_for(
+        &authed2,
+        RelayRecord {
+            account: Some(account.clone()),
+            operation: Some((shared_op.clone(), 1)),
+            upstream: Some((
+                "https://api.openai.com".to_owned(),
+                "/v1/responses".to_owned(),
+            )),
+            method: Some("POST".to_owned()),
+            upstream_status: Some(200),
+            bytes_down: 10,
+            upstream_failure: None,
+            duration: std::time::Duration::from_millis(2),
+            outcome: RelayOutcome::Complete,
+        },
+    );
+
+    // Relay 1 MUST still be registered, uncut so far, and counted in flight.
+    assert_eq!(state.relays.lock().unwrap().len(), 1);
+    assert_eq!(state.inflight.load(std::sync::atomic::Ordering::Acquire), 1);
+    assert!(!token1.is_cancelled());
+
+    // `disable --cut` MUST still cancel Relay 1!
+    admin(
+        &state,
+        &local(),
+        None,
+        &AdminRequest::Disable {
+            target: DisableTarget::Account {
+                account: account.clone(),
+            },
+            cut: true,
+        },
+    );
+    assert!(
+        token1.is_cancelled(),
+        "Relay 1 must still be cut after colliding Relay 2 finished"
+    );
+
+    // Relay 1 terminates: inflight, caller_inflight, and relays all return to 0.
+    drop(injection1);
+    drop(admission1);
+    gateway.audit_for(
+        &authed1,
+        RelayRecord {
+            account: Some(account.clone()),
+            operation: Some((shared_op, 1)),
+            upstream: Some((
+                "https://api.openai.com".to_owned(),
+                "/v1/responses".to_owned(),
+            )),
+            method: Some("POST".to_owned()),
+            upstream_status: None,
+            bytes_down: 0,
+            upstream_failure: None,
+            duration: std::time::Duration::from_millis(5),
+            outcome: RelayOutcome::Cut,
+        },
+    );
+    assert_eq!(state.inflight.load(std::sync::atomic::Ordering::Acquire), 0);
+    assert_eq!(
+        state
+            .caller_inflight
+            .lock()
+            .unwrap()
+            .get("caller-one")
+            .copied()
+            .unwrap_or(0),
+        0
+    );
+    assert_eq!(
+        state
+            .caller_inflight
+            .lock()
+            .unwrap()
+            .get("caller-two")
+            .copied()
+            .unwrap_or(0),
+        0
+    );
+    assert!(state.relays.lock().unwrap().is_empty());
+
+    // Audit lines must record real callers, never "unknown".
+    let lines =
+        super::audit::read_lines(&super::server_config::audit_dir(&paths), None, None).unwrap();
+    let relay_lines: Vec<_> = lines
+        .iter()
+        .filter(|line| line.contains("\"verb\":\"relay\""))
+        .collect();
+    assert_eq!(relay_lines.len(), 3, "{relay_lines:?}");
+    assert!(
+        relay_lines
+            .iter()
+            .all(|line| !line.contains("\"caller\":\"unknown\"")),
+        "{relay_lines:?}"
+    );
+    assert!(
+        relay_lines
+            .iter()
+            .any(|line| line.contains("\"caller\":\"caller-one\"") && line.contains("\"cut\"")),
+        "{relay_lines:?}"
+    );
+    assert_eq!(
+        relay_lines
+            .iter()
+            .filter(|line| line.contains("\"caller\":\"caller-two\""))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn authorization_scope_bypasses_are_blocked_across_list_status_disable_login_and_missing_scopes() {
+    let (_dir, paths) = home();
+    let state = state_for(&paths);
+    let sandbox = GatewayAccount::new("openai/sandbox").unwrap();
+    let prod = GatewayAccount::new("anthropic/prod").unwrap();
+    for account in [&sandbox, &prod] {
+        admin(
+            &state,
+            &local(),
+            None,
+            &AdminRequest::KeySet {
+                account: account.clone(),
+                secret: plakous::gateway::protocol::SecretText::new(zeroize::Zeroizing::new(
+                    "synthetic-secret".to_owned(),
+                ))
+                .unwrap(),
+            },
+        );
+    }
+
+    let narrow = mint(
+        &state,
+        "narrow",
+        "relay:openai/sandbox,admin:openai/sandbox",
+        "127.0.0.1",
+    );
+    let admin_only = mint(&state, "admin-only", "admin:openai/sandbox", "127.0.0.1");
+    let relay_only = mint(&state, "relay-only", "relay:*", "127.0.0.1");
+    let broad_admin = mint(&state, "broad-admin", "relay:*,admin:*", "127.0.0.1");
+
+    // 1. AdminRequest::List filters returned accounts to caller-authorized scopes.
+    let AdminResponse::Accounts { accounts } = admin(
+        &state,
+        &tcp("127.0.0.1"),
+        Some(&narrow),
+        &AdminRequest::List {},
+    ) else {
+        panic!("expected Accounts");
+    };
+    assert_eq!(accounts, vec![sandbox.clone()]);
+
+    // 2. AdminRequest::Status { accounts: [] } filters to authorized scopes,
+    //    and refuses callers without any relay scope rather than vacuously passing.
+    let AdminResponse::Status { rows } = admin(
+        &state,
+        &tcp("127.0.0.1"),
+        Some(&narrow),
+        &AdminRequest::Status {
+            accounts: Vec::new(),
+        },
+    ) else {
+        panic!("expected Status");
+    };
+    let row_accounts: Vec<_> = rows.into_iter().map(|row| row.facts.account).collect();
+    assert_eq!(row_accounts, vec![sandbox.clone()]);
+
+    let denied_status = dispatch::handle(
+        &state,
+        &tcp("127.0.0.1"),
+        &request(
+            "POST",
+            &Endpoint::Admin.path(1),
+            Some(&admin_only),
+            call::encode(&AdminRequest::Status {
+                accounts: Vec::new(),
+            })
+            .unwrap(),
+        ),
+    );
+    assert_eq!(denied_status.status, 403);
+    assert_eq!(refusal(&denied_status), GatewayRefusal::ScopeDenied {});
+
+    // 3. DisableTarget::Caller: narrow admin cannot disable another caller,
+    //    can disable self; relay-only cannot disable anyone; broad admin:* can disable others.
+    let narrow_other = dispatch::handle(
+        &state,
+        &tcp("127.0.0.1"),
+        &request(
+            "POST",
+            &Endpoint::Admin.path(1),
+            Some(&narrow),
+            call::encode(&AdminRequest::Disable {
+                target: DisableTarget::Caller {
+                    caller: CallerId::new("broad-admin").unwrap(),
+                },
+                cut: true,
+            })
+            .unwrap(),
+        ),
+    );
+    assert_eq!(narrow_other.status, 403);
+    assert_eq!(refusal(&narrow_other), GatewayRefusal::ScopeDenied {});
+
+    let relay_self = dispatch::handle(
+        &state,
+        &tcp("127.0.0.1"),
+        &request(
+            "POST",
+            &Endpoint::Admin.path(1),
+            Some(&relay_only),
+            call::encode(&AdminRequest::Disable {
+                target: DisableTarget::Caller {
+                    caller: CallerId::new("relay-only").unwrap(),
+                },
+                cut: false,
+            })
+            .unwrap(),
+        ),
+    );
+    assert_eq!(relay_self.status, 403);
+    assert_eq!(refusal(&relay_self), GatewayRefusal::ScopeDenied {});
+
+    let narrow_self = admin(
+        &state,
+        &tcp("127.0.0.1"),
+        Some(&narrow),
+        &AdminRequest::Disable {
+            target: DisableTarget::Caller {
+                caller: CallerId::new("narrow").unwrap(),
+            },
+            cut: false,
+        },
+    );
+    assert_eq!(narrow_self, AdminResponse::Disabled {});
+    let broad_disable_other = admin(
+        &state,
+        &tcp("127.0.0.1"),
+        Some(&broad_admin),
+        &AdminRequest::Disable {
+            target: DisableTarget::Caller {
+                caller: CallerId::new("relay-only").unwrap(),
+            },
+            cut: false,
+        },
+    );
+    assert_eq!(broad_disable_other, AdminResponse::Disabled {});
+
+    // 4. Pending OAuth logins: bound to (Principal, GatewayAccount); cross-caller
+    //    complete/poll/cancel and post-start account/caller disables are refused.
+    let claude_admin = mint(
+        &state,
+        "claude-admin",
+        "relay:claude,admin:claude",
+        "127.0.0.1",
+    );
+    let codex_admin = mint(
+        &state,
+        "codex-admin",
+        "relay:codex,admin:codex",
+        "127.0.0.1",
+    );
+    let claude = GatewayAccount::new("claude").unwrap();
+    let AdminResponse::Challenge { attempt, .. } = admin(
+        &state,
+        &tcp("127.0.0.1"),
+        Some(&claude_admin),
+        &AdminRequest::LoginStart {
+            account: claude.clone(),
+            notice_revision: plakous::gateway::protocol::BoundedText::new("notice").unwrap(),
+            replace_newer: false,
+        },
+    ) else {
+        panic!("expected login challenge");
+    };
+
+    for attacker_key in [&codex_admin, &broad_admin] {
+        for req in [
+            AdminRequest::LoginComplete {
+                attempt: attempt.clone(),
+                pasted: plakous::gateway::protocol::SecretText::new(zeroize::Zeroizing::new(
+                    "fixture-ok".to_owned(),
+                ))
+                .unwrap(),
+            },
+            AdminRequest::LoginPoll {
+                attempt: attempt.clone(),
+            },
+            AdminRequest::LoginCancel {
+                attempt: attempt.clone(),
+            },
+        ] {
+            let denied = dispatch::handle(
+                &state,
+                &tcp("127.0.0.1"),
+                &request(
+                    "POST",
+                    &Endpoint::Admin.path(1),
+                    Some(attacker_key),
+                    call::encode(&req).unwrap(),
+                ),
+            );
+            assert_eq!(
+                denied.status, 403,
+                "cross-caller login hijack must fail 403"
+            );
+            assert_eq!(refusal(&denied), GatewayRefusal::ScopeDenied {});
+        }
+    }
+
+    // Account disabled AFTER LoginStart blocks LoginComplete / LoginPoll / LoginCancel.
+    admin(
+        &state,
+        &local(),
+        None,
+        &AdminRequest::Disable {
+            target: DisableTarget::Account {
+                account: claude.clone(),
+            },
+            cut: false,
+        },
+    );
+    for req in [
+        AdminRequest::LoginComplete {
+            attempt: attempt.clone(),
+            pasted: plakous::gateway::protocol::SecretText::new(zeroize::Zeroizing::new(
+                "fixture-ok".to_owned(),
+            ))
+            .unwrap(),
+        },
+        AdminRequest::LoginPoll {
+            attempt: attempt.clone(),
+        },
+        AdminRequest::LoginCancel {
+            attempt: attempt.clone(),
+        },
+    ] {
+        let blocked = dispatch::handle(
+            &state,
+            &tcp("127.0.0.1"),
+            &request(
+                "POST",
+                &Endpoint::Admin.path(1),
+                Some(&claude_admin),
+                call::encode(&req).unwrap(),
+            ),
+        );
+        assert_eq!(blocked.status, 503);
+        assert_eq!(refusal(&blocked), GatewayRefusal::AccountDisabled {});
+    }
+    admin(
+        &state,
+        &local(),
+        None,
+        &AdminRequest::Enable {
+            target: DisableTarget::Account {
+                account: claude.clone(),
+            },
+        },
+    );
+    // Owner can still complete cleanly after re-enable.
+    let completed = admin(
+        &state,
+        &tcp("127.0.0.1"),
+        Some(&claude_admin),
+        &AdminRequest::LoginComplete {
+            attempt,
+            pasted: plakous::gateway::protocol::SecretText::new(zeroize::Zeroizing::new(
+                "fixture-ok".to_owned(),
+            ))
+            .unwrap(),
+        },
+    );
+    assert!(matches!(
+        completed,
+        AdminResponse::Progress {
+            phase: LoginPhase::Succeeded,
+            ..
+        }
+    ));
+
+    // 5. Fail closed when scopes == None for a non-LocalAdmin principal.
+    let caller_principal = super::auth::Principal::Caller(CallerId::new("missing-scopes").unwrap());
+    let admin_denied = dispatch::serve_authed(
+        &state,
+        &caller_principal,
+        None,
+        &request(
+            "POST",
+            &Endpoint::Admin.path(1),
+            None,
+            call::encode(&AdminRequest::List {}).unwrap(),
+        ),
+        std::time::Instant::now(),
+    );
+    assert_eq!(admin_denied.status, 403);
+    assert_eq!(refusal(&admin_denied), GatewayRefusal::ScopeDenied {});
+    assert_eq!(
+        dispatch::gate_relay(&state, &caller_principal, None, &sandbox),
+        Err(GatewayRefusal::ScopeDenied {})
+    );
+    assert_eq!(
+        dispatch::gate_admin_allowance(&state, &caller_principal, None, &sandbox),
+        Err(GatewayRefusal::ScopeDenied {})
+    );
+    assert_eq!(
+        dispatch::gate_admin_refresh(&state, &caller_principal, None, &sandbox),
+        Err(GatewayRefusal::ScopeDenied {})
+    );
+}
+
+#[test]
+fn flags_and_callers_rollback_in_memory_state_when_persist_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let gw_dir = dir.path().join("gw");
+    std::fs::create_dir_all(&gw_dir).unwrap();
+    std::fs::set_permissions(&gw_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    // Flags persist failure (path is a symlink -> write_private refuses):
+    let flags_path = gw_dir.join("flags.json");
+    let mut flags = Flags::load(&flags_path).unwrap();
+    std::os::unix::fs::symlink(dir.path().join("elsewhere"), &flags_path).unwrap();
+    let account = GatewayAccount::new("openai").unwrap();
+    let caller = CallerId::new("worker").unwrap();
+    assert!(flags.disable_all().is_err());
+    assert!(!flags.disabled_all());
+    assert!(flags.disable_account(account.clone()).is_err());
+    assert!(!flags.account_disabled(&account));
+    assert!(flags.disable_caller(caller.clone()).is_err());
+    assert!(!flags.caller_disabled(&caller));
+
+    // Callers persist failure rollback:
+    let callers_path = gw_dir.join("callers.json");
+    let mut callers = Callers::load(&callers_path).unwrap();
+    let initial_key = callers
+        .add(
+            caller.clone(),
+            ScopeSet::parse("relay:*").unwrap(),
+            vec![SourceNet::parse("127.0.0.1").unwrap()],
+        )
+        .unwrap();
+    assert!(callers.authenticate(&initial_key).is_some());
+
+    // Replace callers.json with a symlink so write_private fails.
+    std::fs::remove_file(&callers_path).unwrap();
+    std::os::unix::fs::symlink(dir.path().join("target"), &callers_path).unwrap();
+    assert!(
+        callers
+            .add(
+                CallerId::new("second").unwrap(),
+                ScopeSet::parse("relay:*").unwrap(),
+                vec![SourceNet::parse("127.0.0.1").unwrap()],
+            )
+            .is_err()
+    );
+    assert_eq!(callers.rows().len(), 1);
+    assert!(callers.rotate(&caller).is_err());
+    assert!(
+        callers.authenticate(&initial_key).is_some(),
+        "failed rotate must keep previous secret hash in memory"
+    );
+    assert!(callers.remove(&caller).is_err());
+    assert!(
+        callers.authenticate(&initial_key).is_some(),
+        "failed remove must not revoke caller in memory"
+    );
+}
+
+#[test]
+fn gateway_client_bounds_responses_and_rejects_chunk_size_overflow() {
+    // Chunk size usize::MAX overflows `size + 2` without checked arithmetic.
+    let overflow_hex = format!("{:x}", usize::MAX);
+    let raw =
+        format!("HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n{overflow_hex}\r\nab\r\n");
+    assert!(super::client::parse_response(raw.as_bytes()).is_err());
+
+    let overflow_minus_one = format!("{:x}", usize::MAX - 1);
+    let raw2 = format!(
+        "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n{overflow_minus_one}\r\nab\r\n"
+    );
+    assert!(super::client::parse_response(raw2.as_bytes()).is_err());
+
+    // Oversized content-length and oversized unframed body are refused.
+    let too_large = format!(
+        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n",
+        call::MAX_CALL_BYTES + 1
+    );
+    assert!(super::client::parse_response(too_large.as_bytes()).is_err());
+    let mut unframed = b"HTTP/1.1 200 OK\r\n\r\n".to_vec();
+    unframed.resize(unframed.len() + call::MAX_CALL_BYTES + 1, b'x');
+    assert!(super::client::parse_response(&unframed).is_err());
+
+    // Real socket streaming unbounded data fails cleanly at the response bound.
+    let dir = tempfile::tempdir().unwrap();
+    let sock = dir.path().join("big.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    let server = std::thread::spawn(move || {
+        use std::io::Write as _;
+        if let Ok((mut conn, _)) = listener.accept() {
+            let _ = conn.write_all(b"HTTP/1.1 200 OK\r\n\r\n");
+            let chunk = vec![b'a'; 32 * 1024];
+            for _ in 0..16 {
+                if conn.write_all(&chunk).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    let err = super::client::exchange(
+        &super::GatewayAddress::Unix(sock),
+        None,
+        "GET",
+        "/versions",
+        &[],
+    )
+    .err()
+    .expect("oversized stream must be rejected");
+    assert!(err.to_string().contains("exceeds size limit"), "{err}");
+    server.join().unwrap();
+}
+
+#[test]
+fn gateway_key_file_io_file_and_api_key_writes_refuse_symlinks_and_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    let priv_dir = dir.path().join("priv");
+    super::io_file::ensure_private_dir(&priv_dir).unwrap();
+
+    // Symlink target that must never be read or overwritten.
+    let target = priv_dir.join("target.txt");
+    super::io_file::write_private(&target, b"original-secret\n").unwrap();
+    let link = priv_dir.join("link.key");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+
+    // read_key_file refuses symlinks and hard-link aliases.
+    assert!(super::read_key_file(&link).is_err());
+    let alias = priv_dir.join("alias.key");
+    std::fs::hard_link(&target, &alias).unwrap();
+    assert!(super::read_key_file(&target).is_err());
+    std::fs::remove_file(&alias).unwrap();
+    assert_eq!(
+        super::read_key_file(&target).unwrap().as_str(),
+        "original-secret"
+    );
+
+    // io_file::private_file and io_file::write_private refuse symlinks.
+    assert!(super::io_file::private_file(&link).is_err());
+    assert!(super::io_file::write_private(&link, b"overwritten").is_err());
+    assert_eq!(std::fs::read(&target).unwrap(), b"original-secret\n");
+
+    // home::secrets::set_api_key refuses writing through a symlink.
+    let home_paths = PlakPaths::explicit(dir.path().join("plak-home"));
+    home_paths.ensure_layout().unwrap();
+    let named_dir = home_paths.secret_shelf_dir(crate::home::paths::SecretShelf::Api(
+        plakous_hosted::account::Vertical::OpenAi,
+    ));
+    home_paths
+        .ensure_secret_shelf_dir(crate::home::paths::SecretShelf::Api(
+            plakous_hosted::account::Vertical::OpenAi,
+        ))
+        .unwrap();
+    let key_link = named_dir.join("sym.secret");
+    std::os::unix::fs::symlink(&target, &key_link).unwrap();
+    assert!(
+        crate::home::secrets::set_api_key(
+            &home_paths,
+            "openai/sym",
+            zeroize::Zeroizing::new("sk-attempt".to_owned()),
+        )
+        .is_err()
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"original-secret\n");
 }
