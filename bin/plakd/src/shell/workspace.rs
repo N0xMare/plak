@@ -73,6 +73,7 @@ mod tests {
             service_tier: None,
             workspace: root.path().to_owned(),
             roster: None,
+            root_template: None,
             live_children: false,
             mcp: None,
             account_choices: std::collections::BTreeMap::new(),

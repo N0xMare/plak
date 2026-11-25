@@ -840,6 +840,7 @@ fn profile(
             service_tier: meta.service_tier.clone(),
             workspace: meta.workspace.clone(),
             roster: Some(tree.roster.clone()),
+            root_template: None,
             live_children: false,
             mcp: None,
             account_choices: BTreeMap::new(),

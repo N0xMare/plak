@@ -459,19 +459,18 @@ fn row(config: &ProductConfig, resolved: &Resolved, aliases: Vec<String>) -> Pro
     .into_iter()
     .filter_map(|(depth, name)| {
         let template = template(name.as_str())?;
-        // A built-in card reads as its role; a user card as its file.
         let label = name
             .as_str()
             .strip_prefix(&format!("{}-", resolved.id))
             .unwrap_or(name.as_str());
-        Some(role(label, template, depth))
+        Some(role(label, name.as_str(), template, depth))
     })
     .collect();
     ProfileRow {
         id: resolved.id.clone(),
         differences: Vec::new(),
         aliases,
-        root: role("root", &resolved.root.1, 0),
+        root: role("root", &resolved.root.0, &resolved.root.1, 0),
         cards,
         account_kinds: account_kinds(
             std::iter::once(&resolved.root.1)
@@ -494,9 +493,10 @@ fn account_kinds<'a>(templates: impl Iterator<Item = &'a AgentTemplate>) -> Vec<
     kinds.into_iter().collect()
 }
 
-fn role(label: &str, template: &AgentTemplate, depth: usize) -> ProfileRole {
+fn role(label: &str, name: &str, template: &AgentTemplate, depth: usize) -> ProfileRole {
     ProfileRole {
         label: label.to_owned(),
+        template: Some(name.to_owned()),
         account: template.account.clone(),
         model: template.model.clone(),
         effort: template

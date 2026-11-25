@@ -163,7 +163,7 @@ fn unavailable_session_profile(
     )
 }
 
-fn session_profile_for(
+pub(crate) fn session_profile_for(
     paths: &PlakPaths,
     session: &plakous_hosted::runtime::SurfaceSession,
 ) -> crate::surface_protocol::ProfileRow {
@@ -203,6 +203,7 @@ fn session_profile_row(
                     .unwrap_or(&card.template)
                     .to_owned(),
                 account: card.account.clone(),
+                template: Some(card.template.clone()),
                 model: card.tuple_id.clone(),
                 effort: card.effort.clone().unwrap_or_else(|| "default".to_owned()),
                 fast,
@@ -227,6 +228,10 @@ fn session_profile_row(
         aliases: Vec::new(),
         root: ProfileRole {
             label: "root".to_owned(),
+            template: session.roster.as_ref().map_or_else(
+                || session.root_template.clone(),
+                |roster| roster.root_template.clone(),
+            ),
             account: session.account.clone().unwrap_or_default(),
             model: session
                 .model

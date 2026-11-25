@@ -122,6 +122,9 @@ observation at session open or after RefreshTemplates for evaluated readiness:
 The root attachment snapshot includes the current `session_profile` state.
 The host publishes it again after a profile switch lands, without a
 `list_profiles` request.
+Profile roles carry the exact template name in `template`; `label` is
+for display and may omit the profile prefix. A session root with no
+recorded template carries null.
 
 The host serves only 13. Use the exact build's schema and pair it with
 matching client artifacts before connecting. A Hello for 12 receives

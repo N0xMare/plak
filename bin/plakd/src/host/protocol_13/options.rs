@@ -194,6 +194,7 @@ pub(super) fn profile(row: views::ProfileRow) -> v13::ProfileRow {
     fn role(row: views::ProfileRole) -> v13::ProfileRole {
         v13::ProfileRole {
             label: row.label,
+            template: row.template,
             account: row.account,
             model: row.model,
             effort: row.effort,

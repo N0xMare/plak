@@ -103,6 +103,9 @@ pub struct ProfileRow {
 #[serde(deny_unknown_fields)]
 pub struct ProfileRole {
     pub label: String,
+    #[serde(deserialize_with = "required")]
+    #[schemars(required, schema_with = "nullable::<String>")]
+    pub template: Option<String>,
     pub account: String,
     pub model: String,
     pub effort: String,

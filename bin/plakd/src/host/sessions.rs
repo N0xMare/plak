@@ -1367,6 +1367,7 @@ mod tests {
                     .map(str::to_owned),
                 workspace,
                 roster: Some(tree.current_epoch().clone()),
+                root_template: None,
                 live_children: false,
                 mcp: None,
                 account_choices: BTreeMap::new(),

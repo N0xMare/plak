@@ -8,6 +8,7 @@ use super::{
 use plakous_host_protocol::SessionObservation;
 use plakous_host_protocol::views::SessionInfoView;
 use plakous_hosted::host_service::wire::StoredSessionView;
+use plakous_hosted::runtime::SurfaceSession;
 
 impl ProductSessions {
     pub(super) fn read_stored(
@@ -54,12 +55,40 @@ impl ProductSessions {
             ..Default::default()
         };
         let snapshot = plakous_hosted::runtime::session_restore_snapshot(&record);
+        let context = if record.runner.is_some() {
+            paths.for_remote_workspace(&record.workspace_root)
+        } else {
+            paths.for_workspace(&record.workspace_root)
+        };
+        let profile = crate::shell::settings::session_profile_for(
+            &context,
+            &SurfaceSession {
+                runner: record.runner,
+                id: record.id.clone(),
+                account: record.account,
+                model: record.model,
+                effort: record.effort,
+                service_tier: record
+                    .target_selection
+                    .native_service_tier()
+                    .map(str::to_owned),
+                workspace: record.workspace_root,
+                roster: None,
+                root_template: info.root_template.clone(),
+                live_children: false,
+                mcp: None,
+                account_choices: record.account_choices,
+            },
+        );
         Ok(Some(StoredSessionView {
             archived: record.archived,
             session: record.id,
             root,
             observations: vec![
                 SessionObservation::SessionInfo(info),
+                SessionObservation::Extension(
+                    crate::surface_protocol::SurfaceObservation::SessionProfile(profile),
+                ),
                 SessionObservation::PresentationSnapshot(snapshot),
             ],
         }))

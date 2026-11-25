@@ -51,6 +51,7 @@ fn choose_openai(
             service_tier: None,
             workspace: workspace.to_path_buf(),
             roster: None,
+            root_template: None,
             live_children: false,
             mcp: None,
             account_choices: std::collections::BTreeMap::new(),

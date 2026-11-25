@@ -6,8 +6,12 @@
 )]
 #[serde(deny_unknown_fields)]
 pub struct ProfileRole {
-    /// Role (`root`, `worker`, …) or, for a user profile, the template name.
+    /// Role display label (`root`, `worker`, …), with the profile prefix removed when present.
     pub label: String,
+    /// Exact template name, retained for the product's framed projection.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub template: Option<String>,
     /// Provider account.
     pub account: String,
     /// Model id.

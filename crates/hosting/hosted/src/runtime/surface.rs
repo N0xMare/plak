@@ -177,6 +177,8 @@ pub struct SurfaceSession {
     pub workspace: std::path::PathBuf,
     /// This session's frozen tree epoch, when it has one.
     pub roster: Option<crate::orchestration::OrchestrationSnapshot>,
+    /// The root template recorded for a session without a materialized tree.
+    pub root_template: Option<String>,
     /// Whether a sub-agent of this session's attached tree is running or
     /// parked: work a reload carrying into a new session cannot hand off.
     pub live_children: bool,
@@ -292,6 +294,10 @@ pub(super) fn session_facts(
             .map(str::to_owned),
         workspace: session.workspace_root.clone(),
         roster,
+        root_template: session
+            .root_profile
+            .as_ref()
+            .and_then(|profile| profile.root_template.clone()),
         live_children,
         mcp: with_tools.then(|| SurfaceMcp::of(session)),
         account_choices: session.account_choices.clone(),
