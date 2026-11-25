@@ -7,6 +7,28 @@ use plakous_hosted::host_service::{KeptActivity, KeptDirectoryAttention};
 use plakous_hosted::sessions::projector::{SessionViews, ViewWrites};
 
 #[test]
+fn draft_differences_preserve_the_exact_named_session_tier() {
+    use plakous_host_protocol::views::ProfileDifference as Old;
+    use v13::{ProfileDifference as New, ServiceTier};
+
+    assert!(differences(&[], Some("priority"), Some(Some("fast"))).is_empty());
+    assert_eq!(
+        differences(&[], Some("ultrafast"), Some(Some("fast"))),
+        vec![New::RootServiceTier {
+            session: Some(ServiceTier::Ultrafast),
+        }]
+    );
+    assert_eq!(
+        differences(
+            &[Old::RootFast { session: false }],
+            None,
+            Some(Some("fast"))
+        ),
+        vec![New::RootServiceTier { session: None }]
+    );
+}
+
+#[test]
 fn preview_redacts_and_removes_markup_before_the_utf8_cut() {
     let input = "<b>**Title**</b>\x1b[31m\r\n[link](https://invalid.example/)\u{2028}\nAuthorization: Bearer example-value\n";
     let rendered = preview(input.to_owned()).unwrap();

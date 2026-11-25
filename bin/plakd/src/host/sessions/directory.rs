@@ -759,6 +759,7 @@ fn summarize(
         && !meta.archived
         && profiles.is_some()
         && work.attention(activity.root, 0, activity.wakes).is_some();
+    let (profile, differences) = profile(id, meta, profiles.zip(tree));
     let draft = projection.draft.map(|draft| {
         let remote = hosted_elsewhere.is_some()
             || meta
@@ -775,9 +776,19 @@ fn summarize(
                 remote,
                 policy,
             },
+            draft::differences(
+                &differences,
+                meta.service_tier.as_deref(),
+                profiles.and_then(|profiles| {
+                    profiles
+                        .catalog
+                        .iter()
+                        .find(|(row, _)| row.id == profile)
+                        .map(|(_, prepared)| prepared.root.service_tier())
+                }),
+            ),
         )
     });
-    let (profile, differences) = profile(id, meta, profiles.zip(tree));
     Ok((
         Summary {
             identity: meta.identity.clone(),

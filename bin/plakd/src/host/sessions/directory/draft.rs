@@ -38,6 +38,7 @@ pub(super) struct Facts {
     preview: Option<v13::SessionPreview>,
     cost_root: v13::Cost,
     cost_tree: v13::TreeCost,
+    differences: Vec<v13::ProfileDifference>,
     attention: Candidates,
     actionable: bool,
     root: Member,
@@ -74,6 +75,7 @@ impl Source {
         meta: &DirectoryMetadata,
         activity: &DirectoryActivity,
         context: Context<'_>,
+        differences: Vec<v13::ProfileDifference>,
     ) -> Facts {
         let Context {
             tree,
@@ -126,6 +128,7 @@ impl Source {
             preview: self.previews.get(id).cloned().flatten(),
             cost_root,
             cost_tree,
+            differences,
             attention,
             actionable,
             root,
@@ -381,7 +384,7 @@ fn draft_row(
         activity_seq: row.activity_seq,
         archived: row.archived,
         profile: row.profile.clone(),
-        differences: row.differences.clone(),
+        differences: draft.differences.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
         residency: slot.map_or(row.residency, |slot| slot.residency),
@@ -392,6 +395,52 @@ fn draft_row(
         environment,
         hosted_elsewhere,
     })
+}
+
+fn service_tier(tier: Option<&str>) -> Option<v13::ServiceTier> {
+    match tier {
+        Some("fast" | "priority") => Some(v13::ServiceTier::Fast),
+        Some("ultrafast") => Some(v13::ServiceTier::Ultrafast),
+        _ => None,
+    }
+}
+
+pub(super) fn differences(
+    legacy: &[plakous_host_protocol::views::ProfileDifference],
+    session_tier: Option<&str>,
+    profile_tier: Option<Option<&str>>,
+) -> Vec<v13::ProfileDifference> {
+    use plakous_host_protocol::views::ProfileDifference as Old;
+    use v13::ProfileDifference as New;
+    let mut differences = legacy
+        .iter()
+        .filter_map(|difference| match difference {
+            Old::RootAccount { session, profile } => Some(New::RootAccount {
+                session: session.clone(),
+                profile: profile.clone(),
+            }),
+            Old::RootModel { session, profile } => Some(New::RootModel {
+                session: session.clone(),
+                profile: profile.clone(),
+            }),
+            Old::RootEffort { session, profile } => Some(New::RootEffort {
+                session: session.clone(),
+                profile: profile.clone(),
+            }),
+            Old::RootFast { .. } => None,
+            Old::WorkingSet => Some(New::WorkingSet),
+            Old::Card(card) => Some(New::Card(card.clone())),
+            Old::Roster => Some(New::Roster),
+        })
+        .collect::<Vec<_>>();
+    if let Some(profile_tier) = profile_tier
+        && service_tier(profile_tier) != service_tier(session_tier)
+    {
+        differences.push(New::RootServiceTier {
+            session: service_tier(session_tier),
+        });
+    }
+    differences
 }
 
 pub(super) fn preview(raw: String) -> Option<v13::SessionPreview> {
