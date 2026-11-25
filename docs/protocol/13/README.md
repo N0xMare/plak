@@ -55,7 +55,7 @@ are unchanged; a v12 Hello gets `frame: refused`, `kind: version_mismatch`.
 | Observation `kind: template_readiness`; template row `tier`, `unready_reason` | Rows had a string `tier` and nullable reason text | Rows have nullable `service_tier` and tagged `readiness`: `ready` or `not_ready {reason}` for evaluated rows; `not_evaluated` for definition rows | Treat definition reads as unevaluated. Use the observation for the evaluated verdict. |
 | Observation `kind: usage_limits` | Balance lines and amount entries were formatted `{label, value}` | Amount entries and balances use `{currency, used_micros?, remaining_micros?, cap_micros?, display}`; percentages unchanged | Consume micro-units; missing is not zero and `display` is not parseable data. |
 | Product `response: accounts_usage` | Per-account `allowance.view` used v12 meters and balances | The allowance view uses the same typed money as `usage_limits`; recorded usage is unchanged | Share the money codec between console responses and attachment observations. |
-| Product `response: refused` | For a Changes version mismatch, `workspace_read_failed` with `cause: "vcs_unavailable"` | With observed version evidence, `reason: "vcs_unsupported_version"` carries `found` and `required`; the generic refusal can still occur | Show the version remedy only when the selected authority reported it. |
+| Product `response: refused` | For a Changes version mismatch, `workspace_read_failed` with `cause: "vcs_unavailable"` | A host-local mismatch returns `reason: "vcs_unsupported_version"` with `found` and `required`. A paired-runner mismatch still returns `workspace_read_failed` with `cause: "vcs_unavailable"` and no versions. | Show the version remedy for the typed refusal; don't infer a version from `vcs_unavailable`. |
 | Product `response: profiles_list` | `{etag, current, rows, diagnostics, page}` with v12 profile summaries | Same wrapper; summaries use v13 roles and differences | Decode each summary with the new profile codec. |
 | Product `response: profiles_get` | `{profile}` with a v12 summary | Same wrapper; the definition body is unchanged and the summary is v13 | Use the resolved `template` field for identity, not the display `label`. |
 | Product `response: templates_list` | `{etag, rows, diagnostics, page}` with v12 template summaries and a prose `unready_reason` for this read | Same wrapper; summaries use nullable `service_tier` and `readiness: {state: "not_evaluated"}` | Don't parse a readiness sentence or infer readiness from a definition read. |
@@ -159,9 +159,12 @@ from an unreported cap, and its money entries do not carry the reset cadence
 or whether BYOK spend counts against the limit. Leave those facts unknown
 rather than inferring them from the amounts.
 
-A known Changes version mismatch carries the observed Git version and its
-minimum requirement. If the selected execution authority cannot report its
-own version evidence, the host does not substitute another machine's version.
+For a host-local Changes request, a known Git version mismatch returns
+`vcs_unsupported_version` with `found` and `required`. A paired runner's
+Git version mismatch instead returns `workspace_read_failed` with
+`cause: "vcs_unavailable"` and neither version field. Runner protocol 9 has
+no compatible field for the version evidence, and the host does not substitute
+its own Git version.
 
 The bounded drain countdown uses the natural-drain deadline, not the
 verdict-barrier floor; an idle drain has no countdown. A paired successor

@@ -4533,6 +4533,12 @@ full 2,000 entries even when the response truncates; internal identity bytes
 do not consume the client-response limit. Untracked files open through Files, never
 `diff --no-index`; binary patches expose bounded numstat only. Non-colocated
 repositories using jj answer `vcs_unsupported`; colocated ones say git view.
+For host-local Changes, a known Git version mismatch is the protocol 13
+product refusal `vcs_unsupported_version {found, required}`. For Changes on
+a paired runner, a Git version mismatch is `workspace_read_failed` with
+`cause: "vcs_unavailable"` and no version fields. Runner protocol 9 has no
+compatible field to carry those versions; the host does not substitute its
+own Git version.
 The fixed execution policy is chapter 04 §2.6.
 
 `config_patch`, `template_put` and `profile_put`, introduced in protocol 7
