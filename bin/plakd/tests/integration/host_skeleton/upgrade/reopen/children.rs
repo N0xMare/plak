@@ -11,7 +11,7 @@ use plakous_offline_crash_harness::{
 use std::sync::{Arc, atomic::AtomicU64};
 
 fn spawn_child(fixture: &Fixture, host: &Host) -> (Client, String, NodeAddress) {
-    spawn_child_with_idle(fixture, host, |session| {
+    spawn_child_with_idle(fixture, Client::connect(host), |session| {
         root_wake::idle_turns(fixture, session, 1);
     })
 }
@@ -70,10 +70,9 @@ fn child_decode_failure_stays_in_the_flat_audit_fields() {
 
 pub(in crate::host_skeleton) fn spawn_child_with_idle(
     fixture: &Fixture,
-    host: &Host,
+    mut client: Client,
     wait_idle: impl FnOnce(&str),
 ) -> (Client, String, NodeAddress) {
-    let mut client = Client::connect(host);
     let Outcome::Ok(Answer::Created { session, node, .. }) =
         client.request(1, new_session(&fixture.workspace()))
     else {
@@ -316,6 +315,7 @@ fn a_missing_evaluator_is_reported_and_does_not_refuse() {
         &fixture,
         Path::new(env!("CARGO_BIN_EXE_plakd")),
         &image,
+        WIRE_VERSION,
         |session| {
             root_wake::idle_turns(&fixture, session, 1);
         },
@@ -326,6 +326,7 @@ pub(in crate::host_skeleton) fn missing_evaluator_upgrade(
     fixture: &Fixture,
     source: &Path,
     destination: &Path,
+    source_wire_version: u32,
     wait_idle: impl FnOnce(&str),
 ) {
     let _cleanup = HomeHost(fixture.home());
@@ -338,7 +339,8 @@ pub(in crate::host_skeleton) fn missing_evaluator_upgrade(
         .unwrap()
     };
     let mut host = start();
-    let (_client, _, node) = spawn_child_with_idle(fixture, &host, wait_idle);
+    let client = Client::connect_at_version(&host.socket, source_wire_version);
+    let (_client, _, node) = spawn_child_with_idle(fixture, client, wait_idle);
     std::fs::write(fixture.root.join("release-child"), "").unwrap();
     root_wake::submitted_result(fixture, &node);
     stop(&mut host);

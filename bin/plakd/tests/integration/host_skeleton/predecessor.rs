@@ -44,6 +44,7 @@ fn production_predecessor_with_a_missing_child_evaluator_can_upgrade() {
             &fixture,
             &old,
             &candidate,
+            source_wire_version(&fixture, &old),
             |session| {
                 source::idle_locator(&source::open(&fixture), session, 1);
             },
@@ -63,10 +64,13 @@ fn production_predecessor_refuses_a_destination_only_unreadable_child() {
     let _cleanup = upgrade::HomeHost(fixture.home());
     let mut host =
         await_serving_host(spawn_host(image_command(&fixture, &old).arg("host"))).unwrap();
-    let (mut client, _, node) =
-        upgrade::reopen::children::spawn_child_with_idle(&fixture, &host, |session| {
+    let (mut client, _, node) = upgrade::reopen::children::spawn_child_with_idle(
+        &fixture,
+        Client::connect_at_version(&host.socket, source_wire_version(&fixture, &old)),
+        |session| {
             source::idle_locator(&source::open(&fixture), session, 1);
-        });
+        },
+    );
     let coordinator = UnixStream::connect(fixture.home().join("host/upgrade.sock")).unwrap();
     coordinator.set_read_timeout(Some(WAIT)).unwrap();
     let mut line = String::new();
@@ -145,11 +149,7 @@ fn production_predecessor_upgrade_preserves_live_work() {
     let mut host = start_host(&fixture, &old, &paired, &socket, &workspace);
     let pid = host.child.as_ref().unwrap().id();
     let inode = std::fs::symlink_metadata(&socket).unwrap().ino();
-    let old_schema: Value = serde_json::from_str(&run(fixture
-        .base_command_from(&old)
-        .args(["wire", "schema"])))
-    .unwrap();
-    let old_wire = u32::try_from(old_schema["wire_version"].as_u64().unwrap()).unwrap();
+    let old_wire = source_wire_version(&fixture, &old);
     let mut client = Client::connect_at_version(&host.socket, old_wire);
     runner::wait_local_runner_ready_on(&mut client);
     paired.ready(&mut client);
@@ -268,7 +268,8 @@ fn a_serving_predecessor_blocks_upgrade_verdict_acknowledgement() {
     );
     assert_eq!(std::fs::read_to_string(&path).unwrap(), pending);
     assert_eq!(
-        Client::connect(&host).request(1, Op::Ping),
+        Client::connect_at_version(&host.socket, source_wire_version(&fixture, &old))
+            .request(1, Op::Ping),
         Outcome::Ok(Answer::Pong)
     );
     stop(&mut host);
@@ -541,6 +542,14 @@ fn probe(fixture: &Fixture, binary: &Path) -> Value {
         .base_command_from(binary)
         .args(["version", "--host-upgrade-probe"])))
     .unwrap()
+}
+
+fn source_wire_version(fixture: &Fixture, binary: &Path) -> u32 {
+    let schema: Value = serde_json::from_str(&run(fixture
+        .base_command_from(binary)
+        .args(["wire", "schema"])))
+    .unwrap();
+    u32::try_from(schema["wire_version"].as_u64().unwrap()).unwrap()
 }
 
 fn probe_pair(fixture: &Fixture, old: &Path, candidate: &Path) -> (Value, Value) {
