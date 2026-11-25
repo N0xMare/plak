@@ -4616,7 +4616,7 @@ Protocol 5 introduced explicit placement, bounded creation options, directory
 lifecycle and process-local draft identity.
 
 The protocol 13 schema pin is SHA-256
-`2274665a5932cb62bba1fed44e06e89009e0f7a596123033b1c7c3e2acdaffc4`:
+`f86d0fd6147b7d067c18a78b9174e801e7e87bc323c74b19a74960173a73030d`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
 checks this build-independent pin. `plakd wire schema` prints the serving

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -61,6 +63,50 @@ def nextest() -> None:
     )
 
 
+def wire() -> None:
+    output = subprocess.check_output(
+        [
+            "cargo",
+            "run",
+            "--locked",
+            "--offline",
+            "-p",
+            "plakd",
+            "--bin",
+            "plakd",
+            "--",
+            "wire",
+            "schema",
+        ],
+        cwd=ROOT,
+        text=True,
+    )
+    fixture = ROOT / "bin/plakd/tests/fixtures/protocol-13-wire-schema.json"
+    updated, count = re.subn(r'(?m)^  "binary_id": "[^"]+",$', '  "binary_id": null,', output)
+    if count != 1:
+        raise ValueError("expected one serving binary identity")
+
+    def pin(schema: str) -> str:
+        body = json.loads(schema)
+        del body["binary_id"]
+        payload = json.dumps(body, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    old_pin, new_pin = pin(fixture.read_text()), pin(updated)
+    for relative in (
+        "bin/plakd/src/wire_schema/tests.rs",
+        "docs/protocol/13/README.md",
+        "docs/spec/02-plak-product.md",
+    ):
+        path = ROOT / relative
+        source = path.read_text()
+        if source.count(old_pin) != 1:
+            raise ValueError(f"expected one prior wire schema pin in {relative}")
+        write_if_changed(path, source.replace(old_pin, new_pin))
+    write_if_changed(fixture, updated)
+    print(f"protocol 13 schema: {new_pin}", flush=True)
+
+
 def prompt_pin_rows(previous: str, rows: list[tuple[str, str]]) -> str:
     pins = dict(rows)
     order = dict.fromkeys(re.findall(r'\(\s*"([a-zA-Z0-9_.-]+)",', previous))
@@ -98,6 +144,7 @@ def main() -> None:
         "bindings": bindings,
         "nextest": nextest,
         "prompts": prompts,
+        "wire": wire,
     }
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("parts", nargs="*", metavar="PART", help=", ".join(generators))

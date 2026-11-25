@@ -192,6 +192,64 @@ fn source_preserved(host: &Host, client: &mut Client, source: &str, node: &NodeA
     );
 }
 
+fn assert_session_profile(host: &Host, node: &NodeAddress) {
+    let mut client = Client::connect(host);
+    client.read_deadline = Some(std::time::Instant::now() + WAIT);
+    let attachment = client.attach(1, node);
+    loop {
+        let frame: serde_json::Value = serde_json::from_str(&client.read_wire_line()).unwrap();
+        let row = &frame["observation"]["body"]["session_profile"];
+        if frame["attachment"] == attachment && !row.is_null() {
+            assert_eq!(frame["class"], "state");
+            assert_eq!(row["root"]["effort"], "low");
+            assert_eq!(row["root"]["template"], "offline-low");
+            return;
+        }
+    }
+}
+
+fn assert_superseded(host: &Host, source: &str, target: &str) {
+    let mut client = Client::connect(host);
+    client.read_deadline = Some(std::time::Instant::now() + WAIT);
+    client.send(&ClientFrame::Request {
+        id: 1,
+        op: Op::WatchSessions {
+            include_archived: false,
+        },
+    });
+    let source_row = |rows: &serde_json::Value| {
+        rows.as_array()?
+            .iter()
+            .find(|row| row["session"] == source)
+            .cloned()
+    };
+    let watched = loop {
+        let frame: serde_json::Value = serde_json::from_str(&client.read_wire_line()).unwrap();
+        if frame["frame"] == "directory"
+            && let Some(row) = source_row(&frame["rows"])
+            && row["superseded_by"] == target
+        {
+            break row;
+        }
+    };
+    client.send(&ClientFrame::Request {
+        id: 2,
+        op: Op::ListSessions {
+            workspace: None,
+            runner: None,
+            include_archived: false,
+        },
+    });
+    loop {
+        let frame: serde_json::Value = serde_json::from_str(&client.read_wire_line()).unwrap();
+        if frame["frame"] == "response" && frame["id"] == 2 {
+            let listed = source_row(&frame["outcome"]["ok"]["rows"]).unwrap();
+            assert_eq!(listed["superseded_by"], watched["superseded_by"]);
+            return;
+        }
+    }
+}
+
 fn refresh_readiness(client: &mut Client, attachment: u64) {
     assert_eq!(
         client.request(
@@ -248,6 +306,9 @@ fn transition(mode: ProfileApply, expected: ProfileOutcome) {
     }
     // A switch keeps the line's node; a fork starts another line.
     assert_eq!(target_node == node, mode == ProfileApply::Switch);
+    if mode == ProfileApply::Switch {
+        assert_superseded(&host, &source, &target_session);
+    }
     let attachment = client.attach(12, &target_node);
     if moved.is_some() {
         let Application::Applied(outcome) = receive_application(&mut client).unwrap() else {
@@ -255,6 +316,7 @@ fn transition(mode: ProfileApply, expected: ProfileOutcome) {
         };
         assert_eq!(outcome, expected);
     }
+    assert_session_profile(&host, &target_node);
     client.prompt(
         13,
         attachment,

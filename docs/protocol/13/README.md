@@ -7,7 +7,7 @@ shared JSON Schema draft 2020-12 definitions. Its `binary_id` is null;
 select `client_frame` or `host_frame` as the root and keep the document's
 `$defs` in scope. The normalized pin is SHA-256 of compact JSON with all
 object keys sorted, omitting only `binary_id`:
-`2274665a5932cb62bba1fed44e06e89009e0f7a596123033b1c7c3e2acdaffc4`.
+`f86d0fd6147b7d067c18a78b9174e801e7e87bc323c74b19a74960173a73030d`.
 
 The [client frames](../../../crates/hosting/plakd-wire-types/tests/fixtures/protocol-13-client.jsonl)
 and [host frames](../../../crates/hosting/plakd-wire-types/tests/fixtures/protocol-13-host.jsonl)

@@ -201,7 +201,7 @@ fn rows(value: &mut Value) {
                     .any(|reason| reason["reason"] != "interrupted_by_upgrade")
             })),
         );
-        for field in ["preview", "cost_root", "cost_tree"] {
+        for field in ["preview", "cost_root", "cost_tree", "superseded_by"] {
             fields.remove(field);
         }
         placement(&mut row["runner_status"]);
@@ -248,6 +248,17 @@ fn choices(value: &mut Value) {
 
 fn template(row: &mut Value, field: &str) {
     if let Some(fields) = row.as_object_mut() {
+        fields.remove("resolved_tools");
+        if let Some(readiness) = fields.remove("readiness") {
+            let reason = match readiness["state"].as_str() {
+                Some("not_evaluated") => {
+                    json!("readiness is not evaluated by this definition read")
+                }
+                Some("not_ready") => readiness["reason"].clone(),
+                _ => Value::Null,
+            };
+            fields.insert("unready_reason".into(), reason);
+        }
         let tier = fields.remove("service_tier").unwrap_or_default();
         let extra = tier
             .as_str()
@@ -266,6 +277,7 @@ fn template(row: &mut Value, field: &str) {
 fn profile(row: &mut Value) {
     fn role(row: &mut Value) {
         if let Some(fields) = row.as_object_mut() {
+            fields.remove("template");
             let named = fields
                 .remove("service_tier")
                 .is_some_and(|value| !value.is_null());

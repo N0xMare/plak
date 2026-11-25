@@ -7472,10 +7472,17 @@
               "type": "null"
             }
           ]
+        },
+        "template": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "label",
+        "template",
         "account",
         "model",
         "effort",
@@ -8846,6 +8853,22 @@
           "type": "string"
         }
       ]
+    },
+    "ResolvedTool": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/ToolOrigin"
+        }
+      },
+      "required": [
+        "name",
+        "origin"
+      ],
+      "type": "object"
     },
     "Result_of_Nullable_McpServerConfiguration_or_string": {
       "oneOf": [
@@ -10739,6 +10762,12 @@
         "session": {
           "type": "string"
         },
+        "superseded_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "title": {
           "type": [
             "string",
@@ -10765,6 +10794,7 @@
         "cost_tree",
         "activity_seq",
         "archived",
+        "superseded_by",
         "differences",
         "created_at",
         "updated_at",
@@ -17014,6 +17044,13 @@
             }
           ]
         },
+        "resolved_tools": {
+          "items": {
+            "$ref": "#/$defs/ResolvedTool"
+          },
+          "maxItems": 128,
+          "type": "array"
+        },
         "service_tier": {
           "anyOf": [
             {
@@ -17050,6 +17087,7 @@
         "description",
         "max_tier",
         "tools",
+        "resolved_tools",
         "spawns",
         "may_adopt",
         "delegation",
@@ -17130,6 +17168,53 @@
       ],
       "type": "object"
     },
+    "TemplateReadiness": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "not_evaluated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "ready",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "state": {
+              "const": "not_ready",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TemplateRow": {
       "additionalProperties": false,
       "properties": {
@@ -17151,6 +17236,9 @@
         "name": {
           "type": "string"
         },
+        "readiness": {
+          "$ref": "#/$defs/TemplateReadiness"
+        },
         "service_tier": {
           "anyOf": [
             {
@@ -17160,12 +17248,6 @@
               "type": "null"
             }
           ]
-        },
-        "unready_reason": {
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -17173,7 +17255,8 @@
         "account",
         "model",
         "composition",
-        "service_tier"
+        "service_tier",
+        "readiness"
       ],
       "type": "object"
     },
@@ -17816,6 +17899,13 @@
           "type": "string"
         }
       ]
+    },
+    "ToolOrigin": {
+      "enum": [
+        "core",
+        "template_extra"
+      ],
+      "type": "string"
     },
     "TranscriptItem": {
       "additionalProperties": false,
