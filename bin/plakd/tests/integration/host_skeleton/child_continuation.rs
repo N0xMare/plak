@@ -4,6 +4,8 @@ use super::*;
 use plakous_recursive_subagents::tree::{ProductAgentTree, TreeStore as _};
 use plakous_recursive_subagents_store::SqliteTreeStore;
 
+mod paired;
+
 fn child_calls(fixture: &Fixture) -> usize {
     use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
     read_evidence(fixture.root.join("child-evidence.jsonl"))
@@ -33,13 +35,31 @@ fn gate_child(fixture: &Fixture, gate: &str) {
 }
 
 fn start_idle_parent(fixture: &Fixture) -> (Host, String, NodeAddress) {
+    start_idle_parent_on(fixture, None)
+}
+
+fn start_idle_parent_on(
+    fixture: &Fixture,
+    paired: Option<(&str, &str)>,
+) -> (Host, String, NodeAddress) {
     crash::client_control::script(fixture, true);
     gate_child(fixture, "first-gate");
-    let host = start(fixture);
+    let host = match paired {
+        Some((path, _)) => start_env(fixture, &[], &[("PATH", path.to_owned())]),
+        None => start(fixture),
+    };
     let mut client = Client::connect(&host);
-    let Outcome::Ok(Answer::Created { session, node, .. }) =
-        client.request(1, new_session(&fixture.workspace()))
-    else {
+    let mut request = new_session(&fixture.workspace());
+    if let Some((_, id)) = paired {
+        runner::remote_ready(&mut client, id);
+        if let Op::NewSession { runner, .. } = &mut request {
+            *runner = plakous_host_protocol::wire::RunnerLabel {
+                name: "remote".into(),
+                runner_id: id.into(),
+            };
+        }
+    }
+    let Outcome::Ok(Answer::Created { session, node, .. }) = client.request(1, request) else {
         panic!("session not created")
     };
     let attachment = client.attach(2, &node);
