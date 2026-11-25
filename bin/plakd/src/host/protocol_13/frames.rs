@@ -231,7 +231,7 @@ fn host_response(
                 .map(|row| v13::TemplateSummary {
                     id: row.id,
                     source: row.source,
-                    summary: super::options::template(row.summary),
+                    summary: super::options::definition_template(row.summary),
                 })
                 .collect(),
         },

@@ -4546,6 +4546,10 @@ or runner protocol changes are introduced by these console operations.
 Protocol 13 template writes and reads, template readiness and profile roles
 use nullable `service_tier`: `fast`, `ultrafast`, or null for Standard.
 Profile differences identify the exact session value in `root_service_tier`.
+The definition-only `templates_list` read returns
+`readiness: {state: not_evaluated}`. The evaluated source is the
+`template_readiness` observation at session open and on `RefreshTemplates`;
+it reports `ready` or `not_ready {reason}`.
 The separate session model picker and settings still use the generic extras
 fields and only advertise a tier for an account and model offering it.
 

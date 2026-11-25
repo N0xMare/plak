@@ -167,7 +167,15 @@ pub struct TemplateRow {
     #[serde(deserialize_with = "required")]
     #[schemars(required, schema_with = "nullable::<ServiceTier>")]
     pub service_tier: Option<ServiceTier>,
-    pub unready_reason: Option<String>,
+    pub readiness: TemplateReadiness,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TemplateReadiness {
+    NotEvaluated,
+    Ready,
+    NotReady { reason: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

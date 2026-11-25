@@ -114,6 +114,11 @@ template readiness and profile roles carry the same nullable `service_tier`
 instead of the legacy Fast projection. Profile differences name the exact
 session tier in `root_service_tier`.
 
+`templates_list` is a definition read: each summary has
+`readiness: {"state":"not_evaluated"}`. Use the `template_readiness`
+observation at session open or after RefreshTemplates for evaluated readiness:
+`ready` or `not_ready` with a reason.
+
 The host serves only 13. Use the exact build's schema and pair it with
 matching client artifacts before connecting. A Hello for 12 receives
 `{"frame":"refused","kind":"version_mismatch","host":13,"client":12}` and no

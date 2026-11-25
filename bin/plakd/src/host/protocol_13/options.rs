@@ -153,7 +153,24 @@ pub(super) fn tier(tier: Option<&str>) -> Option<v13::ServiceTier> {
     }
 }
 
-pub(super) fn template(row: views::TemplateRow) -> v13::TemplateRow {
+pub(super) fn template(mut row: views::TemplateRow) -> v13::TemplateRow {
+    let readiness = row
+        .unready_reason
+        .take()
+        .map_or(v13::TemplateReadiness::Ready, |reason| {
+            v13::TemplateReadiness::NotReady { reason }
+        });
+    template_with_readiness(row, readiness)
+}
+
+pub(super) fn definition_template(row: views::TemplateRow) -> v13::TemplateRow {
+    template_with_readiness(row, v13::TemplateReadiness::NotEvaluated)
+}
+
+fn template_with_readiness(
+    row: views::TemplateRow,
+    readiness: v13::TemplateReadiness,
+) -> v13::TemplateRow {
     v13::TemplateRow {
         name: row.name,
         account: row.account,
@@ -161,7 +178,7 @@ pub(super) fn template(row: views::TemplateRow) -> v13::TemplateRow {
         effort: row.effort,
         composition: row.composition,
         service_tier: tier(Some(&row.tier)),
-        unready_reason: row.unready_reason,
+        readiness,
     }
 }
 
