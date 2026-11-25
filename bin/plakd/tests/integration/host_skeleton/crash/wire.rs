@@ -335,6 +335,22 @@ impl Connection {
         }
         Ok(())
     }
+
+    fn navigator_barrier(&mut self) -> io::Result<()> {
+        let until = Instant::now() + WAIT;
+        loop {
+            let frame = self.read()?;
+            let observation = &frame["observation"];
+            if frame["frame"] == "event"
+                && (observation["kind"] == "topology_navigator_unavailable"
+                    || (observation["kind"] == "topology_navigator_snapshot"
+                        && observation["body"]["solicited"] == true))
+            {
+                return Ok(());
+            }
+            assert!(Instant::now() < until, "the navigator did not answer");
+        }
+    }
 }
 
 fn replay(
@@ -363,6 +379,11 @@ fn replay(
                 wait_local_runner_ready(host);
             } else if barrier == "new-session-time-boundary" {
                 separate_session_timestamp(fixture, session);
+            } else if barrier == "new-session-ready" {
+                // The new session can attach before its final startup save.
+                // Its loop answers the navigator only after that save, so
+                // read the answer before switching back and stopping the original.
+                connections.get_mut(&1).unwrap().navigator_barrier()?;
             } else if barrier == "stop-time-boundary" {
                 separate_stop_timestamp(fixture);
             } else if barrier == "answered" {
