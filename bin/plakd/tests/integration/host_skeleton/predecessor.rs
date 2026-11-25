@@ -67,6 +67,13 @@ fn production_predecessor_refuses_a_destination_only_unreadable_child() {
         upgrade::reopen::children::spawn_child_with_idle(&fixture, &host, |session| {
             source::idle_locator(&source::open(&fixture), session, 1);
         });
+    let coordinator = UnixStream::connect(fixture.home().join("host/upgrade.sock")).unwrap();
+    coordinator.set_read_timeout(Some(WAIT)).unwrap();
+    let mut line = String::new();
+    BufReader::new(coordinator).read_line(&mut line).unwrap();
+    let identity: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(identity["binary"], before["binary_id"]);
+    let compares_child_heads = identity["child_reopen_baseline"].as_bool().unwrap_or(false);
     let id = after["binary_id"].as_str().unwrap();
     let result = image_command(&fixture, &candidate)
         .env("PLAK_TEST_CHILD_BINDING_UNREADABLE_IMAGE", &candidate)
@@ -82,6 +89,11 @@ fn production_predecessor_refuses_a_destination_only_unreadable_child() {
     assert!(
         stderr.contains("child binding is unreadable in this image"),
         "{stderr}"
+    );
+    assert_eq!(
+        stderr.contains("qualification phase=exact_reopen "),
+        compares_child_heads,
+        "only a comparing source should receive the request before this refusal: {stderr}"
     );
     assert!(
         !stderr.contains("resolving earlier admission verdicts"),

@@ -16,6 +16,58 @@ fn spawn_child(fixture: &Fixture, host: &Host) -> (Client, String, NodeAddress) 
     })
 }
 
+#[test]
+fn child_decode_failure_stays_in_the_flat_audit_fields() {
+    let Some((fixture, _)) = root_wake::child_fixture(false) else {
+        return;
+    };
+    let _cleanup = HomeHost(fixture.home());
+    let mut host = start(&fixture);
+    let (_client, _, node) = spawn_child(&fixture, &host);
+    std::fs::write(fixture.root.join("release-child"), []).unwrap();
+    root_wake::submitted_result(&fixture, &node);
+    stop(&mut host);
+
+    let audit_child = || {
+        let output = output(&fixture, &["session", "check-binding", "--all"], false);
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        report["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["child"] == true && row["superseded"] == false)
+            .unwrap()
+            .clone()
+    };
+    let decoded = audit_child();
+    assert_eq!(decoded["archived"], false, "{decoded}");
+    assert_ne!(decoded["closed"], true, "{decoded}");
+    assert!(decoded["unavailable"].is_null(), "{decoded}");
+    assert!(decoded["child_binding"].is_object(), "{decoded}");
+
+    let paths = PlakPaths::explicit(fixture.home());
+    let runtime = rusqlite::Connection::open(paths.runtime_database()).unwrap();
+    assert_eq!(
+        runtime
+            .execute(
+                "UPDATE runtime_object_bytes SET bytes=x'00' WHERE id IN (
+                    SELECT o.id FROM runtime_objects o JOIN checkpoints c
+                    ON (o.kind,o.codec,o.digest)=(c.root_kind,c.root_codec,c.root_digest)
+                    WHERE c.checkpoint_id=?1
+                )",
+                [decoded["checkpoint"].as_str().unwrap()],
+            )
+            .unwrap(),
+        1
+    );
+    drop(runtime);
+
+    let unreadable = audit_child();
+    assert_eq!(unreadable["checkpoint"], decoded["checkpoint"]);
+    assert!(unreadable["unavailable"].is_string(), "{unreadable}");
+    assert!(unreadable["child_binding"].is_null(), "{unreadable}");
+}
+
 pub(in crate::host_skeleton) fn spawn_child_with_idle(
     fixture: &Fixture,
     host: &Host,

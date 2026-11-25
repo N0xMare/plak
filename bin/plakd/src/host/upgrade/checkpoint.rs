@@ -470,6 +470,39 @@ fn error(failure: impl std::fmt::Display) -> CliFailure {
 mod tests {
     use super::*;
 
+    fn publish_header(paths: &PlakPaths, ticket: &Ticket) {
+        let scratch = stage(&baseline(paths), LIMIT, |out| {
+            serde_json::to_writer(&mut *out, ticket).unwrap();
+            out.write_all(b"\n").map_err(error)
+        })
+        .unwrap();
+        Ticket::publish(paths, scratch).unwrap();
+    }
+
+    #[test]
+    fn legacy_child_audit_is_bound_to_the_ticket_nonce() {
+        let (_root, paths) = PlakPaths::isolated_test_home();
+        paths.ensure_layout().unwrap();
+        crate::commands::runner::private_directory(&root(&paths)).unwrap();
+        let parent = u32::try_from(rustix::process::getppid().unwrap().as_raw_pid()).unwrap();
+        let mut ticket = Ticket {
+            nonce: Uuid::from_u128(1),
+            source: format!("{parent}-0000000000000001"),
+            destination: crate::build_identity::binary_id().to_owned(),
+            process_birth: process_birth(parent).unwrap(),
+            runtime_expected: None,
+        };
+        let audit = LegacyChildBaseline::from(["a recorded branch fault".into()]);
+        ticket.publish_child_audit(&paths, &audit).unwrap();
+        publish_header(&paths, &ticket);
+        assert_eq!(legacy_child_audit(&paths).unwrap(), Some(audit));
+
+        // Only the request changes: the source process and image still match.
+        ticket.nonce = Uuid::from_u128(2);
+        publish_header(&paths, &ticket);
+        assert!(legacy_child_audit(&paths).unwrap().is_none());
+    }
+
     #[test]
     fn inherited_checkpoint_rejects_a_different_instance_on_the_same_pid() {
         let (_root, paths) = PlakPaths::isolated_test_home();
@@ -487,15 +520,7 @@ mod tests {
             child_reopen_baseline: true,
         };
         let mut ticket = Ticket::new(&identity, binary).unwrap();
-        let publish_ticket = |ticket: &Ticket| {
-            let scratch = stage(&baseline(&paths), LIMIT, |out| {
-                serde_json::to_writer(&mut *out, ticket).unwrap();
-                out.write_all(b"\n").map_err(error)
-            })
-            .unwrap();
-            Ticket::publish(&paths, scratch).unwrap();
-        };
-        publish_ticket(&ticket);
+        publish_header(&paths, &ticket);
         assert!(
             Checkpoint::inherited(&paths, binary, Some(&instance))
                 .unwrap()
@@ -512,7 +537,7 @@ mod tests {
                 .is_some()
         );
         ticket.process_birth = "recycled".into();
-        publish_ticket(&ticket);
+        publish_header(&paths, &ticket);
         assert!(
             Checkpoint::inherited(&paths, binary, None)
                 .unwrap()

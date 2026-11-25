@@ -385,3 +385,6 @@ pub(super) fn legacy_preflight(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
