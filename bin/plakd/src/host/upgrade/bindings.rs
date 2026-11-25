@@ -107,18 +107,23 @@ pub(super) fn source_image(pid: u32) -> CliResult<PathBuf> {
     Ok(path)
 }
 
-pub(in crate::host) fn health(paths: &PlakPaths, baseline: &Baseline) -> CliResult<()> {
+/// The destination's own inspection; it needs no baseline, so it can run
+/// beside the preservation comparison that decodes one.
+pub(in crate::host) fn inspect_destination(paths: &PlakPaths) -> CliResult<Report> {
     let image = std::env::current_exe().map_err(super::io_failure)?;
     let output = probe(&image, paths, &crate::home::state::state_key(), None)?;
-    let report = serde_json::from_slice::<Report>(&output.stdout).map_err(|_| {
+    serde_json::from_slice::<Report>(&output.stdout).map_err(|_| {
         CliFailure::new(
             "host_upgrade_health_refused: destination binding inspection gave no verdict",
         )
-    })?;
+    })
+}
+
+pub(in crate::host) fn health(baseline: &Baseline, report: &Report) -> CliResult<()> {
     // A working head can be unavailable until planned recovery. The paired
     // exact-reopen and preservation checks own that case, not a strict fleet
     // binding audit or a second attempt to open the live session.
-    let refused = regressions(baseline, &report);
+    let refused = regressions(baseline, report);
     if refused.is_empty() {
         Ok(())
     } else {

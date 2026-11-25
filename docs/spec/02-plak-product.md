@@ -5929,7 +5929,13 @@ admission and step holds; it does not compare against the earlier snapshot.
 A definite failure to obtain the held evidence refuses surrender and the
 source withdraws its pause and resumes admission. The destination compares
 under stand-alone writer exclusion after stopped-store revisions and before
-serving. The held comparison checks store identities, every saved product
+serving. Under that one exclusion it runs the read-only store integrity
+checks (one per store), the preservation comparison and its binding
+inspection concurrently, each within its own bound. It joins all of them,
+then reports the first failure in the fixed order product, tree and runtime
+store health, preservation, bindings, so the failure stage does not depend
+on which check finished first. The held comparison checks store
+identities, every saved product
 session row (including non-head roots and children), retained branch and
 history ancestry, queue prefixes (a loss needs exact durable admission
 evidence), tree state and revisions, and durable job and retention evidence.

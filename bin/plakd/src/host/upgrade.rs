@@ -3,6 +3,7 @@
 mod backup;
 pub(super) mod bindings;
 pub(super) mod checkpoint;
+pub(super) mod gate;
 pub(super) mod health;
 mod preservation;
 mod progress;

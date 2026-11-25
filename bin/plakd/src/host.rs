@@ -201,12 +201,7 @@ impl UpgradeGate {
             true,
             Instant::now() + upgrade::health::ADMISSION_TIME,
         )?;
-        upgrade::health::stores(paths)?;
-        self.stage = upgrade::checkpoint::Failure::Preservation;
-        let (evidence, baseline) = checkpoint.verify_destination(paths)?;
-        self.stage = upgrade::checkpoint::Failure::Health;
-        upgrade::bindings::health(paths, &baseline)?;
-        self.evidence = Some(evidence);
+        self.evidence = Some(upgrade::gate::verify(paths, checkpoint, &mut self.stage)?);
         crate::carry::upgrade::crash_cut("after-destination-verification");
         self.stage = upgrade::checkpoint::Failure::Startup;
         Ok(())
