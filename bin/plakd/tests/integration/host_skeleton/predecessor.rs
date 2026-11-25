@@ -156,6 +156,44 @@ fn assert_private_backup(fixture: &Fixture) {
 }
 
 #[test]
+fn a_serving_predecessor_blocks_upgrade_verdict_acknowledgement() {
+    let old = PathBuf::from(std::env::var_os("PLAK_INSTALL_PREDECESSOR").unwrap()).join("plakd");
+    let candidate = PathBuf::from(std::env::var_os("PLAK_TEST_BINARY").unwrap());
+    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
+    let (before, after) = probe_pair(&fixture, &old, &candidate);
+    if before["state_key"] != after["state_key"] {
+        return;
+    }
+    fixture.start_gateway_with(&[]);
+    let mut host =
+        await_serving_host(spawn_host(fixture.base_command_from(&old).arg("host"))).unwrap();
+    // An interrupted exec can be followed by a manager start through the
+    // unchanged service link. The old image cannot see the durable fence.
+    let path = fixture.home().join("host/upgrade-checkpoint-verdict");
+    let id = uuid::Uuid::new_v4().to_string();
+    let pending = json!({"nonce": id, "outcome": "Pending"}).to_string();
+    write_private(&path, &pending);
+    let mut recovery = fixture.base_command_from(&candidate);
+    recovery.args(["host", "upgrade-verdict", "--acknowledge", &id]);
+    let refused = recovery.output().unwrap();
+    assert!(
+        !refused.status.success()
+            && String::from_utf8_lossy(&refused.stderr)
+                .contains("host_upgrade_acknowledge_requires_stopped_home"),
+        "{refused:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), pending);
+    assert_eq!(
+        Client::connect(&host).request(1, Op::Ping),
+        Outcome::Ok(Answer::Pong)
+    );
+    stop(&mut host);
+    let report: Value = serde_json::from_str(&run(&mut recovery)).unwrap();
+    assert_eq!(report["acknowledged"], true);
+    assert!(!path.exists());
+}
+
+#[test]
 fn production_predecessor_never_observes_ready_after_destination_preservation_refusal() {
     let directory = std::env::var_os("PLAK_INSTALL_PREDECESSOR").unwrap();
     let old = PathBuf::from(directory).join("plakd");

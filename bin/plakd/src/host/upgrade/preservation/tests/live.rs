@@ -233,7 +233,7 @@ fn predecessor_requires_a_queue_removal_for_the_same_owner() {
 #[test]
 fn predecessor_requires_durable_tree_rows_or_a_new_owner_retirement() {
     let f = Fixture::new();
-    let mut tree = Connection::open(f.paths.subagents_database()).unwrap();
+    let tree = Connection::open(f.paths.subagents_database()).unwrap();
     tree.execute_batch("
         INSERT INTO agent_trees VALUES('tree','tree',2,1,'live','single_lease','selection','checkout','{}',1,NULL);
         INSERT INTO agent_nodes (tree_id,agent_id,depth,description,prompt,output_schema_json,

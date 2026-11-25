@@ -7,6 +7,7 @@ use std::time::Instant;
 
 mod retained;
 
+use crate::carry::upgrade::timing::REVISION_BACKUP as REVISION_BACKUP_TIME;
 use plakous_recursive_subagents_store::admission::Status;
 use plakous_recursive_subagents_store::database::schema;
 use rusqlite::{Connection, OptionalExtension as _};
@@ -126,7 +127,6 @@ const ARCHIVES: Table = Table::stable(
     ],
 );
 const MAX_REVISION_BACKUP_BYTES: u64 = 16 * 1024 * 1024 * 1024;
-use crate::carry::upgrade::timing::REVISION_BACKUP as REVISION_BACKUP_TIME;
 
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
 struct SchemaIdentity {

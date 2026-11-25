@@ -909,7 +909,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_read_timeout_after_request_is_not_a_withdrawal() {
+    fn progress_and_a_partial_frame_do_not_extend_the_surrender_deadline() {
         let (_root, paths) = PlakPaths::isolated_test_home();
         let instance = plakous_recursive_subagents::tree::HostInstance::generate().to_string();
         let binary = "0123456789ab";
@@ -921,7 +921,16 @@ mod tests {
             deploy_idle: Some(true),
         };
         let ticket = checkpoint::Ticket::new(&identity, binary).unwrap();
-        let (reader, _unanswered) = UnixStream::pair().unwrap();
+        let (reader, mut source) = UnixStream::pair().unwrap();
+        write(
+            &mut source,
+            &Answer::Progress {
+                detail: "draining".to_owned(),
+                qualification: None,
+            },
+        )
+        .unwrap();
+        source.write_all(b"{\"status\":\"rea").unwrap();
         let result = finish_request(
             &paths,
             binary,
