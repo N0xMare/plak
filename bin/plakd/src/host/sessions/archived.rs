@@ -136,8 +136,43 @@ mod tests {
             assert_eq!(view.archived, archived);
             assert!(view.observations.iter().any(|event| matches!(event,
             SessionObservation::PresentationSnapshot(snapshot) if serde_json::to_string(snapshot).unwrap().contains("persisted fact"))));
+            assert_unrecorded_root_template_is_null(view.observations);
             assert_eq!(services.product_store_opens(), 0);
             assert!(!paths.runtime_database().exists());
         }
+    }
+
+    fn assert_unrecorded_root_template_is_null(
+        observations: Vec<SessionObservation<PlakExtension>>,
+    ) {
+        use plakous_host_protocol::wire::HostFrame;
+
+        let observation = observations
+            .into_iter()
+            .find(|event| {
+                matches!(
+                    event,
+                    SessionObservation::Extension(
+                        crate::surface_protocol::SurfaceObservation::SessionProfile(_)
+                    )
+                )
+            })
+            .unwrap();
+        let frame = HostFrame::Event {
+            attachment: 1,
+            seq: 1,
+            class: observation.class(),
+            observation,
+            client_id: None,
+            blobs: Vec::new(),
+        };
+        let encoded = crate::host::protocol_13::encode(frame, |_| Vec::new())
+            .unwrap()
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            json.pointer("/observation/body/session_profile/root/template"),
+            Some(&serde_json::Value::Null)
+        );
     }
 }
