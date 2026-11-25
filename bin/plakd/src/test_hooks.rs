@@ -122,6 +122,8 @@ pub(crate) fn upgrade_reexec_probe_omitted() -> bool {
 pub(crate) fn binding_executor_cut() -> bool {
     std::env::var_os("PLAK_TEST_BINDING_CUT_IMAGE").is_some_and(|image| {
         std::env::current_exe().is_ok_and(|current| current == Path::new(&image))
+            && hook_environment("PLAK_TEST_BINDING_CUT_AFTER")
+                .is_none_or(|gate| Path::new(&gate).is_file())
     })
 }
 
@@ -129,6 +131,13 @@ pub(crate) fn child_binding_cut() -> bool {
     std::env::var_os("PLAK_TEST_CHILD_BINDING_CUT_IMAGE").is_some_and(|image| {
         std::env::current_exe().is_ok_and(|current| current == Path::new(&image))
     })
+}
+
+#[cfg(feature = "web")]
+pub(crate) fn upgrade_backup_limit(limit: u64) -> u64 {
+    hook_environment("PLAK_TEST_HOST_UPGRADE_BACKUP_BYTES")
+        .and_then(|value| value.to_str()?.parse::<u64>().ok())
+        .map_or(limit, |test| test.min(limit))
 }
 
 pub(crate) fn force_host_upgrade() -> bool {

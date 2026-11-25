@@ -5915,20 +5915,36 @@ The optional store backup is off by default. The requester takes private
 read-only SQLite copies of the existing product, runtime and tree stores,
 under one size and time budget, before requesting surrender. Each copy pins
 its own SQLite snapshot; this is not a cross-store transaction. It publishes
-the backup only after syncing the complete set. A refusal or incomplete copy
-does not drain the source. Upgrade never restores these copies.
+the backup only after syncing the complete set, retains only a bounded
+number of completed sets, and sweeps interrupted staging directories on the
+next backup. A refusal or incomplete copy does not drain the source. Upgrade
+never restores these copies.
 
 The requester binds a bounded hash-only preservation baseline to the source
 instance and destination image. It survives requester loss during handoff
 without changing the coordinator frames or client wire version. A source
-that supports the checkpoint compares again under its admission and step
-holds; a definite mismatch there refuses surrender. The destination compares
-under stand-alone writer exclusion after any stopped-store revisions and
-before serving. It checks store identities, retained branch and history
-ancestry, queued prefixes (a loss needs exact durable admission evidence),
-tree state and revisions, and durable job and retention evidence. Registered
-tree revisions require the stopped-store backup of the prior revision.
-Intentional tree retirement must be disabled for the comparison.
+that supports the checkpoint replaces the requester's baseline under its
+admission and step holds; it does not compare against the earlier snapshot.
+A definite failure to obtain the held evidence refuses surrender and the
+source withdraws its pause and resumes admission. The destination compares
+under stand-alone writer exclusion after stopped-store revisions and before
+serving. The held comparison checks store identities, every saved product
+session row (including non-head roots and children), retained branch and
+history ancestry, queue prefixes (a loss needs exact durable admission
+evidence), tree state and revisions, and durable job and retention evidence.
+Intentional child retirement must be disabled for this comparison.
+
+A predecessor that cannot capture under the holds supplies the weaker
+`host_upgrade_baseline_predates_drain` evidence level. Its early snapshot is
+read-only, including on the immediately previous product store revision. The
+destination then checks store identities, retained ancestry and feed overlap,
+non-decreasing revisions and fences, and existing identities unless a
+recorded delete accounts for their absence. Live choices, unadmitted drafts,
+consumable job receipts and mutable tree projections do not cause refusals
+against this early snapshot. Registered tree revisions still require the
+intact stopped-store backup of the prior revision. Destination binding
+health checks for regressions against the preflight source verdict, not for
+absence of issues the source already reported.
 
 The host exposes `resolve_paused_drafts(pause, deadline)` for an upgrade
 coordinator to call before planned surrender. The pause must belong to that
@@ -6194,10 +6210,22 @@ drain; installation does not advance the link.
 Reloading a client does not run this command, acquire custody or resend an
 ambiguously accepted submission. After exec, a definite destination startup,
 health or preservation refusal is `host_upgrade_fix_forward_required`;
-it neither reverses custody nor restores a backup. A lost response or timeout
-without proof is `host_upgrade_outcome_unknown`. Inspect the live owner and
-logs before starting a destination; do not infer rollback from a missing
-readiness response.
+it neither reverses custody nor restores a backup. The inherited destination
+records a private durable pending verdict before verification, and publishes
+Ready only after health and preservation pass. A failed or unfinished gate
+blocks ordinary startup, including a service manager's automatic restart.
+After investigating and repairing the cause, the operator clears the
+verdict while the home is stopped and restarts the destination on the same
+stores. Ready disarms the gate; a later normal lifecycle failure does not
+rewrite its verdict.
+
+If destination exec itself fails while the old image still owns the
+inherited locks and listeners, the existing exec fallback can restore the
+source; the requester reports `host_upgrade_source_restored` only after it
+observes the restored owner. A lost response or timeout without proof is
+`host_upgrade_outcome_unknown`. Inspect the live owner and logs before
+starting a destination; do not infer rollback from a missing readiness
+response.
 
 Native login, introduced in protocol 7 (current client protocol 12), runs in
 a dedicated account-service worker, never the

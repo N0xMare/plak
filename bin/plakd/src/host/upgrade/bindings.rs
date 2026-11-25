@@ -83,7 +83,9 @@ pub(super) fn requester_baseline(
 fn source_image(pid: u32) -> CliResult<PathBuf> {
     // The descriptor path resolves the running bytes even if the installed
     // link has been switched ahead of the process.
-    Ok(PathBuf::from(format!("/proc/{pid}/exe")))
+    let path = PathBuf::from(format!("/proc/{pid}/exe"));
+    path.metadata().map_err(super::io_failure)?;
+    Ok(path)
 }
 
 #[cfg(target_os = "macos")]

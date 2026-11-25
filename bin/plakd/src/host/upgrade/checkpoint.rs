@@ -191,7 +191,7 @@ struct Payload<S, B> {
     bindings: B,
 }
 
-pub(in crate::host) fn refuse_cold_start(paths: &PlakPaths) -> CliResult<()> {
+fn refuse_cold_start(paths: &PlakPaths) -> CliResult<()> {
     if let Some(file) = open(&verdict_path(paths), FRAME)?
         && !matches!(decode::<Verdict>(file, FRAME)?.outcome, Outcome::Ready(..))
     {
@@ -201,6 +201,12 @@ pub(in crate::host) fn refuse_cold_start(paths: &PlakPaths) -> CliResult<()> {
         ));
     }
     Ok(())
+}
+
+pub(in crate::host) fn clear_cold_start(paths: &PlakPaths) -> CliResult<()> {
+    // The cold owner already holds the home lock: a checkpoint with no
+    // unfinished verdict cannot describe a still-running surrender.
+    Ticket::clear_stale(paths)
 }
 
 pub(in crate::host) struct Checkpoint {
@@ -293,7 +299,7 @@ fn process_birth(pid: u32) -> CliResult<String> {
 fn process_birth(pid: u32) -> CliResult<String> {
     let mut ps = std::process::Command::new("/bin/ps");
     ps.args(["-p", &pid.to_string(), "-o", "lstart="])
-        .env("LC_ALL", "C");
+        .envs([("LC_ALL", "C"), ("TZ", "UTC")]);
     let output = super::process::run(ps, super::PROBE_BOUND)?;
     let birth = String::from_utf8(output.stdout).map_err(error)?;
     if birth.trim().is_empty() {
@@ -394,4 +400,61 @@ fn decode<T: DeserializeOwned>(read: impl std::io::Read, limit: u64) -> CliResul
 
 fn error(failure: impl std::fmt::Display) -> CliFailure {
     CliFailure::new(format!("host_upgrade_checkpoint_refused: {failure}"))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inherited_checkpoint_rejects_a_different_instance_on_the_same_pid() {
+        let (_root, paths) = PlakPaths::isolated_test_home();
+        paths.ensure_layout().unwrap();
+        crate::commands::runner::private_directory(&root(&paths)).unwrap();
+        let binary = "0123456789ab";
+        let instance = HostInstance::generate().to_string();
+        let other = HostInstance::generate().to_string();
+        let identity = Identity {
+            protocol: crate::carry::upgrade::PROTOCOL,
+            key: crate::home::state::state_key(),
+            instance: instance.clone(),
+            binary: binary.to_owned(),
+            deploy_idle: Some(true),
+        };
+        let mut ticket = Ticket::new(&identity, binary).unwrap();
+        let publish_ticket = |ticket: &Ticket| {
+            let scratch = stage(&baseline(&paths), LIMIT, |out| {
+                serde_json::to_writer(&mut *out, ticket).unwrap();
+                out.write_all(b"\n").map_err(error)
+            })
+            .unwrap();
+            Ticket::publish(&paths, scratch).unwrap();
+        };
+        publish_ticket(&ticket);
+        assert!(
+            Checkpoint::inherited(&paths, binary, Some(&instance))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            Checkpoint::inherited(&paths, binary, Some(&other))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            Checkpoint::inherited(&paths, binary, None)
+                .unwrap()
+                .is_some()
+        );
+        ticket.process_birth = "recycled".into();
+        publish_ticket(&ticket);
+        assert!(
+            Checkpoint::inherited(&paths, binary, None)
+                .unwrap()
+                .is_none()
+        );
+        clear_cold_start(&paths).unwrap();
+        assert!(!baseline(&paths).exists());
+    }
 }

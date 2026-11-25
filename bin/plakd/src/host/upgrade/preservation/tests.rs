@@ -15,7 +15,9 @@ use serde_json::{Value, json};
 use crate::home::paths::PlakPaths;
 use crate::store::{ProductStore, queue_tombstone_digest};
 
-use super::Snapshot;
+use super::{Evidence, Snapshot};
+
+mod live;
 
 const SESSION: &str = "00000000-0000-0000-0000-0000000002bc";
 const BRANCH: &str = "00000000-0000-0000-0000-0000000002bd";
@@ -28,7 +30,7 @@ const TEXT: &str = "wake draft";
 const ANCHOR: u64 = 5;
 
 struct Fixture {
-    _temp: tempfile::TempDir,
+    temp: tempfile::TempDir,
     paths: PlakPaths,
     product: Connection,
     writer: ProductStore,
@@ -37,6 +39,10 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_stub_runtime(true)
+    }
+
+    fn with_stub_runtime(stub_runtime: bool) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let paths = PlakPaths::explicit(temp.path().join("home"));
         let writer = ProductStore::open(&paths).unwrap();
@@ -61,19 +67,21 @@ impl Fixture {
                 [TEXT],
             )
             .unwrap();
-        runtime
-            .execute(
-                "
+        if stub_runtime {
+            runtime
+                .execute(
+                    "
             INSERT INTO sessions
               (session_id,initial_branch,revision,created_s,created_ns,durability,archived,
                feed_tail,feed_retained_from,feed_bytes)
             VALUES(?1,?2,zeroblob(8),zeroblob(8),0,2,0,0,1,0)
         ",
-                [SESSION, BRANCH],
-            )
-            .unwrap();
+                    [SESSION, BRANCH],
+                )
+                .unwrap();
+        }
         Self {
-            _temp: temp,
+            temp,
             paths,
             product,
             writer,
@@ -187,8 +195,8 @@ impl Fixture {
             .unwrap();
         self.runtime
             .execute(
-                "UPDATE sessions SET feed_retained_from=(SELECT min(seq) FROM session_feed),
-                                 feed_tail=(SELECT max(seq) FROM session_feed) WHERE session_id=?1",
+                "UPDATE sessions SET feed_retained_from=(SELECT min(seq) FROM session_feed WHERE session_id=?1),
+                                 feed_tail=(SELECT max(seq) FROM session_feed WHERE session_id=?1) WHERE session_id=?1",
                 [SESSION],
             )
             .unwrap();
@@ -271,6 +279,14 @@ async fn native_session(
     sessions: &AgentSessions,
     workspace: &std::path::Path,
 ) -> plakous::sessions::OpenedSession {
+    native_session_with_id(sessions, workspace, "preservation:fixture").await
+}
+
+async fn native_session_with_id(
+    sessions: &AgentSessions,
+    workspace: &std::path::Path,
+    id: &str,
+) -> plakous::sessions::OpenedSession {
     use plakous_offline_crash_harness::{
         BoundaryController, protocol::CrashBoundary, text_runtime_binding,
     };
@@ -287,7 +303,7 @@ async fn native_session(
     .unwrap();
     let CreateSessionOutcome::Created { session, .. } = sessions
         .create(CreateSessionRequest::new(
-            SessionOperationId::new("preservation:fixture").unwrap(),
+            SessionOperationId::new(id).unwrap(),
             binding,
         ))
         .await

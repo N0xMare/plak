@@ -9,6 +9,7 @@ mod bootstrap;
 const DESTINATION: &str = "r999.e999.p999.t999";
 
 mod drain;
+mod gate;
 mod lifecycle;
 mod paired;
 pub(super) mod preservation;

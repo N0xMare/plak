@@ -1,8 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use plakous_recursive_subagents_store::admission::Status;
 use plakous_recursive_subagents_store::database::schema;
@@ -123,6 +124,7 @@ const ARCHIVES: Table = Table::stable(
     ],
 );
 const MAX_REVISION_BACKUP_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+pub(in crate::host) const REVISION_BACKUP_TIME: Duration = Duration::from_secs(60);
 
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
 struct SchemaIdentity {
@@ -250,15 +252,14 @@ impl Trees {
         after: &Self,
         paths: &PlakPaths,
         evidence: Evidence,
-        deleted: &BTreeSet<Key>,
+        deleted: impl Fn(&str) -> bool,
     ) -> CliResult<Option<String>> {
         let backup = if self.schema == after.schema {
             None
         } else {
             Some(self.verify_revision(after, paths)?)
         };
-        let recorded_delete =
-            |id: &str| evidence == Evidence::BaselinePredatesDrain && deleted.contains(id);
+        let recorded_delete = |id: &str| evidence == Evidence::BaselinePredatesDrain && deleted(id);
         if evidence == Evidence::Held {
             compare_tables(&self.tables, &after.tables, |_, _| false)?;
         } else {
@@ -287,6 +288,7 @@ impl Trees {
     }
 
     fn verify_revision(&self, after: &Self, paths: &PlakPaths) -> CliResult<String> {
+        let deadline = Instant::now() + REVISION_BACKUP_TIME;
         // Both fingerprints were already checked against the native registry
         // on their capture transactions.
         check(
@@ -321,33 +323,48 @@ impl Trees {
             )?;
         }
         let intact = schema()
-            .inspect_existing(
-                &path,
-                std::time::Instant::now() + std::time::Duration::from_secs(20),
-                |db, status| {
-                    let backup = identity(db, status)?;
-                    let mut query = db
-                        .prepare("PRAGMA quick_check(1)")
-                        .map_err(|_| unreadable("stopped-tree backup"))?;
-                    let result: Option<String> = query
-                        .query_row([], |row| row.get(0))
-                        .optional()
-                        .map_err(|_| unreadable("stopped-tree backup"))?;
-                    Ok::<_, crate::CliFailure>(
-                        backup == self.schema && result.as_deref() == Some("ok"),
-                    )
-                },
-            )
+            .inspect_existing(&path, deadline, |db, status| {
+                let backup = identity(db, status)?;
+                let mut query = db
+                    .prepare("PRAGMA quick_check(1)")
+                    .map_err(|_| unreadable("stopped-tree backup"))?;
+                let result: Option<String> = query
+                    .query_row([], |row| row.get(0))
+                    .optional()
+                    .map_err(|_| unreadable("stopped-tree backup"))?;
+                Ok::<_, crate::CliFailure>(backup == self.schema && result.as_deref() == Some("ok"))
+            })
             .map_err(|_| unreadable("stopped-tree backup"))??;
         check(
             intact,
             "tree revision backup does not contain the intact source store identity",
         )?;
-        let (length, hash) = shipping::hash_reader(file, metadata.len(), &mut io::sink())?;
+        let (length, hash) = shipping::hash_reader(
+            BoundedRead { file, deadline },
+            metadata.len(),
+            &mut io::sink(),
+        )?;
         check(
             length == metadata.len() && stamp(&path)? == Some(observed),
             "tree revision backup changed during verification",
         )?;
         Ok(hash)
+    }
+}
+
+struct BoundedRead {
+    file: fs::File,
+    deadline: Instant,
+}
+
+impl io::Read for BoundedRead {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if Instant::now() >= self.deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "stopped-tree backup inspection exceeded its bound",
+            ));
+        }
+        self.file.read(buffer)
     }
 }

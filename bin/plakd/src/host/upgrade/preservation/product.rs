@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
+use std::os::unix::fs::MetadataExt as _;
 
-use plakous::sessions::SessionLocator;
+use plakous::sessions::{AgentSessions, SessionLocator, SessionOperationId};
 use plakous_hosted::sessions::projector::{Submission, SubmissionKind};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -25,7 +26,7 @@ struct Root {
     archived: bool,
     branch: Option<Key>,
     runtime: Option<Key>,
-    tree: Key,
+    owns_tree: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -74,8 +75,7 @@ impl Product {
                             && current.branch == before.branch))
             } else {
                 evidence == Evidence::BaselinePredatesDrain
-                    && (before.runtime.as_deref().is_some_and(&runtime_deleted)
-                        || after.deleted_trees.contains(&before.tree))
+                    && before.runtime.as_deref().is_some_and(&runtime_deleted)
             };
             check(preserved, "preservation lost or changed a product session")?;
         }
@@ -100,6 +100,16 @@ impl Product {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn owned_tree_had_runtime_deleted(
+        &self,
+        tree: &str,
+        deleted: impl Fn(&str) -> bool,
+    ) -> bool {
+        self.roots
+            .get(tree)
+            .is_some_and(|root| root.owns_tree && root.runtime.as_deref().is_some_and(deleted))
     }
 }
 
@@ -173,8 +183,18 @@ fn capture_product(
                 revision: nonnegative(row, 19)?,
                 archived: get(row, 1)?,
                 branch: locator.map(branch_key),
-                runtime: locator.map(|id| texts([id.session_id().to_string().as_str()])),
-                tree: columns(row, [3])?,
+                runtime: match locator {
+                    Some(id) => Some(id),
+                    None if evidence == Evidence::BaselinePredatesDrain => {
+                        let operation: String = get(row, 16)?;
+                        SessionOperationId::new(operation)
+                            .ok()
+                            .and_then(|op| AgentSessions::genesis_locator_for(&op).ok())
+                    }
+                    None => None,
+                }
+                .map(|id| texts([id.session_id().to_string().as_str()])),
+                owns_tree: columns(row, [3])? == key && columns(row, [4])? == key,
             };
             // Pending drafts can be edited and withdrawn while the predecessor
             // serves. Its durable admissions are checked in the runtime feed.
@@ -229,7 +249,11 @@ fn deleted_trees(paths: &PlakPaths, budget: &mut Budget) -> CliResult<BTreeSet<K
             continue;
         };
         if uuid::Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == id)
-            && entry.file_type().is_ok_and(|kind| kind.is_file())
+            && entry.metadata().is_ok_and(|meta| {
+                meta.is_file()
+                    && meta.mode() & 0o777 == 0o600
+                    && meta.uid() == rustix::process::geteuid().as_raw()
+            })
         {
             deleted.insert(texts([id]));
         }

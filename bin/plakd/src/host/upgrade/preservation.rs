@@ -16,6 +16,7 @@ use crate::{CliFailure, CliResult};
 
 pub(super) use self::facts::CAPTURE_TIME;
 use self::facts::{Budget, Key};
+pub(super) use self::trees::REVISION_BACKUP_TIME;
 
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 pub(in crate::host) enum Evidence {
@@ -79,10 +80,9 @@ impl Snapshot {
         paths: &PlakPaths,
     ) -> CliResult<Option<String>> {
         let recorded_deletes = after.runtime.as_ref().map(runtime::Runtime::deleted);
+        let deleted = |id: &str| recorded_deletes.is_some_and(|deleted| deleted.contains_key(id));
         self.product
-            .compare(&after.product, accepted, self.evidence, |id| {
-                recorded_deletes.is_some_and(|deleted| deleted.contains_key(id))
-            })?;
+            .compare(&after.product, accepted, self.evidence, deleted)?;
         if let Some(before) = &self.runtime {
             before.compare(
                 after
@@ -92,12 +92,11 @@ impl Snapshot {
                 self.evidence,
             )?;
         }
-        self.trees.compare(
-            &after.trees,
-            paths,
-            self.evidence,
-            &after.product.deleted_trees,
-        )
+        self.trees
+            .compare(&after.trees, paths, self.evidence, |tree| {
+                after.product.deleted_trees.contains(tree)
+                    || self.product.owned_tree_had_runtime_deleted(tree, deleted)
+            })
     }
 }
 

@@ -513,7 +513,9 @@ impl Runtime {
                     && before.revision <= current.revision
                     && if evidence == Evidence::Held {
                         before.archived == current.archived
-                            && before.retained_from == current.retained_from
+                            && before.retained_from <= current.retained_from
+                            && (before.retained_from == current.retained_from
+                                || before.feed.is_empty())
                     } else {
                         (!before.archived || current.archived)
                             && before.retained_from <= current.retained_from

@@ -44,6 +44,7 @@ pub(super) fn prove_deploy_source(
         .set_write_timeout(Some(PROBE_BOUND))
         .map_err(io_failure)?;
     let identity: Identity = read(&stream)?;
+    super::refuse_deploy_busy(&identity)?;
     if identity.instance != inspection.source_instance || identity.deploy_idle != Some(true) {
         return Err(runner_carry::deploy_refusal(
             "source coordinator changed or is not idle; replan",

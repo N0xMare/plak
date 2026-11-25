@@ -14,7 +14,7 @@ const COPY_TIME: Duration = Duration::from_secs(60);
 const KEEP: usize = 3;
 
 pub(super) fn create(paths: &PlakPaths) -> CliResult<PathBuf> {
-    create_with_bound(paths, MAX_BYTES)
+    create_with_bound(paths, crate::test_hooks::upgrade_backup_limit(MAX_BYTES))
 }
 
 fn create_with_bound(paths: &PlakPaths, limit: u64) -> CliResult<PathBuf> {
@@ -24,8 +24,8 @@ fn create_with_bound(paths: &PlakPaths, limit: u64) -> CliResult<PathBuf> {
         ))
     };
     let root = paths.state_dir().join("upgrade-backups");
-    crate::commands::runner::private_directory(&root)?;
-    tidy(&root, None).map_err(|error| failure(&error))?;
+    crate::commands::runner::private_directory(&root).map_err(|error| failure(&error.message()))?;
+    tidy(&root, None, KEEP).map_err(|error| failure(&error))?;
     File::open(paths.state_dir())
         .and_then(|dir| dir.sync_all())
         .map_err(|error| failure(&error))?;
@@ -47,9 +47,14 @@ fn create_with_bound(paths: &PlakPaths, limit: u64) -> CliResult<PathBuf> {
     File::open(staging.path())
         .and_then(|dir| dir.sync_all())
         .map_err(|error| failure(&error))?;
+    // Make room before publishing so repeated interruptions cannot
+    // accumulate excess completed backups.
+    tidy(&root, Some(staging.path()), KEEP - 1).map_err(|error| failure(&error))?;
+    File::open(&root)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|error| failure(&error))?;
     let published = root.join(uuid::Uuid::new_v4().to_string());
     fs::rename(staging.path(), &published).map_err(|error| failure(&error))?;
-    tidy(&root, Some(&published)).map_err(|error| failure(&error))?;
     File::open(&root)
         .and_then(|dir| dir.sync_all())
         .map_err(|error| failure(&error))?;
@@ -57,7 +62,7 @@ fn create_with_bound(paths: &PlakPaths, limit: u64) -> CliResult<PathBuf> {
 }
 
 // Called only by the serialized requester. Ignore unrelated names and links.
-fn tidy(root: &Path, published: Option<&Path>) -> std::io::Result<()> {
+fn tidy(root: &Path, active: Option<&Path>, keep: usize) -> std::io::Result<()> {
     let mut older = Vec::new();
     for entry in fs::read_dir(root)? {
         let entry = entry?;
@@ -67,16 +72,14 @@ fn tidy(root: &Path, published: Option<&Path>) -> std::io::Result<()> {
             continue;
         }
         let path = entry.path();
-        if name.starts_with(".pending-") {
+        if name.starts_with(".pending-") && active.is_none_or(|current| current != path) {
             fs::remove_dir_all(&path)?;
-        } else if published.is_some_and(|current| current != path)
-            && uuid::Uuid::parse_str(name).is_ok_and(|id| id.to_string() == name)
-        {
+        } else if uuid::Uuid::parse_str(name).is_ok_and(|id| id.to_string() == name) {
             older.push((entry.metadata()?.modified()?, path));
         }
     }
     older.sort_unstable_by(|a, b| b.cmp(a));
-    for (_, path) in older.into_iter().skip(KEEP - 1) {
+    for (_, path) in older.into_iter().skip(keep) {
         fs::remove_dir_all(path)?;
     }
     Ok(())
@@ -99,7 +102,7 @@ mod tests {
         let size = paths.product_database().metadata().unwrap().len();
         assert!(create_with_bound(&paths, size).is_err());
         assert_eq!(
-            std::fs::read_dir(paths.state_dir().join("upgrade-backups"))
+            fs::read_dir(paths.state_dir().join("upgrade-backups"))
                 .unwrap()
                 .count(),
             0
@@ -115,7 +118,7 @@ mod tests {
         let root = backup.parent().unwrap();
         fs::create_dir(root.join(".pending-interrupted")).unwrap();
         fs::create_dir(root.join("unrelated")).unwrap();
-        for _ in 0..KEEP + 1 {
+        for _ in 0..=KEEP {
             create_with_bound(&paths, size * 2).unwrap();
         }
         assert!(!root.join(".pending-interrupted").exists());

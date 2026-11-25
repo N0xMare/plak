@@ -125,6 +125,20 @@ fn crash(flag: &str, cut: &str, lose_original: bool, paired: bool) {
             }
         }
     }
+    if cut == "after-destination-verification" {
+        let restart = image_command(&fixture, &image)
+            .arg("host")
+            .output()
+            .unwrap();
+        assert_eq!(restart.status.code(), Some(5), "{restart:?}");
+        assert!(
+            String::from_utf8_lossy(&restart.stderr)
+                .contains("inherited upgrade did not reach Ready")
+        );
+        // The crash is the injected cause; the operator acknowledges it
+        // before restarting the destination on the unchanged stores.
+        std::fs::remove_file(fixture.home().join("host/upgrade-checkpoint-verdict")).unwrap();
+    }
     let mut replacement = await_serving_host(spawn_host(
         image_command(&fixture, &image)
             .envs(environment.iter().cloned())

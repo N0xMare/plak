@@ -34,6 +34,7 @@ const SUCCESSOR_BOUND: Duration = Duration::from_secs(
     health::ADMISSION_TIME.as_secs()
         + health::STORE_TIME.as_secs()
         + preservation::CAPTURE_TIME.as_secs()
+        + preservation::REVISION_BACKUP_TIME.as_secs()
         + bindings::INSPECTION_TIME.as_secs()
         + 300,
 );
@@ -323,12 +324,7 @@ pub(super) fn request(
             "host_upgrade_unsupported_source: coordinator protocol differs; settle and drain using the retained source build before starting this destination",
         ));
     }
-    if identity.deploy_idle == Some(false) {
-        return Err(CliFailure::classified(
-            crate::CliFailureKind::Retryable,
-            "host_upgrade_deploy_busy: a prepared or committed deploy receipt is present",
-        ));
-    }
+    refuse_deploy_busy(&identity)?;
     if identity.key != source.key
         || !crate::carry::upgrade::binary_id_valid(&identity.binary)
         || plakous_recursive_subagents::tree::HostInstance::parse(&identity.instance).is_err()
@@ -355,6 +351,7 @@ pub(super) fn request(
         let backup = backup::create(paths)?;
         eprintln!("host upgrade: store backup saved at {}", backup.display());
     }
+    health::stores(paths)?;
     let bindings = bindings::requester_baseline(paths, &identity)?;
     let (baseline, _) = preservation::Snapshot::capture_at(
         paths,
@@ -404,6 +401,16 @@ fn unknown_surrender(failure: CliFailure) -> CliFailure {
             failure.message()
         ),
     )
+}
+
+fn refuse_deploy_busy(identity: &Identity) -> CliResult<()> {
+    if identity.deploy_idle == Some(false) {
+        return Err(CliFailure::classified(
+            crate::CliFailureKind::Retryable,
+            "host_upgrade_deploy_busy: a prepared or committed deploy receipt is present",
+        ));
+    }
+    Ok(())
 }
 
 fn connect(paths: &PlakPaths, timeout: Option<Duration>) -> CliResult<UnixStream> {
@@ -459,7 +466,12 @@ fn wait_host(
     let deadline = Instant::now() + SUCCESSOR_BOUND;
     let mut absent_since = None::<Instant>;
     while Instant::now() < deadline {
-        let verdict = ticket.outcome(paths)?;
+        let verdict = ticket.outcome(paths).map_err(|failure| {
+            CliFailure::classified(
+                crate::CliFailureKind::RecoveryRequired,
+                format!("host_upgrade_outcome_unknown: destination readiness verdict could not be verified ({})", failure.message()),
+            )
+        })?;
         if let Some(checkpoint::Outcome::Failed(failure)) = verdict {
             return Err(failure.fix_forward());
         }
@@ -859,4 +871,36 @@ fn write(stream: &mut UnixStream, value: &impl Serialize) -> CliResult<()> {
 
 pub(super) fn remove(paths: &PlakPaths) {
     let _ = std::fs::remove_file(socket(paths));
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_read_timeout_after_request_is_not_a_withdrawal() {
+        let (_root, paths) = PlakPaths::isolated_test_home();
+        let instance = plakous_recursive_subagents::tree::HostInstance::generate().to_string();
+        let binary = "0123456789ab";
+        let identity = Identity {
+            protocol: crate::carry::upgrade::PROTOCOL,
+            key: crate::home::state::state_key(),
+            instance,
+            binary: binary.to_owned(),
+            deploy_idle: Some(true),
+        };
+        let ticket = checkpoint::Ticket::new(&identity, binary).unwrap();
+        let (reader, _unanswered) = UnixStream::pair().unwrap();
+        reader
+            .set_read_timeout(Some(Duration::from_millis(20)))
+            .unwrap();
+        let result = finish_request(&paths, binary, binary, &ticket, &reader);
+        assert!(
+            result
+                .unwrap_err()
+                .message()
+                .contains("host_upgrade_outcome_unknown")
+        );
+    }
 }

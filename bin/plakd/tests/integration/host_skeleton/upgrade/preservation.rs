@@ -2,7 +2,7 @@ use super::*;
 use plakous_host_protocol::wire::RequestRefusal;
 
 #[test]
-fn preservation_mismatch_withdraws_before_source_surrender() {
+fn a_held_capture_failure_withdraws_and_concurrent_requester_is_busy() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     let release = fixture.root.join("release-drain");
@@ -35,17 +35,30 @@ fn preservation_mismatch_withdraws_before_source_surrender() {
         assert!(Instant::now() < deadline, "upgrade never paused admissions");
         std::thread::sleep(Duration::from_millis(10));
     }
-    replace_store_identity(&fixture);
+    let busy = output_env(
+        &fixture,
+        &["host", "upgrade", "--expect-binary", &id],
+        false,
+        &[("PLAK_TEST_FORCE_HOST_UPGRADE", "1")],
+    );
+    assert!(!busy.status.success());
+    assert!(String::from_utf8_lossy(&busy.stderr).contains("host_upgrade_checkpoint_busy"));
+    let config = fixture.home().join("config.toml");
+    let saved = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        format!("{saved}\n[runtime_store]\nretire_finished_children = true\n"),
+    )
+    .unwrap();
     std::fs::write(release, []).unwrap();
     let result = outcome.recv_timeout(WAIT).unwrap().unwrap();
     let detail = String::from_utf8_lossy(&result.stderr);
     assert!(!result.status.success(), "{detail}");
     assert!(
-        detail.contains(
-            "host_upgrade_preservation_refused: preservation changed the product store identity"
-        ),
+        detail.contains("host_upgrade_preservation_refused: cannot verify intentional retirement"),
         "{detail}"
     );
+    std::fs::write(config, saved).unwrap();
     assert_eq!(host.child.as_ref().unwrap().id(), pid);
     assert_eq!(client.request(11, Op::Ping), Outcome::Ok(Answer::Pong));
     let request_id = uuid::Uuid::new_v4().to_string();

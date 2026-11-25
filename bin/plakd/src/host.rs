@@ -137,7 +137,12 @@ pub(crate) fn run_host_command(
         _ => None,
     };
     if let Some(checkpoint) = &checkpoint {
-        checkpoint.ticket.record_pending(paths)?;
+        if let Err(error) = checkpoint.ticket.record_pending(paths) {
+            let stage = upgrade::checkpoint::Failure::Startup;
+            eprintln!("host upgrade: {}", error.message());
+            checkpoint.ticket.record_failure(paths, stage);
+            return Err(stage.fix_forward());
+        }
     }
     let mut gate = UpgradeGate {
         checkpoint,
@@ -168,7 +173,7 @@ impl UpgradeGate {
         let _writers = crate::carry::upgrade::admission_until(
             paths,
             true,
-            std::time::Instant::now() + upgrade::health::ADMISSION_TIME,
+            Instant::now() + upgrade::health::ADMISSION_TIME,
         )?;
         upgrade::health::stores(paths)?;
         self.stage = upgrade::checkpoint::Failure::Preservation;
@@ -260,9 +265,12 @@ fn serve_host(
     crate::store::revisions::refuse_incompatible(paths).map_err(CliFailure::new)?;
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
+    let clears_stale = inherited
+        .as_ref()
+        .is_none_or(|transport| transport.fallback);
     let (ownership, inherited) = HostOwnership::take(paths, &binary, inherited)?;
-    if inherited.is_none() {
-        upgrade::checkpoint::refuse_cold_start(paths)?;
+    if clears_stale {
+        upgrade::checkpoint::clear_cold_start(paths)?;
     }
     legacy_upgrade::refuse_unresolved(paths)?;
     let paired_start = inherited.is_some();

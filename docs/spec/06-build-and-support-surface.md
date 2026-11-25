@@ -1597,9 +1597,11 @@ product surface and does not widen the shipping or supported platform policy.
 The same-key host upgrade owns the local preservation and health gates and
 any explicitly requested store backup. Fleet coordination must wait for that
 host's destination readiness before publishing it, not infer readiness from
-source surrender. After surrender, a definite destination refusal is fixed
-forward; fleet tooling does not restore a store backup. Fleet route and
-fresh-session canaries remain deployment policy, not host upgrade gates.
+source surrender. A weaker pre-drain verdict does not claim a held
+comparison. After surrender, a definite destination refusal is fixed
+forward; fleet tooling neither bypasses the host's restart fence nor
+restores a store backup. Fleet route and fresh-session canaries remain
+deployment policy, not host upgrade gates.
 It requires Git, OpenSSH and a read-capable source checkout of the origin
 on the operator, and native target operations from the artifact binary on
 the target. It accepts a full revision on the advertised

@@ -122,11 +122,10 @@ pub(super) fn replace(
             command,
             home,
             arguments,
-            binary,
+            (binary, fallback),
             environment,
             descriptors,
             web,
-            fallback,
         )
     };
     let failure = match destination {
@@ -147,11 +146,10 @@ fn exec(
     mut command: Command,
     home: &std::path::Path,
     arguments: &[String],
-    binary: &str,
+    (binary, fallback): (&str, bool),
     environment: &HostEnvironment,
     [home_lock, state_lock, control]: [BorrowedFd<'_>; 3],
     web: Option<BorrowedFd<'_>>,
-    fallback: bool,
 ) -> CliFailure {
     let result = (|| -> CliResult<CliFailure> {
         let saved_stdin = std::io::stdin()

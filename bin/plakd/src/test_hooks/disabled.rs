@@ -82,6 +82,11 @@ pub(crate) fn upgrade_state_key() -> Option<String> {
     None
 }
 
+#[cfg(feature = "web")]
+pub(crate) const fn upgrade_backup_limit(limit: u64) -> u64 {
+    limit
+}
+
 pub(crate) const fn upgrade_runner_revision() -> Option<String> {
     None
 }
