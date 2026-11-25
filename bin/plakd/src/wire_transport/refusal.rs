@@ -62,7 +62,6 @@ pub(crate) fn refusal(reason: RequestRefusal) -> CliFailure {
         RequestRefusal::NodeRetiring => "the node is releasing; retry after release".into(),
         RequestRefusal::OutOfReach => "the node is outside this operator's reach".into(),
         RequestRefusal::NotAttached => "attach to a session before sending this request".into(),
-        RequestRefusal::TranscriptScopeExpired => "the transcript is outside the current attachment".into(),
         RequestRefusal::AccountChoiceRequired { kinds } => {
             let listed = kinds
                 .iter()

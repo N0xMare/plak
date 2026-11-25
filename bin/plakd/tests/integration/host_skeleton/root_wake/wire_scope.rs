@@ -43,41 +43,45 @@ fn served_child_previews_do_not_create_gaps_for_either_viewer() {
         ..node.clone()
     };
     let scope = json!({"agent":child_node.agent_id});
-    let mut child = Client::connect(&host);
-    // Give this link a real root history binding before switching it to a child.
-    child.attach(1, &node);
-    let child_id = child.attach(2, &child_node);
     root.send(&ClientFrame::Request {
         id: 4,
         op: Op::Intent {
             attachment: root_id,
             client_id: None,
             intent: SessionIntent::OpenAgentTranscript {
-                agent_id: child_node.agent_id,
+                agent_id: child_node.agent_id.clone(),
             },
             blobs: Vec::new(),
         },
     });
     root.read_deadline = Some(Instant::now() + WAIT);
-    child.read_deadline = root.read_deadline;
     wait_for_scope(&mut root, root_id, &scope);
-    wait_for_scope(&mut child, child_id, &scope);
 
-    raw_request(
-        &mut child,
-        5,
-        json!({"op":"older_history","attachment":child_id,"cursor":"root-history"}),
+    let mut child = Client::connect(&host);
+    child.read_deadline = Some(Instant::now() + WAIT);
+    // Use a real readable root row, not a bogus cursor that always expires.
+    let former_root_id = child.attach(1, &node);
+    let snapshot = wait_for_scope(&mut child, former_root_id, &json!("root"));
+    let row = snapshot["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["row"]["text"] == "delegate and idle")
+        .unwrap()["key"]
+        .clone();
+    let read_row = |attachment| json!({"op":"read_transcript_row","attachment":attachment,"row":row,"offset":0});
+    raw_request(&mut child, 2, &read_row(former_root_id));
+    assert_eq!(
+        read_outcome(&mut child, 2)["ok"]["text"],
+        "delegate and idle"
     );
-    loop {
-        let frame = received(&mut child);
-        if frame["frame"] == "response" && frame["id"] == 5 {
-            assert_eq!(
-                frame["outcome"]["refused"]["refusal"], "cursor_expired",
-                "{frame}"
-            );
-            break;
-        }
-    }
+    let child_id = child.attach(3, &child_node);
+    wait_for_scope(&mut child, child_id, &scope);
+    raw_request(&mut child, 5, &read_row(child_id));
+    assert_eq!(
+        read_outcome(&mut child, 5)["refused"],
+        json!({"refusal":"cursor_expired"})
+    );
 
     let viewers = [(root, root_id), (child, child_id)];
     let mut viewers = viewers.map(|(mut client, attachment)| {
@@ -87,11 +91,15 @@ fn served_child_previews_do_not_create_gaps_for_either_viewer() {
     });
     std::fs::write(release, []).unwrap();
     for (client, attachment, before) in &mut viewers {
-        let mut sequence = None;
+        let mut sequence: Option<u64> = None;
         let mut numbered = 0;
         let mut observe = |frame: &Value| {
-            assert_ne!(frame["frame"], "snapshot", "unexpected baseline: {frame}");
-            if frame["frame"] == "event" {
+            if frame["frame"] == "snapshot" && frame["last"] == true {
+                // A full snapshot consumes a sequence without carrying it.
+                if let Some(last) = &mut sequence {
+                    *last += 1;
+                }
+            } else if frame["frame"] == "event" {
                 assert_eq!(frame["attachment"], *attachment, "{frame}");
                 let seq = frame["seq"].as_u64().unwrap();
                 if let Some(last) = sequence.replace(seq) {
@@ -103,12 +111,7 @@ fn served_child_previews_do_not_create_gaps_for_either_viewer() {
         loop {
             let frame = received(client);
             observe(&frame);
-            let event = &frame["observation"];
-            if event["kind"] == "transcript_tool_stream"
-                && event["body"]["scope"] == scope
-                && event["body"]["tool"]["name"] == "bash"
-                && event["body"]["tool"]["state"] == "done"
-            {
+            if saw_child_tool_settle(&frame, &scope) {
                 break;
             }
         }
@@ -126,7 +129,31 @@ fn served_child_previews_do_not_create_gaps_for_either_viewer() {
     stop(&mut host);
 }
 
-fn wait_for_scope(client: &mut Client, attachment: u64, scope: &Value) {
+fn saw_child_tool_settle(frame: &Value, scope: &Value) -> bool {
+    let body = &frame["observation"]["body"];
+    let settled = |tool: &Value| {
+        tool["name"] == "bash"
+            && tool["state"]
+                .as_str()
+                .is_some_and(|state| state != "running" && state != "waiting")
+    };
+    if frame["frame"] == "snapshot" && frame["scope"] == *scope {
+        return frame["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|item| settled(&item["row"]));
+    }
+    body["scope"] == *scope
+        && (settled(&body["tool"])
+            || body["upserts"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|item| settled(&item["row"])))
+}
+
+fn wait_for_scope(client: &mut Client, attachment: u64, scope: &Value) -> Value {
     loop {
         let frame = received(client);
         if frame["frame"] == "snapshot"
@@ -134,7 +161,7 @@ fn wait_for_scope(client: &mut Client, attachment: u64, scope: &Value) {
             && frame["scope"] == *scope
             && frame["last"] == true
         {
-            return;
+            return frame;
         }
     }
 }
@@ -145,7 +172,7 @@ fn received(client: &mut Client) -> Value {
     frame
 }
 
-fn raw_request(client: &mut Client, id: u64, op: Value) {
+fn raw_request(client: &mut Client, id: u64, op: &Value) {
     writeln!(
         client.stream,
         "{}",
@@ -154,11 +181,20 @@ fn raw_request(client: &mut Client, id: u64, op: Value) {
     .unwrap();
 }
 
+fn read_outcome(client: &mut Client, id: u64) -> Value {
+    loop {
+        let frame = received(client);
+        if frame["frame"] == "response" && frame["id"] == id {
+            return frame["outcome"].clone();
+        }
+    }
+}
+
 fn ask_status(client: &mut Client, attachment: u64, id: u64) {
     raw_request(
         client,
         id,
-        json!({"op":"attachment_status","attachment":attachment}),
+        &json!({"op":"attachment_status","attachment":attachment}),
     );
 }
 
@@ -175,6 +211,12 @@ fn read_status(
             return (
                 frame["seq_gaps"].as_u64().unwrap(),
                 frame["deltas_evicted"].as_u64().unwrap(),
+            );
+        }
+        if frame["frame"] == "response" && frame["id"] == id {
+            assert_eq!(
+                frame["outcome"]["ok"]["answer"], "attachment_status_requested",
+                "{frame}"
             );
         }
         observe(&frame);

@@ -31,6 +31,15 @@ mod viewport;
 pub(super) use frames::{decode, encode, observes};
 pub(super) use viewport::prepare;
 
+pub(super) fn encode_transcript_scope_expired(id: RequestId) -> Result<String, wire::WireError> {
+    wire::encode_line(&HostFrameV13::Response {
+        id,
+        outcome: Outcome::Refused(Box::new(RequestRefusal::Draft(
+            RequestRefusalV13::CursorExpired,
+        ))),
+    })
+}
+
 /// Replay preparation does no paging and holds no reader slot or connection.
 #[cfg(test)]
 pub(crate) fn prepare_replay(

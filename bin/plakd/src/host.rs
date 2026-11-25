@@ -74,6 +74,8 @@ pub(crate) const HANDOFF_DEADLINE: Duration = Duration::from_secs(50);
 /// stop: the socket, the lock and the runtime.
 const STOP_MARGIN: Duration = Duration::from_secs(5);
 
+const STARTUP_ADVISORY_WINDOW: Duration = Duration::from_secs(90);
+
 fn host_read_limits() -> plakous_hosted::host_service::wire::HostReadLimits {
     console::admission_limits()
 }
@@ -319,6 +321,9 @@ fn serve_host(
     inherited: Option<reexec::Inherited>,
     gate: &mut UpgradeGate,
 ) -> CliResult<ProcessOutcome> {
+    let startup_deadline = inherited
+        .as_ref()
+        .map(|_| Instant::now() + STARTUP_ADVISORY_WINDOW);
     let host_arguments = Arc::new(upgrade::host_argv(command)?);
     // Arm reload before any startup I/O, even for a control-only host.
     let (runtime, reload, stop) = startup_runtime()?;
@@ -340,7 +345,6 @@ fn serve_host(
         upgrade::checkpoint::clear_cold_start(paths)?;
     }
     legacy_upgrade::refuse_unresolved(paths)?;
-    let paired_start = inherited.is_some();
     let stores_pending = store_revisions::pending(paths)?;
     let web_policy = command
         .web
@@ -368,8 +372,11 @@ fn serve_host(
         &environment,
         &binary,
     )?;
-    let inventory = if paired_start {
-        StartupInventory::Discover(Arc::clone(&opened.product))
+    let inventory = if let Some(deadline) = startup_deadline {
+        StartupInventory::Discover {
+            product: Arc::clone(&opened.product),
+            deadline,
+        }
     } else {
         StartupInventory::Known(opened.product.owed()?)
     };
@@ -521,6 +528,9 @@ impl RunningHost {
         ownership.state.running()?;
         ownership.home.running()?;
         gate.ready(paths)?;
+        if let Some(ready) = &startup.advisory_ready {
+            startup_ready(&host, ready, stop);
+        }
         // The web endpoint serves beside the control socket and stops with it.
         let web = web.map(|web| runtime.spawn(web.serve()));
         let upgrades = upgrade::Coordinator::start(
@@ -674,7 +684,7 @@ fn startup_scan(
 ) -> CliResult<StartupScan> {
     use std::sync::atomic::{AtomicBool, Ordering};
     let failed = Arc::new(AtomicBool::new(false));
-    let product = match inventory {
+    let (product, deadline) = match inventory {
         StartupInventory::Known(owed) => {
             scan(
                 host,
@@ -688,13 +698,15 @@ fn startup_scan(
                 worker: None,
                 failed,
                 ready: None,
+                advisory_ready: None,
             });
         }
-        StartupInventory::Discover(product) => product,
+        StartupInventory::Discover { product, deadline } => (product, deadline),
     };
     // Capture owed work before admitting any request that could change it.
     // Welcome and directory observations don't need this recovery inventory.
     let pause = host.pause_admissions()?;
+    host.publish_starting(deadline);
     let (host, services, runtime, scanning) = (
         Arc::clone(host),
         services.clone(),
@@ -702,6 +714,8 @@ fn startup_scan(
         Arc::clone(scanning),
     );
     let worker_failed = Arc::clone(&failed);
+    let advisory_ready = Arc::new(AtomicBool::new(false));
+    let worker_advisory_ready = Arc::clone(&advisory_ready);
     let (settled, ready) = tokio::sync::oneshot::channel();
     let worker = std::thread::Builder::new()
         .name("plakd-startup-scan".into())
@@ -722,6 +736,7 @@ fn startup_scan(
                 Some(pause)
             } else {
                 drop(pause);
+                startup_ready(&host, &worker_advisory_ready, stop);
                 let _ = settled.send(());
                 None
             };
@@ -732,12 +747,16 @@ fn startup_scan(
         worker: Some(worker),
         failed,
         ready: Some(ready),
+        advisory_ready: Some(advisory_ready),
     })
 }
 
 enum StartupInventory {
     Known(Vec<String>),
-    Discover(Arc<sessions::ProductSessions>),
+    Discover {
+        product: Arc<sessions::ProductSessions>,
+        deadline: Instant,
+    },
 }
 
 fn owed_at_start(
@@ -753,6 +772,18 @@ fn owed_at_start(
     product.owed()
 }
 
+fn startup_ready(
+    host: &SessionHost<crate::surface_protocol::PlakExtension>,
+    ready: &std::sync::atomic::AtomicBool,
+    stop: crate::web::StopProbe,
+) {
+    // The second arrival publishes: inventory reopened admission and the
+    // serving thread published its locks and readiness evidence.
+    if ready.swap(true, std::sync::atomic::Ordering::AcqRel) && !stop.stopped() {
+        host.publish_started();
+    }
+}
+
 type InventoryResult = (
     CliResult<()>,
     Option<plakous_hosted::host_service::wire::AdmissionPause>,
@@ -762,6 +793,7 @@ struct StartupScan {
     worker: Option<std::thread::JoinHandle<InventoryResult>>,
     failed: Arc<std::sync::atomic::AtomicBool>,
     ready: Option<tokio::sync::oneshot::Receiver<()>>,
+    advisory_ready: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl StartupScan {

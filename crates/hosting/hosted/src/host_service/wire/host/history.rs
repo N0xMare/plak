@@ -127,7 +127,10 @@ where
                 Some((owner, binding)) if *owner == attachment => {
                     binding.read(&mut self.out, id, root, request)?;
                 }
-                _ => self.write(&refused(RequestRefusal::TranscriptScopeExpired))?,
+                _ => match self.host.sessions.encode_transcript_scope_expired(id) {
+                    Ok(None) => self.write(&refused(RequestRefusal::NotAttached))?,
+                    line => super::write_encoded(&mut self.out, line)?,
+                },
             },
             None => self.write(&refused(RequestRefusal::NotAttached))?,
         }

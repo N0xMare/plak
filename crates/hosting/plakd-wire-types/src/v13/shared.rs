@@ -165,11 +165,7 @@ impl TryFrom<wire::RequestRefusal> for super::RequestRefusal {
     type Error = wire::RequestRefusal;
 
     fn try_from(refusal: wire::RequestRefusal) -> Result<Self, Self::Error> {
-        if matches!(
-            refusal,
-            wire::RequestRefusal::PlacementRefused { .. }
-                | wire::RequestRefusal::TranscriptScopeExpired
-        ) {
+        if matches!(refusal, wire::RequestRefusal::PlacementRefused { .. }) {
             return Err(refusal);
         }
         Ok(Self::Shared(Shared(refusal)))

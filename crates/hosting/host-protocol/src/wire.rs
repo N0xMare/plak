@@ -675,10 +675,6 @@ pub enum RequestRefusal {
     },
     /// No such attachment on this connection.
     NotAttached,
-    /// Internal result: the current attachment has no authority over this transcript.
-    #[serde(skip)]
-    #[schemars(skip)]
-    TranscriptScopeExpired,
     /// The session request could not open its session; the session the
     /// connection serves is unchanged.
     SessionUnavailable {

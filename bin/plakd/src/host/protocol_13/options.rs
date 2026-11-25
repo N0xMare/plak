@@ -66,9 +66,6 @@ pub(super) fn refusal(reason: wire::RequestRefusal) -> v13::RequestRefusal {
                 )),
             }
         }
-        Err(wire::RequestRefusal::TranscriptScopeExpired) => {
-            v13::RequestRefusal::Draft(v13::RequestRefusalV13::CursorExpired)
-        }
         Err(_) => v13::RequestRefusal::session_unavailable("session unavailable".into()),
     }
 }

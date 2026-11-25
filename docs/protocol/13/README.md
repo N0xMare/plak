@@ -96,11 +96,17 @@ minimum requirement. If the selected execution authority cannot report its
 own version evidence, the host does not substitute another machine's version.
 
 The bounded drain countdown uses the natural-drain deadline, not the
-verdict-barrier floor; an idle drain has no countdown. Round remaining
-time up to whole seconds, so zero means the deadline elapsed or there is no
-countdown. `startup` and `cross_key_upgrade` are reserved and are not emitted
-by this host. A bridge that cannot reach Welcome uses the typed discovery
-refusal.
+verdict-barrier floor; an idle drain has no countdown. A paired successor
+that already sent Welcome can report `starting` with reason `paired_upgrade` while
+recovering its inventory. Its countdown starts in the replacement image and
+does not inherit the source's drain deadline. Round remaining time up to
+whole seconds, so zero means the deadline elapsed or there is no countdown.
+The startup countdown is advisory: it cannot abandon a slow inventory or
+change the requester's separate readiness wait. Once inventory reopens
+admission and host readiness is recorded, the successor can report `running`
+with reason `paired_upgrade` and no countdown. `startup` and
+`cross_key_upgrade` are reserved.
+A bridge that cannot reach Welcome uses the typed discovery refusal.
 
 Codex template writes use `{"field":"service_tier","value":"fast"}` or
 `"ultrafast"`; `null` removes the named tier for Standard. Template reads,

@@ -6,7 +6,7 @@ use super::{
     ProtocolExtension, RequestRefusal, SessionRow, StoredSessionView,
 };
 use super::{ClientInput, DirectoryProjection, PreparedViewport, SessionHost, ViewportRevision};
-use plakous_host_protocol::wire::{ClientFrame, WireError, decode_line, encode_line};
+use plakous_host_protocol::wire::{ClientFrame, RequestId, WireError, decode_line, encode_line};
 
 /// What a host of many sessions needs of its product's stores.
 pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
@@ -63,6 +63,14 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
         HostFrame<P>: serde::Serialize,
     {
         encode_line(frame).map(Some)
+    }
+
+    /// Project the refusal for a transcript read outside the active attachment's scope.
+    ///
+    /// # Errors
+    /// The refusal could not be encoded.
+    fn encode_transcript_scope_expired(&self, _id: RequestId) -> Result<Option<String>, WireError> {
+        Ok(None)
     }
 
     /// Native state identity; an ephemeral host has no persisted state key.

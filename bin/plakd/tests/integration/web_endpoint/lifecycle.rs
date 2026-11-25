@@ -225,10 +225,17 @@ fn web_welcome_and_console_reads_do_not_wait_for_owed_sessions() {
     );
     let _notices = notices_until_close(&mut source, &old["host_generation"]);
     let mut socket = upgrade(&web, &login);
-    assert_ne!(
-        directory(&mut socket)["host_generation"],
-        old["host_generation"]
-    );
+    let successor = directory(&mut socket);
+    assert_ne!(successor["host_generation"], old["host_generation"]);
+    let starting = next_frame(&mut socket);
+    assert_eq!(starting["frame"], "host_lifecycle", "{starting}");
+    assert_eq!(starting["host_generation"], successor["host_generation"]);
+    assert_eq!(starting["phase"], "starting");
+    assert_eq!(starting["reason"], "paired_upgrade");
+    assert!(matches!(
+        starting["seconds_remaining"].as_u64(),
+        Some(1..=90)
+    ));
     assert_owed_directory(&fixture, &mut socket, &root);
     socket.send(Message::text(json!({
         "frame": "request", "id": 2, "op": {"op": "host", "request": {"request": "config_get"}}
@@ -248,6 +255,12 @@ fn web_welcome_and_console_reads_do_not_wait_for_owed_sessions() {
     std::fs::remove_file(gate).unwrap();
     std::fs::write(release, []).unwrap();
     assert!(requester.wait().unwrap().success());
+    let running = next_frame(&mut socket);
+    assert_eq!(running["frame"], "host_lifecycle", "{running}");
+    assert_eq!(running["host_generation"], successor["host_generation"]);
+    assert_eq!(running["phase"], "running");
+    assert_eq!(running["reason"], "paired_upgrade");
+    assert_eq!(running["seconds_remaining"], 0);
     attach(&mut socket, &root, 4);
     drop(socket);
     interrupt_and_wait(&mut web);

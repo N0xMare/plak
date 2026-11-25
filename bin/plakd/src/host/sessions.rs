@@ -420,6 +420,13 @@ impl HostSessions<PlakExtension> for ProductSessions {
         })
     }
 
+    fn encode_transcript_scope_expired(
+        &self,
+        id: plakous_host_protocol::wire::RequestId,
+    ) -> Result<Option<String>, plakous_host_protocol::wire::WireError> {
+        super::protocol_13::encode_transcript_scope_expired(id).map(Some)
+    }
+
     fn prepare_viewport(
         &self,
         session: &str,

@@ -119,7 +119,9 @@ fn draft_refusal(
     };
     use plakous_host_protocol::wire::{self, RequestRefusal};
     match reason {
-        RequestRefusalV13::CursorExpired => RequestRefusal::TranscriptScopeExpired,
+        RequestRefusalV13::CursorExpired => RequestRefusal::Unsupported {
+            detail: "the transcript is outside the current attachment".into(),
+        },
         RequestRefusalV13::PlacementRefused { runner, reason } => {
             RequestRefusal::PlacementRefused {
                 runner,

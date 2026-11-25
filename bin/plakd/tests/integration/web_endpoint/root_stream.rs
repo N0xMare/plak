@@ -179,6 +179,75 @@ fn root_repair_preserves_a_streaming_prefix_on_the_web() {
     assert!(repaired_prefix, "{}", trace.join("\n"));
 }
 
+#[test]
+fn coherent_root_repair_keeps_the_token_on_the_web() {
+    const ANSWER: &str = "one settled response";
+    let fixture = Fixture::new(&json!({
+        "version":1,"steps":[{"output":{"text":ANSWER}}]
+    }));
+    let mut web = start(&fixture);
+    let mut socket = upgrade(&web, &cookie(&web));
+    let root = hello(&mut socket);
+    let attachment = attach(&mut socket, &root, 1);
+    let mut view = KeyedRoot::default();
+    let revision = loop {
+        let frame = view.read(&mut socket);
+        if frame["frame"] == "snapshot" && frame["last"] == true {
+            break frame["revision"].clone();
+        }
+    };
+    send(
+        &mut socket,
+        &ClientFrame::Request {
+            id: 2,
+            op: Op::Intent {
+                attachment,
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
+                intent: SessionIntent::Prompt(Draft::from("write a reply")),
+                blobs: Vec::new(),
+            },
+        },
+    );
+    loop {
+        let frame = view.read(&mut socket);
+        if frame["observation"]["kind"] == "set_busy"
+            && frame["observation"]["body"] == false
+            && assistant_text(view.transcript.items().values()) == ANSWER
+        {
+            break;
+        }
+    }
+    send(
+        &mut socket,
+        &ClientFrame::Request {
+            id: 3,
+            op: Op::Intent {
+                attachment,
+                client_id: None,
+                intent: SessionIntent::ResyncTranscript {
+                    scope: TranscriptScope::Root,
+                },
+                blobs: Vec::new(),
+            },
+        },
+    );
+    loop {
+        let frame = view.read(&mut socket);
+        if frame["frame"] == "snapshot" && frame["last"] == true {
+            assert_eq!(frame["attachment"], attachment);
+            assert_eq!(
+                frame["revision"]["host_generation"],
+                revision["host_generation"]
+            );
+            assert_eq!(frame["revision"]["token"], revision["token"]);
+            assert_eq!(assistant_text(view.transcript.items().values()), ANSWER);
+            break;
+        }
+    }
+    drop(socket);
+    interrupt_and_wait(&mut web);
+}
+
 fn trace_through_settlement(socket: &mut WebSocket<UnixStream>, trace: &mut Vec<String>) {
     let complete = format!("{PREFIX}{MIDDLE}{TAIL}");
     loop {
