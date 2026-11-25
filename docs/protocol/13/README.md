@@ -14,6 +14,74 @@ and [host frames](../../../crates/hosting/plakd-wire-types/tests/fixtures/protoc
 are NDJSON examples, checked by the wire-types tests. They illustrate
 independent scenarios, not a single connection capture.
 
+## Changes from protocol 12
+
+The rows below follow the decoder's replaced cases, including cases that keep
+their tag but no longer accept a v12 body. Here `?` means optional; null is
+written explicitly. Upgrade the entire codec at once: the host serves only
+protocol 13, and the v12 shapes are not a fallback.
+Send `hello.proto: 13` and require `welcome.proto: 13`. The handshake shapes
+are unchanged; a v12 Hello gets `frame: refused`, `kind: version_mismatch`.
+
+| Layer and exact tag | Protocol 12 | Protocol 13 | Client action |
+| --- | --- | --- | --- |
+| Client `frame: request` | `{id, op}` with the v12 operation union | Same envelope with the v13 `op` union | Keep request correlation; switch the operation encoder. |
+| `op: attach` | `{node}` | `{node, retained?}`, with `retained: {host_generation, revision, token}` | Offer only an exact viewport still held for this node; otherwise omit it. |
+| `op: host` | `{request}` with v12 product requests | Same wrapper with the v13 product request union | Update the nested `request` and template change codec. |
+| Product `request: template_put` | `{id, changes, if_match, confirmation}`, including the boolean Fast change | Same envelope; `changes` uses the v13 union | Preserve etag and confirmation; send named tier changes. |
+| Template change `field: fast_mode` | `{field: "fast_mode", value: boolean}` | `{field: "service_tier", value: "fast" or "ultrafast" or null}` | Convert false to null and true to `fast`; never send `fast_mode`. |
+| Host `frame: response` | `{id, outcome: {ok: Answer} or {refused: RequestRefusal}}` | Same wrapper with the v13 answer and refusal unions | Correlate by `id`; dispatch using the updated union. |
+| `answer: attached` | `{attachment}` | `{attachment, transcript}`: `{mode: "first_page"}` or `{mode: "replay", from, to}` | Replace from the first page, or apply the patch chain only to the exact `from` viewport. |
+| `answer: sessions` | `{rows}` with v12 directory rows | Same wrapper with the v13 rows used by `directory` | Decode both list and watch with one v13 row codec. |
+| `answer: options` | `{options}` with v12 runner status, profile and template rows | Same envelope; runners, profiles, templates and workspace choices use the v13 shapes | Update both top-level and workspace-nested choices and refusals. |
+| `answer: host` | `{response}` with v12 product responses | Same wrapper with the v13 product response union | Decode the nested `response` tag; don't treat product refusals as transport refusals. |
+| `refusal: placement_refused` | `{runner, reason}` using the v12 placement reason | Same wrapper with the v13 reason union | Check the nested `reason` tag rather than parsing a message. |
+| Placement `reason: runner_unreachable` | `{phase: string, timed_out}`, including flat `reconcile_*` strings | `{phase: {phase, subphase?}, timed_out}`; reconciliation is `phase: "reconcile"` with optional `store`, `obsolete_lines`, `terminals`, `jobs`, `stops` or `foreground` | Decode the object in options, refusals and directory status; keep the timeout bit. |
+| Host `frame: event` | `{attachment, seq, class, observation, client_id?, blobs}` with v12 observations | Same envelope with the v13 observation union | Keep sequencing and blob association; replace the observation codec. |
+| Host `frame: snapshot` | `{attachment, scope, schema, revision: integer, page, last, items}` | Drops `schema`; `revision` is `{host_generation, revision, token}`, and `part` replaces `page`; adds `has_older`, `older_rows`, `older_bytes`, `older_cursor?`, `live_rows` and optional item `truncated_bytes` | Assemble all parts of the newest logical page before applying it. Merge live lengths by row key and request older pages by cursor. |
+| Host `frame: directory` | `{attachment, seq, snapshot, rows}` using v12 rows | Same envelope with v13 rows | Keep snapshot/merge semantics; replace rows by session ID using the new fields below. |
+| Directory row `needs_operator` | Boolean | `attention`: array of typed `{reason, since, ...}` entries | Render by reason, not by a single operator flag; `interrupted_by_upgrade` is advisory. |
+| Directory row `live_work.children` | Live count included parked children | Running-work count excludes parked children | Use `held_children` for those awaiting consent, not the running count. |
+| Host `frame: options_progress` | `{request_id, runner, phase, row}`: nullable flat phase and v12 runner options | Same wrapper with nullable phase object and v13 runner options | Correlate as before; null still means no phase yet, not a failure. |
+| Host `frame: host_lifecycle` | `{host_generation, phase, reason, target?, retry_after_ms?}` | Adds required `seconds_remaining`, optional `deadline_at`, phase `starting`, and reason `startup` | Display the host's countdown; never use it for admission or replay. |
+| Observation `kind: assistant_delta` | Body was raw assistant text | Removed; admitted live text uses keyed `transcript_stream` | Append by row key and byte offset, not to a global text buffer. |
+| Observation `kind: reasoning_delta` | `{location_key, text}` | Removed; admitted live reasoning uses keyed `transcript_stream` | Reconcile thinking rows by key through the baseline and patches. |
+| Observation `kind: transcript_stream` | `{scope, delta}` with `assistant`, `assistant_done`, `reasoning` or `tool` | Text body is `{row, offset, end, text}` in attachment scope; tools move to `transcript_tool_stream {scope, tool}`. No streamed `assistant_done` delta. | Check UTF-8 byte offsets and seal from keyed patches or baseline; route tool previews separately. |
+| Observation `kind: presentation_snapshot` | Snapshot body inside an observation | Not an observation in 13; use the `snapshot` frame | Assemble the frame parts rather than waiting for a snapshot event. |
+| Observation `kind: extension` | Product observation union | Same wrapper; `profiles` and `session_profile` use v13 rows | Decode those two bodies with the new profile role shape; other tags are shared. |
+| Extension `profiles` | `{rows, current, diagnostics}` with v12 roles and differences | Same wrapper with v13 roles and differences | Read named tiers and template identifiers instead of inferring either from the label. |
+| Extension `session_profile` | One v12 profile row, available via profile/chrome reads | One v13 profile row, also kept in root attach state and refreshed when the switch lands | Initialize and replace from the state event; don't round trip `list_profiles` for it. |
+| Profile role `fast`; difference `root_fast` | `fast: boolean`; `root_fast: {session: boolean}` | `service_tier: "fast" or "ultrafast" or null`; `root_service_tier: {session}` with the same values | Preserve the distinction between the two named tiers and Standard. |
+| Observation `kind: template_readiness`; template row `tier`, `unready_reason` | Rows had a string `tier` and nullable reason text | Rows have nullable `service_tier` and tagged `readiness`: `ready` or `not_ready {reason}` for evaluated rows; `not_evaluated` for definition rows | Treat definition reads as unevaluated. Use the observation for the evaluated verdict. |
+| Observation `kind: usage_limits` | Balance lines and amount entries were formatted `{label, value}` | Amount entries and balances use `{currency, used_micros?, remaining_micros?, cap_micros?, display}`; percentages unchanged | Consume micro-units; missing is not zero and `display` is not parseable data. |
+| Product `response: accounts_usage` | Per-account `allowance.view` used v12 meters and balances | The allowance view uses the same typed money as `usage_limits`; recorded usage is unchanged | Share the money codec between console responses and attachment observations. |
+| Product `response: refused` | For a Changes version mismatch, `workspace_read_failed` with `cause: "vcs_unavailable"` | With observed version evidence, `reason: "vcs_unsupported_version"` carries `found` and `required`; the generic refusal can still occur | Show the version remedy only when the selected authority reported it. |
+| Product `response: profiles_list` | `{etag, current, rows, diagnostics, page}` with v12 profile summaries | Same wrapper; summaries use v13 roles and differences | Decode each summary with the new profile codec. |
+| Product `response: profiles_get` | `{profile}` with a v12 summary | Same wrapper; the definition body is unchanged and the summary is v13 | Use the resolved `template` field for identity, not the display `label`. |
+| Product `response: templates_list` | `{etag, rows, diagnostics, page}` with v12 template summaries and a prose `unready_reason` for this read | Same wrapper; summaries use nullable `service_tier` and `readiness: {state: "not_evaluated"}` | Don't parse a readiness sentence or infer readiness from a definition read. |
+| Product `response: templates_get`; template body `extra` | `{template}` whose body carried the legacy nullable `extra` tier and declared `tools` | Body has nullable `service_tier` in place of `extra`, and keeps declared `tools` alongside `resolved_tools` | Use named tiers and use the resolved list to explain tool availability. |
+
+Additions that don't replace a v12 tag or field:
+
+- `op: older_history`, `answer: history_started`, `frame: history_page` and
+  `refusal: cursor_expired`: prepend completed cursor pages; on expiry, attach
+  for a fresh baseline.
+- `op: read_transcript_row` and `answer: transcript_row`: fetch bounded body
+  slices by row and UTF-8 byte offset.
+- `op: attachment_status`, `answer: attachment_status_requested` and
+  `frame: attachment_status`: consume the counters; only an addressed
+  status frame includes `request_id`.
+- `frame: blob_refused`: discard that staged blob and don't use its ID in
+  an intent.
+- Directory row `preview`, `cost_root`, `cost_tree` and `superseded_by`:
+  display the available facts and use the successor ID instead of treating a
+  predecessor as the current session.
+- Profile role `template`: use the exact name; `label` remains display text.
+  Template body `resolved_tools`: render the tool names and their origins
+  without treating the declared `tools` list as the runtime menu.
+
+## Reading the stream
+
 Attach starts with the newest whole-turn page (`snapshot`); rows inside a
 page are in ascending transcript order. Assemble all parts of a page before
 applying it, then prepend each completed older page. Page totals and the
