@@ -69,8 +69,9 @@ Runner reconciliation uses `phase: reconcile` with one of `store`,
 `subphase`. Progress, directory status and placement refusals share the
 same phase vocabulary. A broad reconciliation marker does not name a
 subphase on its own. Directory `live_work.children` counts pending, running
-and sealing descendants, excluding parked children. `held_children` counts
-descendants waiting for consent after host loss, not also in `children`.
+and sealing descendants, excluding parked children, and interrupted
+descendants with automatic continuations. `held_children` counts only
+owner-loss holds waiting for consent, not also in `children`.
 `processes` counts running and stopping process views.
 
 Console and attached allowance views use the same provider amounts. The host
