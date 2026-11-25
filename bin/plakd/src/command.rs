@@ -435,6 +435,7 @@ pub(crate) enum Command {
     HostUpgrade {
         expect_binary: String,
         drain: Option<HostDrain>,
+        backup_store: bool,
         inspection: Option<crate::deploy::DeployRunnerInspection>,
     },
     /// A byte-transparent bridge to the home's existing host.

@@ -1,5 +1,6 @@
 //! Same-user, instance-bound coordination for same-key host handoff.
 
+mod backup;
 mod bindings;
 mod progress;
 mod qualification;
@@ -26,7 +27,7 @@ use crate::{CliFailure, CliResult, ProcessOutcome};
 
 const PROBE_BOUND: Duration = Duration::from_secs(30);
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Eq, PartialEq, Serialize)]
 struct Identity {
     protocol: u32,
     key: String,
@@ -278,6 +279,7 @@ pub(super) fn request(
     services: &Services,
     expected: &str,
     drain: crate::command::HostDrain,
+    backup_store: bool,
     inspection: Option<DeployRunnerInspection>,
 ) -> CliResult<ProcessOutcome> {
     if !crate::carry::upgrade::binary_id_valid(expected)
@@ -301,18 +303,7 @@ pub(super) fn request(
         requester::prove_deploy_source(paths, inspection)?;
     }
     super::store_revisions::rehearse_runtime(paths)?;
-    let mut stream = crate::wire_transport::hosts::socket_until(&socket(paths), Instant::now() + PROBE_BOUND)
-        .map_err(|_| CliFailure::new("host_upgrade_unsupported_source: source has no supported upgrade coordinator; retain its executable and settle it using its own lifecycle"))?;
-    stream
-        .set_read_timeout(
-            drain
-                .duration()
-                .map(|duration| duration + Duration::from_secs(600)),
-        )
-        .map_err(io_failure)?;
-    stream
-        .set_write_timeout(Some(PROBE_BOUND))
-        .map_err(io_failure)?;
+    let mut stream = connect(paths, Some(PROBE_BOUND))?;
     let identity: Identity = read(&stream)?;
     if identity.protocol != crate::carry::upgrade::PROTOCOL {
         return Err(CliFailure::new(
@@ -339,6 +330,24 @@ pub(super) fn request(
     let destination =
         std::fs::canonicalize(std::env::current_exe().map_err(io_failure)?).map_err(io_failure)?;
     process::verify_image(&destination, expected)?;
+    if backup_store {
+        drop(stream);
+        let backup = backup::create(paths)?;
+        eprintln!("host upgrade: store backup saved at {}", backup.display());
+        stream = connect(paths, Some(PROBE_BOUND))?;
+        if read::<Identity>(&stream)? != identity {
+            return Err(CliFailure::new(
+                "host upgrade source identity changed during backup; no upgrade requested",
+            ));
+        }
+    }
+    stream
+        .set_read_timeout(
+            drain
+                .duration()
+                .map(|duration| duration + Duration::from_secs(600)),
+        )
+        .map_err(io_failure)?;
     let prior_instance = identity.instance.clone();
     write(
         &mut stream,
@@ -356,6 +365,16 @@ pub(super) fn request(
         },
     )?;
     finish_request(paths, expected, &prior_instance, &stream)
+}
+
+fn connect(paths: &PlakPaths, timeout: Option<Duration>) -> CliResult<UnixStream> {
+    let stream = crate::wire_transport::hosts::socket_until(&socket(paths), Instant::now() + PROBE_BOUND)
+        .map_err(|_| CliFailure::new("host_upgrade_unsupported_source: source has no supported upgrade coordinator; retain its executable and settle it using its own lifecycle"))?;
+    stream.set_read_timeout(timeout).map_err(io_failure)?;
+    stream
+        .set_write_timeout(Some(PROBE_BOUND))
+        .map_err(io_failure)?;
+    Ok(stream)
 }
 
 fn finish_request(

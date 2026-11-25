@@ -619,6 +619,9 @@ enum HostAction {
         /// Same-key boundary drain: default 60s; 0, integer ms/s/m/h, or idle.
         #[arg(long)]
         drain: Option<crate::command::HostDrain>,
+        /// Save a private, size-bounded SQLite backup before requesting handoff.
+        #[arg(long)]
+        backup_store: bool,
         #[arg(long, hide = true, requires = "inspect_source")]
         inspect_runner: Vec<String>,
         #[arg(long, hide = true, requires = "inspect_runner")]

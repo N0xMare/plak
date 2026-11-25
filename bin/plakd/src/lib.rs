@@ -571,12 +571,14 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         Command::HostUpgrade {
             expect_binary,
             drain,
+            backup_store,
             inspection,
         } => {
             return host::upgrade(
                 &services,
                 &expect_binary,
                 drain.unwrap_or_default(),
+                backup_store,
                 inspection,
             );
         }

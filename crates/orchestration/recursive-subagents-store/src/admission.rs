@@ -1,7 +1,7 @@
 //! Single-file SQLite admission shared by the product and tree stores.
 
 mod revision;
-pub use revision::{BackedUpUpgrade, LockedUpgrade};
+pub use revision::{BackedUpUpgrade, LockedUpgrade, copy_snapshot_bounded};
 
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) mod test_registry;

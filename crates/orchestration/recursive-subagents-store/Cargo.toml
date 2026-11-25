@@ -21,7 +21,7 @@ neutral = true
 # Repository-only commit tracing; never selected by a default or maintainer build.
 plakous-store = { workspace = true, optional = true }
 plakous-recursive-subagents.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, features = ["backup"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha2.workspace = true

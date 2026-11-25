@@ -82,9 +82,10 @@ pub(crate) fn upgrade(
     services: &Services,
     expect_binary: &str,
     drain: crate::command::HostDrain,
+    backup_store: bool,
     inspection: Option<crate::deploy::DeployRunnerInspection>,
 ) -> CliResult<ProcessOutcome> {
-    upgrade::request(services, expect_binary, drain, inspection)
+    upgrade::request(services, expect_binary, drain, backup_store, inspection)
 }
 
 fn startup_runtime() -> CliResult<(

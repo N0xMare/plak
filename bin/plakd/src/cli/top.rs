@@ -452,6 +452,7 @@ impl TopCommand {
                     Some(HostAction::Upgrade {
                         expect_binary,
                         drain,
+                        backup_store,
                         inspect_runner,
                         inspect_source,
                         wait,
@@ -473,6 +474,7 @@ impl TopCommand {
                     expect_binary: expect_binary
                         .ok_or_else(|| "expected binary is required".to_owned())?,
                     drain,
+                    backup_store,
                     inspection: inspect_source.map(|source_instance| {
                         crate::deploy::DeployRunnerInspection {
                             source_instance,

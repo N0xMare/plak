@@ -1,9 +1,10 @@
-use std::fs::{self, DirBuilder, File, Permissions};
-use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
+use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use rusqlite::{Connection, Transaction, TransactionBehavior};
+use rusqlite::backup::{Backup, StepResult};
+use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 
 use super::{AdmissionError, Revision, Schema, Status};
 
@@ -125,8 +126,7 @@ impl Schema {
             .and_then(|_| {
                 let file = File::open(&path)
                     .map_err(|_| self.unavailable("copy file could not be opened"))?;
-                file.set_permissions(Permissions::from_mode(0o600))
-                    .and_then(|()| file.sync_all())
+                sync_copy(&file)
                     .map_err(|_| self.unavailable("copy file could not be protected and synced"))
             });
         if result.is_err() {
@@ -165,6 +165,82 @@ impl Schema {
             .pragma_update(None, "user_version", self.version())
             .map_err(|error| self.sql_error(&error, "could not record schema revision"))
     }
+}
+
+fn sync_copy(file: &File) -> std::io::Result<()> {
+    file.set_permissions(Permissions::from_mode(0o600))?;
+    file.sync_all()
+}
+
+/// Copy a pinned read-only SQLite snapshot to a new private, synced file.
+/// The caller stages the file in a private directory and owns cleanup on error.
+///
+/// # Errors
+/// Refuses unsupported inputs, lock contention, budget or deadline exhaustion,
+/// and I/O errors. An absent source uses no budget and creates no file.
+pub fn copy_snapshot_bounded(
+    source: &Path,
+    destination: &Path,
+    remaining: u64,
+    deadline: Instant,
+) -> Result<u64, AdmissionError> {
+    let unavailable = |detail: &str| AdmissionError::Unavailable(detail.to_owned());
+    match source.symlink_metadata() {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Ok(meta) if meta.is_file() => {}
+        _ => return Err(unavailable("backup source is not a regular file")),
+    }
+    let reader = Connection::open_with_flags(
+        source,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|_| unavailable("could not open backup source"))?;
+    let snapshot = reader
+        .unchecked_transaction()
+        .map_err(|_| unavailable("could not start backup snapshot"))?;
+    let bytes: i64 = snapshot
+        .query_row(
+            "SELECT page_count * page_size FROM pragma_page_count, pragma_page_size",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| unavailable("could not read backup source size"))?;
+    let bytes = u64::try_from(bytes).map_err(|_| unavailable("invalid backup source size"))?;
+    if bytes > remaining {
+        return Err(unavailable("combined SQLite backup exceeds its byte bound"));
+    }
+    let file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(destination)
+        .map_err(|_| unavailable("could not create backup file"))?;
+    let mut writer =
+        Connection::open(destination).map_err(|_| unavailable("could not open backup file"))?;
+    {
+        let backup = Backup::new(&snapshot, &mut writer)
+            .map_err(|_| unavailable("could not start SQLite backup"))?;
+        loop {
+            if Instant::now() >= deadline {
+                return Err(unavailable("SQLite backup exceeded its time bound"));
+            }
+            match backup.step(256) {
+                Ok(StepResult::Done) => break,
+                Ok(StepResult::More) => {}
+                _ => return Err(unavailable("could not copy SQLite backup snapshot")),
+            }
+        }
+    }
+    writer
+        .close()
+        .map_err(|_| unavailable("could not close backup file"))?;
+    if file.metadata().map(|meta| meta.len()).ok() != Some(bytes) {
+        return Err(unavailable(
+            "SQLite backup size differs from its pinned source",
+        ));
+    }
+    sync_copy(&file).map_err(|_| unavailable("could not sync backup file"))?;
+    Ok(bytes)
 }
 
 /// A stopped-store revision path with its exclusive SQLite lock held.
