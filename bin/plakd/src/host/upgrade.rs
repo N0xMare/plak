@@ -311,7 +311,7 @@ pub(super) fn request(
     if let Some(inspection) = &inspection {
         requester::prove_deploy_source(paths, inspection)?;
     }
-    super::store_revisions::rehearse_runtime(paths)?;
+    let bootstrap = super::store_revisions::rehearse_runtime(paths)?.unwrap_or_default();
     let stream = connect(paths, Some(PROBE_BOUND))?;
     let identity: Identity = read(&stream)?;
     drop(stream);
@@ -381,7 +381,13 @@ pub(super) fn request(
         stores,
         preservation: captured.elapsed(),
         bindings: measured_bindings,
-        revisions_pending: super::store_revisions::pending(paths)?,
+        stopped: bootstrap.saturating_add(
+            if super::store_revisions::store_revisions_pending(paths)? {
+                timing::REVISION_BACKUP
+            } else {
+                Duration::ZERO
+            },
+        ),
     }
     .check()?;
     let staged = ticket.stage(paths, &baseline, &bindings)?;

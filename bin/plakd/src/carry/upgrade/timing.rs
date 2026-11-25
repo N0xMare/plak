@@ -15,14 +15,16 @@ pub(crate) const PREFLIGHT: Duration = Duration::from_secs(
 );
 // Qualification and mandatory joins, plus the capture under the source holds.
 pub(crate) const SOURCE_REPLY: Duration = Duration::from_secs(600 + CAPTURE.as_secs());
-// Includes stopped revisions other than the validated backup and startup.
+// Host open and startup after the gate, and stopped revisions other than
+// the validated backup.
+pub(crate) const STARTUP: Duration = Duration::from_secs(300);
 pub(crate) const SUCCESSOR: Duration = Duration::from_secs(
     ADMISSION.as_secs()
         + STORE.as_secs()
         + CAPTURE.as_secs()
         + REVISION_BACKUP.as_secs()
         + BINDINGS.as_secs()
-        + 300,
+        + STARTUP.as_secs(),
 );
 
 pub(crate) fn deploy_request(drain: u32) -> Duration {

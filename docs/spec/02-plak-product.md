@@ -6168,18 +6168,20 @@ It projects the gate from checks it already runs against the live stores
 before the request: each store's integrity check, its preservation capture
 (standing for the destination's capture and comparison), and one
 destination `--gating` binding inspection, on rehearsed copies when product
-or tree revisions are pending. It prints `gate projection <phase>=<ms>...
-projected_ms=<ms> successor_ms=<ms>`. The projected gate is the admission
-wait, plus the revision backup bound when stopped-store revisions are
-pending, plus every measured check run serially; the concurrent gate cannot
-take longer. The requester refuses with
+or tree revisions are pending. The stopped-store work is the measured
+runtime bootstrap rehearsal, when a bootstrap is pending, plus the revision
+backup bound when product or tree revisions are pending. It prints `gate
+projection <phase>=<ms>... stopped=<ms> projected_ms=<ms> budget_ms=<ms>`.
+The projected gate is the admission wait, plus the stopped-store work, plus
+every measured check run serially; the concurrent gate is bounded by that
+serial sum. The budget is the successor bound less its reserve for host
+startup after the gate. The requester refuses with
 `host_upgrade_gate_projection_refused`, while the source keeps serving and
 before any request, when a measured check takes more than half of its own
-post-surrender bound or twice the projected gate exceeds the successor
-bound. A destination binding inspection that fails before surrender also
+post-surrender bound or the projected gate is more than half of the
+budget. A destination binding inspection that fails before surrender also
 refuses, except while a runtime bootstrap is pending, which only the
-destination's stopped startup applies; that projection omits bindings. The
-bounds themselves do not change.
+destination's stopped startup applies; that projection omits bindings.
 
 The existing root owner freezes outer actions, the hub defers host-initiated
 wakes and recovery claims, and each admitted root/child driver

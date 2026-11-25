@@ -101,10 +101,11 @@ pub(super) fn rehearse_for_service(paths: &PlakPaths, service: &Path) -> CliResu
 
 /// The destination requester runs this before sending a request, even when
 /// the live coordinator predates the runtime shape change.
-pub(super) fn rehearse_runtime(paths: &PlakPaths) -> CliResult<()> {
+/// Returns how long the rehearsal took, if one was needed.
+pub(super) fn rehearse_runtime(paths: &PlakPaths) -> CliResult<Option<std::time::Duration>> {
     let runtime = paths.runtime_database();
     if !runtime_bootstrap_pending(&runtime)? {
-        return Ok(());
+        return Ok(None);
     }
     eprintln!("host upgrade: qualifying runtime store bootstrap on a detached copy");
     let directory =
@@ -114,11 +115,17 @@ pub(super) fn rehearse_runtime(paths: &PlakPaths) -> CliResult<()> {
     crate::commands::runner::private_directory(&stores)?;
     let start = std::time::Instant::now();
     rehearse_runtime_bootstrap(&runtime, &stores.join("runtime.sqlite3"))?;
+    let elapsed = start.elapsed();
     eprintln!(
         "host upgrade: runtime store bootstrap qualification completed in {} ms",
-        start.elapsed().as_millis()
+        elapsed.as_millis()
     );
-    Ok(())
+    Ok(Some(elapsed))
+}
+
+/// Product or tree revisions, which the stopped startup applies after a backup.
+pub(super) fn store_revisions_pending(paths: &PlakPaths) -> CliResult<bool> {
+    revisions_pending(paths)
 }
 
 pub(super) fn rehearse(paths: &PlakPaths, scratch: &Path) -> CliResult<()> {

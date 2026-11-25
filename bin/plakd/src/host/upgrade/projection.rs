@@ -16,7 +16,9 @@ pub(super) struct Measured {
     pub(super) stores: Vec<(&'static str, Duration)>,
     pub(super) preservation: Duration,
     pub(super) bindings: Option<Duration>,
-    pub(super) revisions_pending: bool,
+    /// The measured runtime bootstrap rehearsal, plus the revision backup
+    /// bound when product or tree revisions are pending.
+    pub(super) stopped: Duration,
 }
 
 impl Measured {
@@ -34,25 +36,20 @@ impl Measured {
         components
     }
 
-    /// The concurrent gate cannot take longer than its checks run serially,
-    /// after the admission wait and any stopped-store revision backup.
+    /// The admission wait, the stopped-store work, then the checks. The
+    /// concurrent gate is bounded by their serial sum.
     fn projected(&self) -> Duration {
-        let reserved = timing::ADMISSION
-            + if self.revisions_pending {
-                timing::REVISION_BACKUP
-            } else {
-                Duration::ZERO
-            };
-        self.components()
-            .iter()
-            .fold(reserved, |total, (_, elapsed, _)| {
-                total.saturating_add(*elapsed)
-            })
+        self.components().iter().fold(
+            timing::ADMISSION.saturating_add(self.stopped),
+            |total, (_, elapsed, _)| total.saturating_add(*elapsed),
+        )
     }
 
     pub(super) fn check(&self) -> CliResult<()> {
         let components = self.components();
         let projected = self.projected();
+        // Post-gate startup keeps its own reserve of the successor bound.
+        let budget = timing::SUCCESSOR.saturating_sub(timing::STARTUP);
         let mut line = components
             .iter()
             .map(|(phase, elapsed, _)| format!("{phase}={}", millis(*elapsed)))
@@ -60,19 +57,20 @@ impl Measured {
         if self.bindings.is_none() {
             line.push("bindings=unmeasured".into());
         }
+        line.push(format!("stopped={}", millis(self.stopped)));
         eprintln!(
-            "host upgrade: gate projection {} projected_ms={} successor_ms={}",
+            "host upgrade: gate projection {} projected_ms={} budget_ms={}",
             line.join(" "),
             millis(projected),
-            millis(timing::SUCCESSOR)
+            millis(budget)
         );
         for (phase, elapsed, bound) in &components {
             if elapsed.saturating_mul(MARGIN) > *bound {
                 return Err(refusal(phase, *elapsed, *bound));
             }
         }
-        if projected.saturating_mul(MARGIN) > timing::SUCCESSOR {
-            return Err(refusal("gate", projected, timing::SUCCESSOR));
+        if projected.saturating_mul(MARGIN) > budget {
+            return Err(refusal("gate", projected, budget));
         }
         Ok(())
     }
@@ -110,7 +108,7 @@ mod tests {
             ],
             preservation: Duration::from_secs(preservation),
             bindings: bindings.map(Duration::from_secs),
-            revisions_pending: false,
+            stopped: Duration::ZERO,
         }
     }
 
@@ -135,24 +133,36 @@ mod tests {
         );
         assert!(refused(&measured(46, 1, Some(1))).contains(": store_health_runtime measured"));
         assert!(refused(&measured(1, 61, Some(1))).contains(": preservation measured"));
-        let total = Measured {
-            stores: (0..6)
-                .map(|_| ("runtime", Duration::from_secs(45)))
-                .collect(),
-            ..measured(1, 60, Some(60))
+    }
+
+    #[test]
+    fn the_whole_gate_refuses_although_each_check_fits_its_own_bound() {
+        // Every check is within half of its bound, but the serial sum with
+        // the admission wait is more than half of the pre-startup budget.
+        let near = Measured {
+            stores: vec![
+                ("product", Duration::from_secs(45)),
+                ("tree", Duration::from_secs(45)),
+                ("runtime", Duration::from_secs(45)),
+            ],
+            ..measured(45, 60, Some(60))
         };
         assert!(
-            refused(&total).contains(": gate measured"),
+            refused(&near).contains(": gate measured"),
             "{}",
-            refused(&total)
+            refused(&near)
         );
+        let fits = measured(20, 20, Some(5));
+        assert!(fits.check().is_ok());
+        // A long stopped bootstrap moves an otherwise passing gate over.
+        let stopped = Measured {
+            stopped: Duration::from_secs(150),
+            ..fits
+        };
         assert!(
-            Measured {
-                revisions_pending: true,
-                ..measured(1, 1, Some(1))
-            }
-            .projected()
-                > measured(1, 1, Some(1)).projected()
+            refused(&stopped).contains(": gate measured"),
+            "{}",
+            refused(&stopped)
         );
     }
 }
