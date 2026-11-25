@@ -3238,11 +3238,12 @@ async fn owner_reopen_polls_a_reinstated_lease_with_a_new_operation_id() {
         .await;
     assert!(started.elapsed() >= CHILD_LEASE_POLL);
     assert_eq!(bindings.load(Ordering::SeqCst), 2);
+    let checkpoint = locator.checkpoint_id();
     assert_eq!(
         operations,
         [
-            format!("plak:owner-lease-test:{id}:{generation}:0:0"),
-            format!("plak:owner-lease-test:{id}:{generation}:0:1"),
+            format!("plak:owner-lease-test:{id}:{generation}:{checkpoint}:0:0"),
+            format!("plak:owner-lease-test:{id}:{generation}:{checkpoint}:0:1"),
         ]
     );
     let ChildReopen::Attached { session, recovered } = reopened else {

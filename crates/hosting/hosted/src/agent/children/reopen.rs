@@ -869,8 +869,12 @@ async fn reopen_spawned_child_at_head(
         )
         .await
         .map_err(child_reopen_from_binding)?;
+        // The runtime derives its lease owner from this identity. A later
+        // recovery in the same host generation must not reuse that owner on a
+        // different head, even when both opens needed no adoption or wait.
         let operation_id = SessionOperationId::new(format!(
-            "plak:{operation_kind}:{agent_id}:{generation}:{}:{}",
+            "plak:{operation_kind}:{agent_id}:{generation}:{}:{}:{}",
+            locator.checkpoint_id(),
             u8::from(retry.adoptions),
             retry.lease_waits
         ))

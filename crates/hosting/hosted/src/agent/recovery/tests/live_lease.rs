@@ -62,7 +62,18 @@ async fn live_child_lease_fence_continues_once_then_holds_if_its_continuation_fe
         }
     })
     .await
-    .expect("the second loss holds on the continuation turn");
+    .unwrap_or_else(|error| {
+        let state = fixture.runtime.read(|tree| {
+            (
+                tree.nodes()[&id].status,
+                tree.attempt(&id).cloned(),
+                tree.loss_continuation(&id),
+                tree.owned_turn_id(&id).map(str::to_owned),
+            )
+        });
+        panic!("the second loss must hold on the continuation turn: {error:?}, {state:?}, {} decisions, {} dispatches",
+            continuation_decisions(&fixture), fixture.dispatches());
+    });
     recover_tree(&fixture.tree_id).await;
     assert_eq!(continuation_decisions(&fixture), 1);
     assert_eq!(fixture.dispatches(), 2, "no third provider dispatch");
