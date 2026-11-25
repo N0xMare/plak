@@ -121,16 +121,24 @@ pub(crate) fn upgrade_reexec_probe_omitted() -> bool {
 /// Model a candidate's incompatible executable revision, never a stored verdict.
 pub(crate) fn binding_executor_cut() -> bool {
     std::env::var_os("PLAK_TEST_BINDING_CUT_IMAGE").is_some_and(|image| {
-        std::env::current_exe().is_ok_and(|current| current == Path::new(&image))
+        running_image(&image)
             && hook_environment("PLAK_TEST_BINDING_CUT_AFTER")
                 .is_none_or(|gate| Path::new(&gate).is_file())
     })
 }
 
 pub(crate) fn child_binding_cut() -> bool {
-    std::env::var_os("PLAK_TEST_CHILD_BINDING_CUT_IMAGE").is_some_and(|image| {
-        std::env::current_exe().is_ok_and(|current| current == Path::new(&image))
-    })
+    std::env::var_os("PLAK_TEST_CHILD_BINDING_CUT_IMAGE").is_some_and(|image| running_image(&image))
+}
+
+/// Whether `image` names this executable. Both sides are canonical: a
+/// symlinked build directory must not hide the match.
+fn running_image(image: &std::ffi::OsStr) -> bool {
+    let canonical = |path: &Path| std::fs::canonicalize(path).ok();
+    std::env::current_exe()
+        .ok()
+        .and_then(|current| canonical(&current))
+        .is_some_and(|current| canonical(Path::new(image)).is_some_and(|image| image == current))
 }
 
 #[cfg(feature = "web")]
@@ -342,8 +350,7 @@ fn install_identity_hash_delay() {
 /// loopback or child runner when the offline script asks for one (spec 01
 /// §8.5). Nothing else selects a runner.
 pub(crate) fn install() -> Result<(), String> {
-    if hook_environment("PLAK_TEST_STORE_REVISION_IMAGE")
-        .is_some_and(|image| std::env::current_exe().is_ok_and(|path| path == Path::new(&image)))
+    if hook_environment("PLAK_TEST_STORE_REVISION_IMAGE").is_some_and(|image| running_image(&image))
     {
         STORE_REVISION_FIXTURE.store(true, Ordering::Relaxed);
         plakous_recursive_subagents_store::test_support::enable_store_revision_fixture();

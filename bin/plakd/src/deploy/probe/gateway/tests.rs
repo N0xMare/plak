@@ -244,6 +244,8 @@ impl DrainSocket {
                     }
                     Err(error) => panic!("{error}"),
                 };
+                // BSD sockets inherit the listener's non-blocking mode.
+                peer.set_nonblocking(false).unwrap();
                 peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
                 let mut reader = BufReader::new(&peer);
                 let mut head = String::new();
