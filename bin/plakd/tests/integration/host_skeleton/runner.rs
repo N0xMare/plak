@@ -496,7 +496,17 @@ pub(super) fn start_job_at(
     env: &[(&str, String)],
     workspace: &std::path::Path,
 ) -> (Host, String, NodeAddress) {
-    fixture.write_script(&job_script(fixture, busy));
+    start_scripted_job(fixture, busy, env, workspace, &job_script(fixture, busy))
+}
+
+fn start_scripted_job(
+    fixture: &Fixture,
+    busy: bool,
+    env: &[(&str, String)],
+    workspace: &std::path::Path,
+    script: &serde_json::Value,
+) -> (Host, String, NodeAddress) {
+    fixture.write_script(script);
     let host = start_env(fixture, &[], env);
     wait_local_runner_ready(&host);
     let mut client = Client::connect(&host);

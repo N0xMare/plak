@@ -292,10 +292,22 @@ fn an_embedded_open_refuses_a_daemon_held_line_without_recording_a_terminal() {
 #[test]
 fn detached_daemon_and_piped_job_do_not_ignore_interrupt_or_quit() {
     let Some(fixture) = fixture() else { return };
-    let (mut host, _, _) = start_job_env(
+    // Bash ignores QUIT while running the shell itself. Exec the probe before
+    // inspecting dispositions; the runner still owns the same piped PID.
+    let mut script = job_script(&fixture, false);
+    let probe = "import os, sys\nwith open(sys.argv[1], 'a') as marker:\n    print(os.getpid(), os.getppid(), file=marker)\nsys.stdin.read(1)";
+    let marker = fixture.root.join("local-job.marker");
+    script["steps"][0]["output"]["tool"]["arguments"]["command"] = json!(format!(
+        "exec python3 -c {} {}",
+        shell_words::quote(probe),
+        shell_words::quote(&marker.to_string_lossy()),
+    ));
+    let (mut host, _, _) = start_scripted_job(
         &fixture,
         false,
         &[("PLAK_TEST_RUNNER_DETACHED", "1".into())],
+        &fixture.workspace(),
+        &script,
     );
     let (job, daemon) = job(&fixture);
     let host_pid = host.child.as_ref().unwrap().id();
