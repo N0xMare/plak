@@ -261,7 +261,6 @@ impl Outbox {
         generation: u64,
         attachment: AttachmentId,
         snapshot: PresentationSnapshot,
-        retained: Option<uuid::Uuid>,
     ) -> CliResult<()> {
         self.snapshot_projected(
             attachment,
@@ -269,7 +268,7 @@ impl Outbox {
             &snapshot::ENCODERS,
             Some(snapshot::Projection {
                 generation,
-                token: retained.unwrap_or_else(uuid::Uuid::new_v4),
+                token: uuid::Uuid::new_v4(),
             }),
         )
     }

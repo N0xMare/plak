@@ -2062,7 +2062,7 @@ fn paced_release_refuses_stale_intents_then_delivers_queued_items_before_detache
             HostPrincipal::Socket(501),
             || false,
         )
-        .with_snapshot_output(|_, _, _| Ok(()));
+        .with_snapshot_output(|_, _| Ok(()));
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let id = attached(&out.take(), 1);
     let link = connection.node.as_ref().unwrap();

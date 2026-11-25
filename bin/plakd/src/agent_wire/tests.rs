@@ -1,8 +1,8 @@
 use plakous_host_protocol::intent::{Draft, DraftImage};
 use plakous_host_protocol::observation::ObservationClass;
 use plakous_host_protocol::wire::{
-    Answer, AttachmentId, ClientFrame, HostFrame, NodeAddress, Op, Outcome, RequestRefusal,
-    WIRE_VERSION, encode_line, take_images,
+    Answer, AttachmentId, ClientFrame, HostFrame, NEUTRAL_WIRE_VERSION, NodeAddress, Op, Outcome,
+    RequestRefusal, encode_line, take_images,
 };
 use plakous_host_protocol::{SessionIntent, SessionObservation};
 use plakous_hosted::host_service::HostService;
@@ -174,7 +174,10 @@ fn the_adapter_attaches_the_root_and_carries_intents_and_events() {
 #[test]
 fn the_handshake_refuses_another_version() {
     let welcome = || session_welcome("b".into(), 1, "s1".into(), root());
-    for (proto, admitted) in [(WIRE_VERSION, true), (WIRE_VERSION + 1, false)] {
+    for (proto, admitted) in [
+        (NEUTRAL_WIRE_VERSION, true),
+        (NEUTRAL_WIRE_VERSION + 1, false),
+    ] {
         let (client, lines) = wire::lines(1);
         client
             .send(Ok(line(&ClientFrame::Hello(

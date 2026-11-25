@@ -90,6 +90,7 @@ fn unavailable(_: impl std::error::Error) -> HistoryError {
     HistoryError::Unavailable
 }
 
+#[cfg(test)]
 pub(crate) fn read<T>(
     paths: &PlakPaths,
     session: &str,

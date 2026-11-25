@@ -121,7 +121,7 @@ fn root_repair_preserves_a_streaming_prefix_on_the_web() {
     let mut web = start(&fixture);
     let mut socket = upgrade(&web, &cookie(&web));
     let root = hello(&mut socket);
-    let attachment = attach(&mut socket, &root, 1);
+    let mut attachment = attach(&mut socket, &root, 1);
     let mut trace = start_stream(&mut socket, attachment);
     let mut repairing = false;
     let mut repaired_prefix = false;
@@ -133,7 +133,12 @@ fn root_repair_preserves_a_streaming_prefix_on_the_web() {
         let kind = frame["frame"].as_str().unwrap();
         let event = observation["kind"].as_str().unwrap_or(kind);
         trace.push(trace_frame(&frame));
-        assert_ne!(kind, "resync_required");
+        if kind == "resync_required" {
+            assert!(repairing, "unexpected repair boundary: {trace:?}");
+            assert_eq!(frame["attachment"], attachment);
+            attachment = attach(&mut socket, &root, 4);
+            continue;
+        }
         if event == "transcript_patch" && body["scope"] == "root" {
             settled_text |= assistant_rows(&body["upserts"]).any(|text| text == complete);
         }
@@ -247,7 +252,7 @@ fn assistant_text<'a>(rows: impl Iterator<Item = &'a TranscriptRow>) -> String {
 }
 
 #[test]
-fn late_root_attach_gets_the_prefix_before_future_web_deltas() {
+fn late_root_attach_and_retained_replay_get_the_prefix_before_future_web_deltas() {
     let fixture = stream_fixture();
     let mut web = start(&fixture);
     let cookie = cookie(&web);
@@ -293,36 +298,23 @@ fn late_root_attach_gets_the_prefix_before_future_web_deltas() {
             break;
         }
         if !released && frame["frame"] == "snapshot" && frame["last"] == true {
-            send(
-                &mut late,
-                &ClientFrame::Request {
-                    id: 4,
-                    op: Op::Intent {
-                        attachment: late_attachment,
-                        client_id: None,
-                        intent: SessionIntent::ResyncTranscript {
-                            scope: TranscriptScope::Root,
-                        },
-                        blobs: Vec::new(),
-                    },
-                },
-            );
+            let retained = frame["revision"].clone();
+            let hit = attach_retained(&mut late, &root, 4, &retained);
+            assert_eq!(hit["answer"], "attached");
+            assert_ne!(hit["attachment"], late_attachment);
+            assert_eq!(hit["transcript"]["mode"], "replay");
+            assert_eq!(hit["transcript"]["from"], retained);
+            let mut wrong = retained.clone();
+            wrong["token"] = json!(uuid::Uuid::new_v4().to_string());
+            let miss = attach_retained(&mut late, &root, 5, &wrong);
+            assert_eq!(miss["answer"], "attached");
+            assert_eq!(miss["transcript"]["mode"], "first_page");
             loop {
-                let repair = late_view.read(&mut late);
-                if repair["frame"] == "response" && repair["id"] == 4 {
-                    assert_eq!(repair["outcome"]["ok"]["answer"], "accepted");
-                }
-                if repair["frame"] == "snapshot" && repair["last"] == true {
-                    assert_eq!(repair["revision"]["token"], frame["revision"]["token"]);
-                    assert_eq!(
-                        repair["revision"]["host_generation"],
-                        frame["revision"]["host_generation"]
-                    );
-                    assert!(
-                        repair["revision"]["revision"].as_u64().unwrap()
-                            >= frame["revision"]["revision"].as_u64().unwrap()
-                    );
-                    assert_eq!(repair["live_rows"], frame["live_rows"]);
+                let replacement = late_view.read(&mut late);
+                if replacement["frame"] == "snapshot" && replacement["last"] == true {
+                    assert_eq!(replacement["attachment"], miss["attachment"]);
+                    assert_ne!(replacement["revision"]["token"], wrong["token"]);
+                    assert_ne!(replacement["revision"]["token"], retained["token"]);
                     break;
                 }
             }
@@ -357,4 +349,24 @@ fn late_root_attach_gets_the_prefix_before_future_web_deltas() {
     drop(early);
     interrupt_and_wait(&mut web);
     late_view.assert_durable(&fixture, session);
+}
+
+fn attach_retained(
+    socket: &mut WebSocket<UnixStream>,
+    root: &NodeAddress,
+    id: u64,
+    revision: &Value,
+) -> Value {
+    socket
+        .send(Message::text(
+            json!({
+                "frame": "request", "id": id,
+                "op": { "op": "attach", "node": root, "retained": revision },
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let outcome = response(socket, id);
+    assert!(outcome["ok"].is_object(), "{outcome}");
+    outcome["ok"].clone()
 }

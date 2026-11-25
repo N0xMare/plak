@@ -373,8 +373,8 @@ async fn admit(
         .with_blob_refusal_output(crate::draft_wire::write_blob_refusal)
         .with_lifecycle_output(crate::draft_wire::write_lifecycle)
         .with_attachment_status(crate::host::protocol_13::status)
-        .with_snapshot_output(move |attachment, snapshot, retained| {
-            snapshots.snapshot_v13(generation, attachment, snapshot, retained)
+        .with_snapshot_output(move |attachment, snapshot| {
+            snapshots.snapshot_v13(generation, attachment, snapshot)
         }))
 }
 

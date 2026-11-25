@@ -37,7 +37,7 @@ fn binding(session: &str) -> SessionObservation<Core> {
 
 fn hello() -> Hello {
     Hello {
-        proto: WIRE_VERSION,
+        proto: NEUTRAL_WIRE_VERSION,
         binary_id: "client".into(),
         caps: Vec::new(),
     }

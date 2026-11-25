@@ -81,6 +81,10 @@ pub use tool_rows::{FramedObservation, FramedTranscriptRow};
 /// and attachment, blob and host lifecycle outcomes.
 pub const WIRE_VERSION: u32 = 13;
 
+/// Version of the neutral, standalone framed transport, not the product's
+/// served protocol. Its convenience clients do not decode product v13.
+pub const NEUTRAL_WIRE_VERSION: u32 = 12;
+
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
 
@@ -242,15 +246,15 @@ pub enum HandshakeRefusal {
 ///
 /// # Errors
 ///
-/// [`HandshakeRefusal::VersionMismatch`] unless `hello.proto` is exactly
-/// [`WIRE_VERSION`].
+/// [`HandshakeRefusal::VersionMismatch`] unless `hello.proto` is exactly the
+/// version the endpoint advertised in `welcome`.
 pub fn admit_hello<P: ProtocolExtension>(
     hello: &Hello,
     welcome: Welcome<P>,
 ) -> Result<Welcome<P>, HandshakeRefusal> {
-    if hello.proto != WIRE_VERSION {
+    if hello.proto != welcome.proto {
         return Err(HandshakeRefusal::VersionMismatch {
-            host: WIRE_VERSION,
+            host: welcome.proto,
             client: hello.proto,
         });
     }
@@ -671,6 +675,10 @@ pub enum RequestRefusal {
     },
     /// No such attachment on this connection.
     NotAttached,
+    /// Internal result: the current attachment has no authority over this transcript.
+    #[serde(skip)]
+    #[schemars(skip)]
+    TranscriptScopeExpired,
     /// The session request could not open its session; the session the
     /// connection serves is unchanged.
     SessionUnavailable {

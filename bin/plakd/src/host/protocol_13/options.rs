@@ -11,17 +11,23 @@ pub(super) fn phase(p: wire::RunnerPhase) -> Option<v13::RunnerPhase> {
         P::Options => R::Options,
         P::Discovery => R::Discovery,
         P::Reconcile => return None,
-        P::ReconcileStore => R::Reconcile { subphase: S::Store },
+        P::ReconcileStore => R::Reconcile {
+            subphase: Some(S::Store),
+        },
         P::ReconcileObsoleteLines => R::Reconcile {
-            subphase: S::ObsoleteLines,
+            subphase: Some(S::ObsoleteLines),
         },
         P::ReconcileTerminals => R::Reconcile {
-            subphase: S::Terminals,
+            subphase: Some(S::Terminals),
         },
-        P::ReconcileJobs => R::Reconcile { subphase: S::Jobs },
-        P::ReconcileStops => R::Reconcile { subphase: S::Stops },
+        P::ReconcileJobs => R::Reconcile {
+            subphase: Some(S::Jobs),
+        },
+        P::ReconcileStops => R::Reconcile {
+            subphase: Some(S::Stops),
+        },
         P::ReconcileForeground => R::Reconcile {
-            subphase: S::Foreground,
+            subphase: Some(S::Foreground),
         },
         P::LinkLost => R::LinkLost,
     })
@@ -35,7 +41,7 @@ fn placement(reason: wire::PlacementReason) -> Option<v13::PlacementReason> {
     {
         return Some(v13::PlacementReason::Draft(
             v13::PlacementReasonV13::RunnerUnreachable {
-                phase: phase(failed)?,
+                phase: phase(failed).unwrap_or(v13::RunnerPhase::Reconcile { subphase: None }),
                 timed_out,
             },
         ));
@@ -59,6 +65,9 @@ pub(super) fn refusal(reason: wire::RequestRefusal) -> v13::RequestRefusal {
                     runner.name
                 )),
             }
+        }
+        Err(wire::RequestRefusal::TranscriptScopeExpired) => {
+            v13::RequestRefusal::Draft(v13::RequestRefusalV13::CursorExpired)
         }
         Err(_) => v13::RequestRefusal::session_unavailable("session unavailable".into()),
     }
@@ -110,6 +119,33 @@ pub(super) fn options(value: wire::SessionOptions) -> v13::SessionOptions {
         }),
         accounts: value.accounts,
     }
+}
+
+#[cfg(test)]
+#[test]
+fn a_broad_reconcile_workspace_refusal_retains_the_timeout_fact() {
+    let result = options(wire::SessionOptions {
+        runners: Vec::new(),
+        models: views::ReadyCatalog::default(),
+        profiles: views::ProfilesView::default(),
+        templates: Vec::new(),
+        workspace: Some(wire::WorkspaceOptions::Refused {
+            refusal: wire::PlacementReason::RunnerUnreachable {
+                phase: wire::RunnerPhase::Reconcile,
+                timed_out: true,
+            },
+        }),
+        accounts: Vec::new(),
+    });
+    assert!(matches!(
+        result.workspace,
+        Some(v13::WorkspaceOptions::Refused {
+            refusal: v13::PlacementReason::Draft(v13::PlacementReasonV13::RunnerUnreachable {
+                phase: v13::RunnerPhase::Reconcile { subphase: None },
+                timed_out: true,
+            }),
+        })
+    ));
 }
 
 pub(super) fn tier(tier: Option<&str>) -> Option<v13::ServiceTier> {

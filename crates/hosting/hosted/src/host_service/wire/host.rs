@@ -406,6 +406,7 @@ where
                 .welcome_extension(principal, &self.admission.limits),
         );
         welcome.state_key = self.sessions.state_key();
+        welcome.proto = self.sessions.wire_version();
         welcome
     }
 

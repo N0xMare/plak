@@ -12,7 +12,7 @@ use plakous_host_protocol::observation::{ObservationClass, SessionObservation};
 use plakous_host_protocol::views::PresentationSnapshot;
 use plakous_host_protocol::wire::{
     Answer, BlobAssembler, ClientFrame, HandshakeRefusal, Hello, HostFrame, LineReader,
-    NodeAddress, Op, Outcome, RequestRefusal, SnapshotAssembler, WIRE_VERSION, Welcome,
+    NEUTRAL_WIRE_VERSION, NodeAddress, Op, Outcome, RequestRefusal, SnapshotAssembler, Welcome,
     WelcomeSession, admit_hello, decode_line, encode_line, page_snapshot, take_images,
 };
 
@@ -70,7 +70,7 @@ fn stub_host(stream: UnixStream) {
     let welcome = Welcome {
         state_key: String::new(),
         extension: None,
-        proto: WIRE_VERSION,
+        proto: NEUTRAL_WIRE_VERSION,
         binary_id: "host".into(),
         host_generation: 1,
         caps: Vec::new(),
@@ -266,7 +266,7 @@ fn a_client_attaches_and_prompts_a_stub_host_over_wire_v2() {
     let (client, host) = UnixStream::pair().unwrap();
     let stub = std::thread::spawn(move || stub_host(host));
     let mut end = End::new(client);
-    end.send(&hello(WIRE_VERSION));
+    end.send(&hello(NEUTRAL_WIRE_VERSION));
     assert!(matches!(end.next::<Host>(), Some(Host::Welcome(_))));
 
     assert_eq!(
@@ -334,12 +334,12 @@ fn another_version_is_refused_at_the_handshake() {
     let (client, host) = UnixStream::pair().unwrap();
     let stub = std::thread::spawn(move || stub_host(host));
     let mut end = End::new(client);
-    end.send(&hello(WIRE_VERSION + 1));
+    end.send(&hello(NEUTRAL_WIRE_VERSION + 1));
     assert_eq!(
         end.next::<Host>(),
         Some(Host::Refused(HandshakeRefusal::VersionMismatch {
-            host: WIRE_VERSION,
-            client: WIRE_VERSION + 1,
+            host: NEUTRAL_WIRE_VERSION,
+            client: NEUTRAL_WIRE_VERSION + 1,
         }))
     );
     stub.join().unwrap();

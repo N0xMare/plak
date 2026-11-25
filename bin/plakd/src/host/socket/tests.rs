@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use plakous_host_protocol::wire::{
-    Answer, ClientFrame, Hello, HostFrame, NodeAddress, Op, Outcome, WIRE_VERSION,
+    Answer, ClientFrame, Hello, HostFrame, NEUTRAL_WIRE_VERSION, NodeAddress, Op, Outcome,
 };
 use plakous_hosted::host_service::wire::{HostPrincipal, StoredSessionView};
 
@@ -553,7 +553,7 @@ fn an_admitted_connection_is_welcomed_to_the_directory_and_a_stop_ends_the_host(
     send(
         &mut client,
         &ClientFrame::Hello(Hello {
-            proto: WIRE_VERSION,
+            proto: NEUTRAL_WIRE_VERSION,
             binary_id: "client".into(),
             caps: Vec::new(),
         }),
@@ -672,7 +672,7 @@ fn a_hello_of_another_version_is_refused() {
     send(
         &mut client,
         &ClientFrame::Hello(Hello {
-            proto: WIRE_VERSION - 1,
+            proto: NEUTRAL_WIRE_VERSION - 1,
             binary_id: "client".into(),
             caps: Vec::new(),
         }),
@@ -680,8 +680,8 @@ fn a_hello_of_another_version_is_refused() {
     assert_eq!(
         next(&mut reader),
         HostFrame::Refused(HandshakeRefusal::VersionMismatch {
-            host: WIRE_VERSION,
-            client: WIRE_VERSION - 1,
+            host: NEUTRAL_WIRE_VERSION,
+            client: NEUTRAL_WIRE_VERSION - 1,
         })
     );
     let mut rest = String::new();
@@ -823,7 +823,7 @@ fn serve_welcomes_a_connection_queued_before_the_expiry_tick() {
                             send(
                                 &mut client,
                                 &ClientFrame::Hello(Hello {
-                                    proto: WIRE_VERSION,
+                                    proto: NEUTRAL_WIRE_VERSION,
                                     binary_id: "queued".into(),
                                     caps: Vec::new(),
                                 }),
@@ -936,7 +936,7 @@ fn a_connection_queued_at_idle_expiry_is_welcomed_and_discovery_can_retry() {
     send(
         &mut client,
         &ClientFrame::Hello(Hello {
-            proto: WIRE_VERSION,
+            proto: NEUTRAL_WIRE_VERSION,
             binary_id: "expiry".into(),
             caps: Vec::new(),
         }),

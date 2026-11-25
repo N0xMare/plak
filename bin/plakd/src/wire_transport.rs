@@ -100,12 +100,64 @@ fn decode_lifecycle_response(
                         id,
                         outcome: Outcome::Refused(reason.into_inner()),
                     }),
-                    v13::RequestRefusal::Draft(_) => None,
+                    v13::RequestRefusal::Draft(reason) => Some(HostFrame::Response {
+                        id,
+                        outcome: Outcome::Refused(draft_refusal(reason)),
+                    }),
                 },
             },
             _ => None,
         },
     })
+}
+
+fn draft_refusal(
+    reason: plakd_wire_types::v13::RequestRefusalV13,
+) -> plakous_host_protocol::wire::RequestRefusal {
+    use plakd_wire_types::v13::{
+        PlacementReason, PlacementReasonV13, ReconcileSubphase, RequestRefusalV13, RunnerPhase,
+    };
+    use plakous_host_protocol::wire::{self, RequestRefusal};
+    match reason {
+        RequestRefusalV13::CursorExpired => RequestRefusal::TranscriptScopeExpired,
+        RequestRefusalV13::PlacementRefused { runner, reason } => {
+            RequestRefusal::PlacementRefused {
+                runner,
+                reason: Box::new(match *reason {
+                    PlacementReason::Shared(reason) => reason.into_inner(),
+                    PlacementReason::Draft(PlacementReasonV13::RunnerUnreachable {
+                        phase,
+                        timed_out,
+                    }) => wire::PlacementReason::RunnerUnreachable {
+                        phase: match phase {
+                            RunnerPhase::Ssh => wire::RunnerPhase::Ssh,
+                            RunnerPhase::Daemon => wire::RunnerPhase::Daemon,
+                            RunnerPhase::Bind => wire::RunnerPhase::Bind,
+                            RunnerPhase::Options => wire::RunnerPhase::Options,
+                            RunnerPhase::Discovery => wire::RunnerPhase::Discovery,
+                            RunnerPhase::LinkLost => wire::RunnerPhase::LinkLost,
+                            RunnerPhase::Reconcile { subphase } => match subphase {
+                                None => wire::RunnerPhase::Reconcile,
+                                Some(ReconcileSubphase::Store) => wire::RunnerPhase::ReconcileStore,
+                                Some(ReconcileSubphase::ObsoleteLines) => {
+                                    wire::RunnerPhase::ReconcileObsoleteLines
+                                }
+                                Some(ReconcileSubphase::Terminals) => {
+                                    wire::RunnerPhase::ReconcileTerminals
+                                }
+                                Some(ReconcileSubphase::Jobs) => wire::RunnerPhase::ReconcileJobs,
+                                Some(ReconcileSubphase::Stops) => wire::RunnerPhase::ReconcileStops,
+                                Some(ReconcileSubphase::Foreground) => {
+                                    wire::RunnerPhase::ReconcileForeground
+                                }
+                            },
+                        },
+                        timed_out,
+                    },
+                }),
+            }
+        }
+    }
 }
 
 /// Connects to the host socket at `path` after checking that the socket

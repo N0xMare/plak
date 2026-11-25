@@ -14,7 +14,7 @@ fn protocol_thirteen_schema_has_an_exact_build_independent_pin() {
     assert_eq!(document["wire_version"], v13::WIRE_VERSION);
     assert_eq!(
         pin().unwrap(),
-        "7fbb3e82a5b1162e69fdc42925d3a31550fdffb051bfe861a4ef386254fec3a4",
+        "2274665a5932cb62bba1fed44e06e89009e0f7a596123033b1c7c3e2acdaffc4",
     );
 }
 

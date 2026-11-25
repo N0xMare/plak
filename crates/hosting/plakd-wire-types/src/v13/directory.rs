@@ -138,7 +138,10 @@ pub enum RunnerPhase {
     Bind,
     Options,
     Discovery,
-    Reconcile { subphase: ReconcileSubphase },
+    Reconcile {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subphase: Option<ReconcileSubphase>,
+    },
     LinkLost,
 }
 

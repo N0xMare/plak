@@ -6,6 +6,7 @@ mod blobs;
 mod observation_filter;
 #[cfg(target_os = "linux")]
 mod replay_profile;
+mod review;
 mod verdicts;
 
 fn root() -> NodeAddress {
@@ -67,7 +68,7 @@ fn a_too_large_paced_patch_requests_a_fresh_scope_without_closing() {
     use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem, TranscriptPatch};
     let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
     let mut connection = WireConnection::new(root(), Vec::new(), actions)
-        .with_snapshot_output(Some(std::sync::Arc::new(|_, _, _| Ok(()))));
+        .with_snapshot_output(Some(std::sync::Arc::new(|_, _| Ok(()))));
     connection
         .service
         .observe(SessionObservation::PresentationSnapshot(
@@ -625,14 +626,14 @@ fn the_hello_wait_ends_at_its_deadline_or_a_stop() {
 }
 
 #[test]
-fn protocol_twelve_is_explicitly_refused_before_any_attachment() {
+fn the_neutral_diagnostic_refuses_protocol_thirteen_before_attach() {
     use plakous_host_protocol::Core;
     use plakous_host_protocol::wire::Hello;
     let (sender, lines) = lines(1);
     sender
         .send(Ok(encode_line(&ClientFrame::<Core>::Hello(Hello {
-            proto: 12,
-            binary_id: "old-client".into(),
+            proto: 13,
+            binary_id: "product-client".into(),
             caps: Vec::new(),
         }))
         .unwrap()))
@@ -642,8 +643,8 @@ fn protocol_twelve_is_explicitly_refused_before_any_attachment() {
     assert!(matches!(
         host_frames(&stdout).as_slice(),
         [HostFrame::Refused(HandshakeRefusal::VersionMismatch {
-            host: WIRE_VERSION,
-            client: 12
+            host: NEUTRAL_WIRE_VERSION,
+            client: 13
         })]
     ));
 }
@@ -1451,6 +1452,8 @@ fn a_lost_moved_replay_resyncs_after_the_viewport_prefix_not_a_ping() {
         .unwrap()
         .unwrap();
     assert!(!served::lock(&shared).owes(old));
+    assert_eq!(connection.service.root(), &root_named("tree-s2"));
+    assert_eq!(connection.generation, served::lock(&shared).generation());
     assert!(
         connection
             .frame(Ok(encode_line(&ClientFrame::<Core>::Request {
@@ -1540,7 +1543,23 @@ fn status_waits_until_the_ordered_prefix_is_sent() {
     );
     connection.flush_attachment_status().unwrap();
     assert_eq!(connection.stdout.inner.as_slice(), b"prefix\n");
+    assert_eq!(
+        connection
+            .service
+            .attachment_status(id, Instant::now(), true)
+            .unwrap()
+            .baselines_sent,
+        0
+    );
     connection.output_sent();
+    assert_eq!(
+        connection
+            .service
+            .attachment_status(id, Instant::now(), true)
+            .unwrap()
+            .baselines_sent,
+        1
+    );
     assert!(connection.status_deadline().is_some());
     connection.flush_attachment_status().unwrap();
     assert_eq!(

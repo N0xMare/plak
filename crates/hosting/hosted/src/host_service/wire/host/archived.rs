@@ -151,7 +151,8 @@ where
                         patches: Vec::new(),
                     };
                     self.unlink();
-                    connection.history = Some(page.write(&mut connection.stdout, id, start)?);
+                    connection.history =
+                        Some((attachment, page.write(&mut connection.stdout, id, start)?));
                     connection.record_baseline_sent(attachment, None);
                 }
                 Some(outcome) => self.write(&HostFrame::Response { id, outcome })?,

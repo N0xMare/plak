@@ -9176,12 +9176,18 @@
               "type": "string"
             },
             "subphase": {
-              "$ref": "#/$defs/ReconcileSubphase"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ReconcileSubphase"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "phase",
-            "subphase"
+            "phase"
           ],
           "type": "object"
         },

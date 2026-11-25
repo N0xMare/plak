@@ -1,6 +1,6 @@
 use super::*;
 use plakd_wire_types::console::{HostRequest, HostResponse, Page};
-use plakous_host_protocol::wire::{Answer, HostFrame, Outcome, WIRE_VERSION};
+use plakous_host_protocol::wire::{Answer, HostFrame, NEUTRAL_WIRE_VERSION, Outcome};
 use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::host_service::wire::{
     HostPrincipal, HostReadLimits, HostReadTask, HostRequestContext, HostSessions, SessionHost,
@@ -276,7 +276,7 @@ async fn web_drive_binds_the_verified_login_before_welcome_and_host_dispatch()
         Ok::<_, std::io::Error>(())
     });
     let mut client = websocket_client(address).await?;
-    client.send(Message::text(serde_json::json!({"frame":"hello","proto":WIRE_VERSION,"binary_id":"fixture","caps":[]}).to_string())).await?;
+    client.send(Message::text(serde_json::json!({"frame":"hello","proto":NEUTRAL_WIRE_VERSION,"binary_id":"fixture","caps":[]}).to_string())).await?;
     let welcome = client.next().await.ok_or("welcome")??;
     assert!(matches!(
         serde_json::from_str::<HostFrame<PlakExtension>>(welcome.to_text()?)?,

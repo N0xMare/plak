@@ -7,7 +7,7 @@ shared JSON Schema draft 2020-12 definitions. Its `binary_id` is null;
 select `client_frame` or `host_frame` as the root and keep the document's
 `$defs` in scope. The normalized pin is SHA-256 of compact JSON with all
 object keys sorted, omitting only `binary_id`:
-`7fbb3e82a5b1162e69fdc42925d3a31550fdffb051bfe861a4ef386254fec3a4`.
+`2274665a5932cb62bba1fed44e06e89009e0f7a596123033b1c7c3e2acdaffc4`.
 
 The [client frames](../../../crates/hosting/plakd-wire-types/tests/fixtures/protocol-13-client.jsonl)
 and [host frames](../../../crates/hosting/plakd-wire-types/tests/fixtures/protocol-13-host.jsonl)
@@ -20,8 +20,9 @@ applying it, then prepend each completed older page. Page totals and the
 next older cursor are the same on every part; the cursor is present exactly
 when `has_older` is true. The older-history cursor is opaque; repeat the
 last completed page's cursor after a transport
-loss only on the same reopened scope. On `cursor_expired`, reattach for a
-new first page. A page cuts between turns, including host-woken turns that
+loss only on the same reopened scope. A child attachment cannot read
+through a previous root attachment's history binding. On `cursor_expired`,
+reattach for a new first page. A page cuts between turns, including host-woken turns that
 have no visible user prompt. If retention or import leaves older rows without
 their turn facts, that prefix pages as one unit. If the runtime session is
 gone, the saved history pages as one unit instead. A single row that cannot fit
@@ -30,6 +31,9 @@ individual truncated row or repair its stream by
 key and UTF-8 byte offset. For replay use the exact retained token, host
 generation and revision; discard a stale replay, or replace the viewport on
 `first_page`. Keep retained revisions and transcript content in memory only.
+When a root repair cannot take a coherent history cut, the host ends that
+attachment with `resync_required` rather than claim a bounded resident window
+is complete. Discard the old token and attach for a fresh first page.
 
 Stream offsets, baseline live lengths, omitted row bytes and older body
 totals use UTF-8 bytes, not JavaScript string length or JSON wire size.
@@ -58,7 +62,9 @@ the end from how many bytes arrived. An attachment status report is sent
 every 10 seconds while its values are changing and on request.
 `seq_gaps` counts sender-visible sequence discontinuities, not losses
 detected only by the client. Queue bytes and length are current gauges;
-the other four fields are cumulative for the attachment.
+the other four fields are cumulative for the attachment. Unkeyed text
+previews, including child and agent previews, are not sent or numbered;
+their transcript still advances through patches and baselines.
 `since` is host Unix seconds in UTC; `seconds_remaining` is an advisory
 monotonic duration. Show `interrupted_by_upgrade` quietly. Preserve missing
 money and unknown cost separately from measured zero. Do not retry a draft
@@ -68,8 +74,9 @@ not-admitted outcome for the named blob, not a draft verdict.
 Runner reconciliation uses `phase: reconcile` with one of `store`,
 `obsolete_lines`, `terminals`, `jobs`, `stops` or `foreground` as its
 `subphase`. Progress, directory status and placement refusals share the
-same phase vocabulary. A broad reconciliation marker does not name a
-subphase on its own. Directory `live_work.children` counts pending, running
+same phase vocabulary. A broad workspace refusal preserves its timeout fact
+with `phase: reconcile` and no `subphase` when no precise step is known.
+Directory `live_work.children` counts pending, running
 and sealing descendants, excluding parked children, and interrupted
 descendants with automatic continuations. `held_children` counts only
 owner-loss holds waiting for consent, not also in `children`.
@@ -89,14 +96,11 @@ minimum requirement. If the selected execution authority cannot report its
 own version evidence, the host does not substitute another machine's version.
 
 The bounded drain countdown uses the natural-drain deadline, not the
-verdict-barrier floor; an idle drain has no countdown. A paired successor
-that already sent Welcome can report `starting` while recovering its
-startup inventory. Its countdown starts in the replacement image and does
-not inherit the source's drain deadline. Round remaining time up to whole
-seconds, so zero means the deadline elapsed or there is no countdown.
-The startup countdown is advisory: it cannot abandon a slow inventory or
-change the requester's separate readiness wait. A bridge that cannot reach
-Welcome still uses the typed discovery refusal.
+verdict-barrier floor; an idle drain has no countdown. Round remaining
+time up to whole seconds, so zero means the deadline elapsed or there is no
+countdown. `startup` and `cross_key_upgrade` are reserved and are not emitted
+by this host. A bridge that cannot reach Welcome uses the typed discovery
+refusal.
 
 Codex template writes use `{"field":"service_tier","value":"fast"}` or
 `"ultrafast"`; `null` removes the named tier for Standard. Template reads,

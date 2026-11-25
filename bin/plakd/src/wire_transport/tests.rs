@@ -5,7 +5,20 @@ use std::time::Duration;
 
 use plakous_host_protocol::SessionIntent;
 use plakous_host_protocol::client;
-use plakous_host_protocol::wire::{Hello, LineReader, WIRE_VERSION};
+
+#[test]
+fn a_product_lifecycle_refusal_is_not_discarded() {
+    use plakous_host_protocol::wire::{
+        HostFrame, Outcome, PlacementReason, RequestRefusal, RunnerPhase,
+    };
+    let line = r#"{"frame":"response","id":7,"outcome":{"refused":{"refusal":"placement_refused","runner":{"name":"local","runner_id":"local"},"reason":{"reason":"runner_unreachable","phase":{"phase":"reconcile"},"timed_out":true}}}}"#;
+    assert!(matches!(
+        decode_lifecycle_response(line).unwrap(),
+        Some(HostFrame::Response { id: 7, outcome: Outcome::Refused(RequestRefusal::PlacementRefused { reason, .. }) })
+            if *reason == PlacementReason::RunnerUnreachable { phase: RunnerPhase::Reconcile, timed_out: true }
+    ));
+}
+use plakous_host_protocol::wire::{Hello, LineReader, NEUTRAL_WIRE_VERSION};
 use plakous_hosted::host_service::wire::{Face, WireSession, handshake, session_welcome};
 
 use super::*;
@@ -178,7 +191,7 @@ fn lifecycle_peer(
             encode_line(&HostFrame::<PlakExtension>::Welcome(Welcome {
                 state_key: String::new(),
                 extension: None,
-                proto: WIRE_VERSION,
+                proto: NEUTRAL_WIRE_VERSION,
                 binary_id: "fixture".into(),
                 host_generation: 1,
                 caps: Vec::new(),
@@ -319,7 +332,7 @@ fn a_remote_face_is_refused_a_local_only_intent_over_the_socket() {
 
 fn hello() -> Hello {
     Hello {
-        proto: WIRE_VERSION,
+        proto: NEUTRAL_WIRE_VERSION,
         binary_id: "client".into(),
         caps: Vec::new(),
     }

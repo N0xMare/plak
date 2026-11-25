@@ -26,7 +26,7 @@ fn lifecycle_advisories_coalesce_without_filling_operator_streams() {
     reader.read_line(&mut line).unwrap();
     peer.write_all(
         encode_line(&HostFrame::<Advisory>::Welcome(Welcome {
-            proto: WIRE_VERSION,
+            proto: NEUTRAL_WIRE_VERSION,
             binary_id: "host".into(),
             host_generation: 1,
             state_key: "key".into(),

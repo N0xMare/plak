@@ -4306,7 +4306,8 @@ product advisory frame `host_lifecycle {host_generation, phase, reason,
 seconds_remaining, deadline_at?, target?, retry_after_ms?}`. `phase` is
 `starting`, `draining`, `restarting`, `stopping` or `running`; `reason` is
 `startup`, `paired_upgrade`, `cross_key_upgrade` or `shutdown`.
-`cross_key_upgrade` remains a wire variant but this build never emits it.
+`startup` and `cross_key_upgrade` remain wire variants but this build never
+emits them.
 A target has exactly `binary_id` and `state_key`. An optional
 retry hint is a u32 bounded to 30000 ms. These DTOs belong to `plakd-wire-types`;
 the neutral envelope carries the product's lifecycle extension.
@@ -4333,6 +4334,10 @@ ready carried-root aliases use the existing `RequestRefusal::Moved`, not a new
 successor field. Versions match exactly, without negotiation. A protocol 12
 Hello gets only `{"frame":"refused","kind":"version_mismatch","host":13,"client":12}`.
 There is no Welcome or lifecycle frame after that refusal.
+The unsupported standalone neutral diagnostic accepts only its own version
+12, never 13. The host protocol crate's neutral convenience clients are not
+product v13 clients; product clients use the exact contract in
+`plakd-wire-types::v13`.
 
 During an admission pause, the host continues to answer Ping, directory reads
 and watches, and authorized read-only console requests. A client may detach or
@@ -4588,7 +4593,7 @@ Protocol 5 introduced explicit placement, bounded creation options, directory
 lifecycle and process-local draft identity.
 
 The protocol 13 schema pin is SHA-256
-`7fbb3e82a5b1162e69fdc42925d3a31550fdffb051bfe861a4ef386254fec3a4`:
+`2274665a5932cb62bba1fed44e06e89009e0f7a596123033b1c7c3e2acdaffc4`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
 checks this build-independent pin. `plakd wire schema` prints the serving

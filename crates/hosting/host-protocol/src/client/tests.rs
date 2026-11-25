@@ -3,7 +3,7 @@ use std::os::unix::net::UnixStream;
 
 use super::*;
 use crate::Core;
-use crate::wire::{WIRE_VERSION, WelcomeSession, decode_line};
+use crate::wire::{NEUTRAL_WIRE_VERSION, WelcomeSession, decode_line};
 
 mod goodbye_drop;
 mod lifecycle;
@@ -40,7 +40,7 @@ fn product_host_responses_route_by_id_without_attaching_a_session() {
         encode_line(&HostFrame::<Reads>::Welcome(Welcome {
             state_key: String::new(),
             extension: None,
-            proto: WIRE_VERSION,
+            proto: NEUTRAL_WIRE_VERSION,
             binary_id: "host".into(),
             host_generation: 1,
             caps: Vec::new(),
@@ -85,7 +85,7 @@ fn product_host_responses_route_by_id_without_attaching_a_session() {
 
 fn hello() -> Hello {
     Hello {
-        proto: WIRE_VERSION,
+        proto: NEUTRAL_WIRE_VERSION,
         binary_id: "client".into(),
         caps: Vec::new(),
     }
@@ -102,7 +102,7 @@ fn welcome() -> Welcome<Core> {
     Welcome {
         state_key: String::new(),
         extension: None,
-        proto: WIRE_VERSION,
+        proto: NEUTRAL_WIRE_VERSION,
         binary_id: "host".into(),
         host_generation: 1,
         caps: Vec::new(),

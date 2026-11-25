@@ -219,11 +219,10 @@ fn phase(value: &mut Value) {
     if let Some(p) = value.get_mut("phase")
         && let Some(name) = p["phase"].as_str()
     {
-        *p = if name == "reconcile" {
-            json!(format!(
-                "reconcile_{}",
-                p["subphase"].as_str().unwrap_or_default()
-            ))
+        *p = if name == "reconcile"
+            && let Some(subphase) = p["subphase"].as_str()
+        {
+            json!(format!("reconcile_{subphase}"))
         } else {
             json!(name)
         };

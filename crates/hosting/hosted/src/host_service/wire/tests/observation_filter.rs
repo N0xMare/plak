@@ -15,8 +15,10 @@ fn unservable_previews_are_never_numbered_for_child_or_agent_viewers() {
         &super::super::super::AttachmentCount::default(),
         Some(|event| !event.is_unkeyed_text_preview()),
     );
-    let service = served::lock(&session.served)
-        .service()
+    let service = session
+        .connect(Vec::new(), Face::Remote, || false)
+        .service
+        .clone()
         .with_nodes(std::sync::Arc::new(OpenChildren));
     let viewer = service.attach(&root(), Face::Remote).unwrap();
     let child = service
@@ -37,7 +39,7 @@ fn unservable_previews_are_never_numbered_for_child_or_agent_viewers() {
         )
         .unwrap();
     for attachment in [viewer, child] {
-        assert!(service.take(attachment).is_empty());
+        assert_eq!(service.take(attachment), []);
         service.enable_attachment_status(attachment, Instant::now(), 0);
     }
     let stream = |delta| SessionObservation::TranscriptStream {
@@ -46,7 +48,7 @@ fn unservable_previews_are_never_numbered_for_child_or_agent_viewers() {
     };
     let tool = |state: &str| -> ToolItem {
         serde_json::from_value(serde_json::json!({
-            "call_id": "call", "name": "tool", "activity_kind": "other", "state": state
+            "call_id": "call", "name": "tool", "activity_kind": "tool", "state": state
         }))
         .unwrap()
     };

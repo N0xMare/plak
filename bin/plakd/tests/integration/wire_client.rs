@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use plakd::wire_transport::PlakExtension;
 use plakous_host_protocol::client;
-use plakous_host_protocol::wire::{Hello, WIRE_VERSION};
+use plakous_host_protocol::wire::{Hello, NEUTRAL_WIRE_VERSION};
 use plakous_host_protocol::{Draft, SessionIntent, SessionObservation};
 use serde_json::json;
 
@@ -46,7 +46,7 @@ fn a_real_wire_runtime_settings_save_preserves_other_product_settings() {
     let (sender, receiver, _) = client::connect::<PlakExtension>(
         transport,
         Hello {
-            proto: WIRE_VERSION,
+            proto: NEUTRAL_WIRE_VERSION,
             binary_id: "settings-wire-test".into(),
             caps: Vec::new(),
         },
@@ -129,7 +129,7 @@ fn the_wire_client_drives_plak_agent_over_stdio() {
         child.stdin.take().expect("stdin piped"),
     );
     let hello = Hello {
-        proto: WIRE_VERSION,
+        proto: NEUTRAL_WIRE_VERSION,
         binary_id: "wire-client-test".into(),
         caps: Vec::new(),
     };

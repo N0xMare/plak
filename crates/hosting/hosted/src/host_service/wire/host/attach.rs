@@ -442,7 +442,7 @@ where
                     binding = Some(page.write(out, id, start)?);
                     Ok(())
                 })?;
-                connection.history = binding;
+                connection.history = binding.map(|binding| (attachment, binding));
                 Ok(Some(Forwarded::Reading(true)))
             }
             Ok(None) if retry => Ok(None),

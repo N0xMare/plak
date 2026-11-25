@@ -37,9 +37,6 @@ pub enum TranscriptRead {
 
 /// Product history attached to a particular line and prune fence.
 pub trait HistoryBinding: Send {
-    /// The viewport token already given to the client for this binding.
-    fn retained_token(&self) -> uuid::Uuid;
-
     /// Write a paged replacement for this exact root snapshot, if coherent.
     ///
     /// # Errors
@@ -117,25 +114,22 @@ where
             }
             return Ok(true);
         }
-        if let Some(link) = &self.node
-            && link.connection.attachment() == Some(attachment)
-            && link.connection.service.attached(attachment)
-            && let Some(binding) = &link.connection.history
-        {
-            binding.read(
-                &mut self.out,
-                id,
-                link.session.root_transcript.as_ref(),
-                request,
-            )?;
-        } else if let Some(link) = &self.readonly
-            && link.connection.attachment() == Some(attachment)
-            && link.connection.service.attached(attachment)
-            && let Some(binding) = &link.connection.history
-        {
-            binding.read(&mut self.out, id, None, request)?;
-        } else {
-            self.write(&refused(RequestRefusal::NotAttached))?;
+        let active = self
+            .node
+            .as_ref()
+            .map(|link| (&link.connection, link.session.root_transcript.as_ref()))
+            .or_else(|| self.readonly.as_ref().map(|link| (&link.connection, None)))
+            .filter(|(wire, _)| {
+                wire.attachment() == Some(attachment) && wire.service.attached(attachment)
+            });
+        match active {
+            Some((wire, root)) => match &wire.history {
+                Some((owner, binding)) if *owner == attachment => {
+                    binding.read(&mut self.out, id, root, request)?;
+                }
+                _ => self.write(&refused(RequestRefusal::TranscriptScopeExpired))?,
+            },
+            None => self.write(&refused(RequestRefusal::NotAttached))?,
         }
         Ok(true)
     }

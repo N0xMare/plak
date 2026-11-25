@@ -20,22 +20,22 @@ pub(in super::super) const fn phase(probe: ProbePhase) -> Option<RunnerPhase> {
         ProbePhase::Discovery => RunnerPhase::Discovery,
         ProbePhase::LinkLost => RunnerPhase::LinkLost,
         ProbePhase::ReconcileStore => RunnerPhase::Reconcile {
-            subphase: Step::Store,
+            subphase: Some(Step::Store),
         },
         ProbePhase::ReconcileObsoleteLines => RunnerPhase::Reconcile {
-            subphase: Step::ObsoleteLines,
+            subphase: Some(Step::ObsoleteLines),
         },
         ProbePhase::ReconcileTerminals => RunnerPhase::Reconcile {
-            subphase: Step::Terminals,
+            subphase: Some(Step::Terminals),
         },
         ProbePhase::ReconcileJobs => RunnerPhase::Reconcile {
-            subphase: Step::Jobs,
+            subphase: Some(Step::Jobs),
         },
         ProbePhase::ReconcileStops => RunnerPhase::Reconcile {
-            subphase: Step::Stops,
+            subphase: Some(Step::Stops),
         },
         ProbePhase::ReconcileForeground => RunnerPhase::Reconcile {
-            subphase: Step::Foreground,
+            subphase: Some(Step::Foreground),
         },
     })
 }

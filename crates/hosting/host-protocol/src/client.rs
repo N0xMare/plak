@@ -467,8 +467,9 @@ impl<P: ProtocolExtension> Drop for Inner<P> {
     }
 }
 
-/// Connects over `transport`: says `hello`, takes the welcome and attaches
-/// the session's root, then follows the host on a thread of its own.
+/// Connects to a neutral endpoint: says `hello`, takes the welcome and
+/// attaches the session's root, then follows the host on a thread of its
+/// own. This helper is not a product protocol 13 decoder.
 ///
 /// # Errors
 ///
@@ -480,6 +481,7 @@ where
     P::Intent: Serialize + DeserializeOwned + Send,
     P::Observation: Serialize + DeserializeOwned + Send,
 {
+    require_neutral(&hello)?;
     connect_rooted(transport, hello, None, false, shared_frame)
 }
 
@@ -500,6 +502,7 @@ where
     P::Intent: Serialize + DeserializeOwned + Send,
     P::Observation: Serialize + DeserializeOwned + Send,
 {
+    require_neutral(&hello)?;
     connect_to_with(transport, hello, root, shared_frame)
 }
 
@@ -521,7 +524,7 @@ where
     connect_rooted(transport, hello, Some(root), false, decode)
 }
 
-/// Says hello to a session directory without attaching a node. The caller
+/// Says hello to a neutral session directory without attaching a node. The caller
 /// selects a root from `list_sessions` or `new_session`, then uses
 /// [`WireSender::attach_to`].
 ///
@@ -537,7 +540,20 @@ where
     P::Intent: Serialize + DeserializeOwned + Send,
     P::Observation: Serialize + DeserializeOwned + Send,
 {
+    require_neutral(&hello)?;
     connect_directory_with(transport, hello, shared_frame)
+}
+
+fn require_neutral(hello: &Hello) -> Result<(), ConnectError> {
+    use crate::wire::NEUTRAL_WIRE_VERSION;
+    if hello.proto == NEUTRAL_WIRE_VERSION {
+        Ok(())
+    } else {
+        Err(ConnectError::Wire(WireError::Malformed(format!(
+            "the neutral client only decodes protocol {NEUTRAL_WIRE_VERSION}, not {}",
+            hello.proto
+        ))))
+    }
 }
 
 type Decode<P> = fn(&str) -> Result<Option<HostFrame<P>>, WireError>;

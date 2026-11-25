@@ -25,8 +25,9 @@ use plakous_host_protocol::views::presentation::PresentationSnapshot;
 use plakous_host_protocol::views::transcript::{NoticeTone, TranscriptRow, TranscriptScope};
 use plakous_host_protocol::wire::{
     Answer, AttachmentId, BlobAssembler, BlobRejection, ClientFrame, HandshakeRefusal, HostFrame,
-    NodeAddress, Op, Outcome, RequestId, RequestRefusal, WIRE_VERSION, Welcome, WelcomeSession,
-    WireError, admit_hello, decode_line, encode_line, page_snapshot, take_observation_images,
+    NEUTRAL_WIRE_VERSION, NodeAddress, Op, Outcome, RequestId, RequestRefusal, Welcome,
+    WelcomeSession, WireError, admit_hello, decode_line, encode_line, page_snapshot,
+    take_observation_images,
 };
 use plakous_host_protocol::{
     IntentSendError, IntentSender, ObservationReceiver, ProtocolExtension, SessionIntent,
@@ -61,9 +62,8 @@ pub const HELLO_DEADLINE: Duration = Duration::from_secs(10);
 /// peer: a failure's own text can name state paths, accounts and sessions.
 pub const UNAVAILABLE_UNAUTHENTICATED: &str = "the session could not be opened";
 
-type SnapshotOutput = std::sync::Arc<
-    dyn Fn(AttachmentId, PresentationSnapshot, Option<uuid::Uuid>) -> CliResult<()> + Send + Sync,
->;
+type SnapshotOutput =
+    std::sync::Arc<dyn Fn(AttachmentId, PresentationSnapshot) -> CliResult<()> + Send + Sync>;
 
 type FrameOutput<P> =
     std::sync::Arc<dyn Fn(&HostFrame<P>) -> Result<Option<String>, WireError> + Send + Sync>;
@@ -138,7 +138,7 @@ pub fn session_welcome<P: ProtocolExtension>(
     Welcome {
         state_key: String::new(),
         extension: Default::default(),
-        proto: WIRE_VERSION,
+        proto: NEUTRAL_WIRE_VERSION,
         binary_id,
         host_generation,
         caps: Vec::new(),
@@ -162,7 +162,7 @@ pub fn host_welcome<P: ProtocolExtension>(
     Welcome {
         state_key: String::new(),
         extension,
-        proto: WIRE_VERSION,
+        proto: NEUTRAL_WIRE_VERSION,
         binary_id,
         host_generation,
         caps: Vec::new(),
@@ -308,7 +308,7 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     service: HostService<P>,
     attachment: Option<AttachmentId>,
     viewport_prefix: Option<host::ViewportPrefix>,
-    history: Option<Box<dyn HistoryBinding>>,
+    history: Option<(AttachmentId, Box<dyn HistoryBinding>)>,
     /// The attachment just answered `attached` that must resync at once.
     resync_after_attach: Option<AttachmentId>,
     /// The session this connection's service handle serves, when the
@@ -1149,6 +1149,7 @@ where
     /// `moved` it causes names it.
     fn unanswered(&mut self) {
         self.window = None;
+        self.history = None;
         let session = self.session_request.take().map(|(id, _, _)| id);
         let status = self.status.deferred.drain(..).map(|(_, request)| request);
         for id in std::mem::take(&mut self.mails)
@@ -1400,13 +1401,8 @@ where
             self.flush_settled()?;
             match item {
                 Outbound::ResyncRequired => {
-                    self.service.wire_drafts_lost(attachment);
-                    self.attachment = None;
-                    self.unanswered();
-                    for (id, outcome) in std::mem::take(&mut self.settled) {
-                        self.write(&HostFrame::<P>::Response { id, outcome })?;
-                    }
-                    self.write(&HostFrame::<P>::ResyncRequired { attachment })?;
+                    self.write_resync_required(attachment)?;
+                    break;
                 }
                 Outbound::Moved { node, request } => {
                     self.service.wire_drafts_lost(attachment);
@@ -1450,6 +1446,9 @@ where
                     ..
                 } => {
                     self.write_snapshot(attachment, snapshot)?;
+                    if self.attachment.is_none() {
+                        break;
+                    }
                     self.record_baseline_sent(attachment, Some(seq));
                 }
                 Outbound::Event {
@@ -1515,18 +1514,19 @@ where
         snapshot: PresentationSnapshot,
     ) -> CliResult<()> {
         if snapshot.scope == TranscriptScope::Root
-            && let Some(binding) = &self.history
-            && binding.repair(&mut self.stdout, &snapshot)?
+            && self.attachment == Some(attachment)
+            && let Some((owner, binding)) = &self.history
+            && *owner == attachment
         {
-            return Ok(());
+            if binding.repair(&mut self.stdout, &snapshot)? {
+                return Ok(());
+            }
+            // A bounded presentation is not authoritative about older history.
+            let _ = self.service.detach(attachment);
+            return self.write_resync_required(attachment);
         }
         if let Some(write) = &self.snapshot_output {
-            let token = self
-                .history
-                .as_ref()
-                .filter(|_| snapshot.scope == TranscriptScope::Root)
-                .map(|binding| binding.retained_token());
-            return write(attachment, snapshot, token);
+            return write(attachment, snapshot);
         }
         for page in page_snapshot(snapshot, attachment)
             .map_err(|error| CliFailure::new(error.to_string()))?
@@ -1534,6 +1534,14 @@ where
             self.write(&HostFrame::<P>::Snapshot(page))?;
         }
         Ok(())
+    }
+
+    fn write_resync_required(&mut self, attachment: AttachmentId) -> CliResult<()> {
+        self.service.wire_drafts_lost(attachment);
+        self.attachment = None;
+        self.unanswered();
+        self.flush_settled()?;
+        self.write(&HostFrame::<P>::ResyncRequired { attachment })
     }
 
     fn flush_settled(&mut self) -> CliResult<()> {

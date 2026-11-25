@@ -107,10 +107,6 @@ impl PreparedViewport for Prepared {
 }
 
 impl HistoryBinding for Bound {
-    fn retained_token(&self) -> uuid::Uuid {
-        self.revision.token
-    }
-
     fn repair(&self, out: &mut dyn Write, snapshot: &PresentationSnapshot) -> CliResult<bool> {
         let Some(root) = &self.root else {
             return Ok(false);

@@ -379,6 +379,10 @@ const fn environment_of(held_elsewhere: bool) -> SessionEnvironment {
 }
 
 impl HostSessions<PlakExtension> for ProductSessions {
+    fn wire_version(&self) -> u32 {
+        plakd_wire_types::v13::WIRE_VERSION
+    }
+
     fn observation_filter(
         &self,
     ) -> Option<plakous_hosted::host_service::wire::ObservationFilter<PlakExtension>> {

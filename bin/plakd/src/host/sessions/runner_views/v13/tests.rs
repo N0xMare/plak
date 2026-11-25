@@ -35,7 +35,9 @@ fn reconciliation_transitions_share_the_typed_phase_across_client_projections() 
         (ProbePhase::ReconcileForeground, Step::Foreground),
     ];
     for (probe, subphase) in steps {
-        let phase = RunnerPhase::Reconcile { subphase };
+        let phase = RunnerPhase::Reconcile {
+            subphase: Some(subphase),
+        };
         let timed_out = probe == ProbePhase::ReconcileJobs;
         let failure = PlacementFailure::RunnerUnreachable {
             phase: probe,
