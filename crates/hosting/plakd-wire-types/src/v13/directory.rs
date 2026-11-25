@@ -1,3 +1,8 @@
+#![allow(
+    unused_qualifications,
+    reason = "schemars qualifies nullable schema helpers in generated code"
+)]
+
 use plakous_host_protocol::views::ReadyCatalog;
 use plakous_host_protocol::wire::{
     DiscoveredWorkspace, HostedElsewhere, KindAccounts, NodeAddress, RecentWorkspace, RunnerLabel,
@@ -5,6 +10,8 @@ use plakous_host_protocol::wire::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+use crate::console::{nullable, required};
 
 use super::shared::SharedPlacementReason;
 use super::{ProfileDifference, ProfilesView, SESSION_PREVIEW_BYTES, TemplateRow};
@@ -28,6 +35,9 @@ pub struct SessionRow {
     pub cost_tree: TreeCost,
     pub activity_seq: u64,
     pub archived: bool,
+    #[serde(deserialize_with = "required")]
+    #[schemars(required, schema_with = "nullable::<String>")]
+    pub superseded_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
     pub differences: Vec<ProfileDifference>,

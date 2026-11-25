@@ -131,3 +131,7 @@ Costs are measured USD micro-units: a root with unproven coverage is unknown,
 and an incomplete tree may report the known subtotal. Coverage depends on
 matching terminal records, attribution and retained evidence, not just the
 presence of a reported price.
+
+Both list and watch rows include `superseded_by`. A predecessor with a
+published same-node switch or rebind names the session its node now opens.
+Other rows carry null.

@@ -633,6 +633,7 @@ impl Source {
                 meta,
                 Projection {
                     head: head.as_deref() == Some(id.as_str()),
+                    open_target: head.as_deref(),
                     tree: tree.as_ref().ok().and_then(|facts| facts.as_deref()),
                     degraded_tree: tree.is_err(),
                     profiles: profiles.as_ref(),
@@ -717,6 +718,7 @@ fn load_profiles(paths: &PlakPaths, workspace: Option<&Path>) -> Option<Profiles
 
 struct Projection<'a> {
     head: bool,
+    open_target: Option<&'a str>,
     tree: Option<&'a TreeFacts>,
     degraded_tree: bool,
     profiles: Option<&'a Profiles>,
@@ -762,7 +764,7 @@ fn summarize(
                 .runner
                 .as_ref()
                 .is_some_and(|runner| runner.runner_id != "local");
-        draft.project(
+        let mut facts = draft.project(
             id,
             meta,
             &activity,
@@ -773,7 +775,13 @@ fn summarize(
                 policy,
             },
             draft::differences(&differences, tier, tier_differs),
-        )
+        );
+        if let Some(target) = projection.open_target.filter(|target| *target != id)
+            && store.has_binding_successor(id).unwrap_or(false)
+        {
+            facts.superseded_by = Some(target.to_owned());
+        }
+        facts
     });
     Ok((
         Summary {

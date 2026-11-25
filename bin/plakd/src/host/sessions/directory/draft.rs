@@ -36,6 +36,7 @@ pub(super) struct Context<'a> {
 #[derive(Clone, Eq, PartialEq)]
 pub(super) struct Facts {
     preview: Option<v13::SessionPreview>,
+    pub(super) superseded_by: Option<String>,
     cost_root: v13::Cost,
     cost_tree: v13::TreeCost,
     differences: Vec<v13::ProfileDifference>,
@@ -126,6 +127,7 @@ impl Source {
         }
         Facts {
             preview: self.previews.get(id).cloned().flatten(),
+            superseded_by: None,
             cost_root,
             cost_tree,
             differences,
@@ -389,6 +391,7 @@ fn draft_row(
         cost_tree: draft.cost_tree,
         activity_seq: row.activity_seq,
         archived: row.archived,
+        superseded_by: draft.superseded_by.clone(),
         profile: row.profile.clone(),
         differences: draft.differences.clone(),
         created_at: row.created_at,

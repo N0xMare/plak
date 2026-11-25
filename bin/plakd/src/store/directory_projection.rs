@@ -154,6 +154,26 @@ const PREVIEW_TEXT: &str = "SELECT json_extract(row,'$.text') FROM transcript_ro
     ORDER BY anchor DESC,ordinal DESC LIMIT 1";
 
 impl ProductStore {
+    #[cfg(feature = "web")]
+    pub(crate) fn has_binding_successor(&self, id: &str) -> Result<bool, String> {
+        self.connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sessions source
+                    JOIN sessions next INDEXED BY sessions_carry_source
+                      ON next.source_session_id=source.id
+                      AND next.node_tree_id=source.node_tree_id
+                      AND next.node_agent_id=source.node_agent_id
+                    JOIN workflow_requests request ON request.operation_id=next.source_operation_id
+                      AND request.session_id=source.id AND request.kind IN ('switch','rebind')
+                    WHERE source.id=?1 AND next.locator IS NOT NULL
+                )",
+                [id],
+                |row| row.get(0),
+            )
+            .map_err(unavailable)
+    }
+
     /// Two bounded index seeks, in one snapshot. Do not join the operator
     /// notice lane, which may contain arbitrary prose but is not a prompt.
     pub(crate) fn directory_preview(&self, id: &str) -> Result<Option<String>, String> {

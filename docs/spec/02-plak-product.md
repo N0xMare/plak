@@ -4569,6 +4569,10 @@ protocol classification, over `plakous-host-protocol`. Product handlers,
 configuration and reload-file/probe authority stay
 outside that crate. Moving these types changes neither wire bytes nor schema.
 
+List and watch use the same directory projection. Its `superseded_by`
+names the current open target for a predecessor with a published same-node
+switch or rebind; otherwise it is null. The field does not change open routing.
+
 Directory attention is independent of activity. The protocol 13 directory
 reports typed reasons with occurrence timestamps, preview, measured or unknown
 cost, and running and held counts. Clients use busy activity to submit
