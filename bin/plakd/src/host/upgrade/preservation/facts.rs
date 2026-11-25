@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, Params, Row};
@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 
 use super::check;
 use crate::CliResult;
+use crate::carry::upgrade::timing::CAPTURE as CAPTURE_TIME;
 
 use super::unreadable;
 
@@ -18,7 +19,6 @@ pub(super) type Map<T> = BTreeMap<Key, T>;
 // row is borrowed at a time; a large or damaged store fails closed at the cap.
 const MAX_FACTS: usize = 3_000_000;
 const MAX_VALUE_BYTES: usize = 64 << 20;
-pub(in crate::host) const CAPTURE_TIME: Duration = Duration::from_secs(120);
 
 pub(super) fn configure_reader(db: &Connection) -> CliResult<()> {
     // Recursive reachability and ordered scans may need a temporary index.

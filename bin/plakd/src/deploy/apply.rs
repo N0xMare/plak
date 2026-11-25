@@ -781,7 +781,7 @@ impl<F: Fleet> Deploy<'_, F> {
         let old = &plan.observed;
         let detached = || {
             Halt::reconcile(
-                "host upgrade outcome is unresolved; use deploy status before any new handoff",
+                "host_upgrade_outcome_unknown: use deploy status before any new handoff",
             )
         };
         if let Err(error) = self.fleet.host(HostOp::Upgrade {
@@ -796,7 +796,17 @@ impl<F: Fleet> Deploy<'_, F> {
                 self.withdraw_host(&observed, pending, log, report)?;
                 return Err(error.into());
             }
-            return Err(detached());
+            let failure: CliFailure = error.into();
+            return Err(
+                if failure
+                    .message()
+                    .starts_with("host_upgrade_fix_forward_required:")
+                {
+                    Halt::reconcile(failure.message())
+                } else {
+                    detached()
+                },
+            );
         }
         let ready = self.observe(report).map_err(|_| detached())?;
         if ready.sha256 != candidate.sha256

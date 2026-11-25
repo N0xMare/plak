@@ -21,23 +21,13 @@ use std::time::{Duration, Instant};
 use plakous_hosted::host_service::wire::{AdmissionPause, SessionHost};
 use serde::{Deserialize, Serialize};
 
+use crate::carry::upgrade::timing::{self, PROBE as PROBE_BOUND};
 use crate::carry::upgrade::{OFFLINE_MIGRATION_REQUIRED, process};
 use crate::deploy::{DeployRunnerInspection, DeployRunnerVerdict};
 use crate::home::paths::PlakPaths;
 use crate::shell::services::Services;
 use crate::surface_protocol::PlakExtension;
 use crate::{CliFailure, CliResult, ProcessOutcome};
-
-const PROBE_BOUND: Duration = Duration::from_secs(30);
-// Includes destination startup, stopped revisions, and verification.
-const SUCCESSOR_BOUND: Duration = Duration::from_secs(
-    health::ADMISSION_TIME.as_secs()
-        + health::STORE_TIME.as_secs()
-        + preservation::CAPTURE_TIME.as_secs()
-        + preservation::REVISION_BACKUP_TIME.as_secs()
-        + bindings::INSPECTION_TIME.as_secs()
-        + 300,
-);
 
 #[derive(Deserialize, Eq, PartialEq, Serialize)]
 struct Identity {
@@ -294,6 +284,7 @@ pub(super) fn request(
     backup_store: bool,
     inspection: Option<DeployRunnerInspection>,
 ) -> CliResult<ProcessOutcome> {
+    let before_request = Instant::now() + timing::PREFLIGHT;
     if !crate::carry::upgrade::binary_id_valid(expected)
         || expected != crate::build_identity::binary_id()
     {
@@ -366,14 +357,16 @@ pub(super) fn request(
         ));
     }
     checkpoint::Ticket::publish(paths, staged)?;
-    stream
-        .set_read_timeout(
-            drain
-                .duration()
-                .map(|duration| duration + Duration::from_secs(600)),
-        )
-        .map_err(io_failure)?;
+    if Instant::now() >= before_request {
+        checkpoint::Ticket::clear(paths);
+        return Err(CliFailure::new(
+            "host_upgrade_preflight_timeout: no surrender was requested",
+        ));
+    }
     let source_binary = identity.binary.clone();
+    let reply_deadline = drain
+        .duration()
+        .map(|duration| Instant::now() + duration + timing::SOURCE_REPLY);
     write(
         &mut stream,
         &Request {
@@ -390,7 +383,14 @@ pub(super) fn request(
         },
     )
     .map_err(unknown_surrender)?;
-    finish_request(paths, expected, &source_binary, &ticket, &stream)
+    finish_request(
+        paths,
+        expected,
+        &source_binary,
+        &ticket,
+        &stream,
+        reply_deadline,
+    )
 }
 
 fn unknown_surrender(failure: CliFailure) -> CliFailure {
@@ -429,9 +429,18 @@ fn finish_request(
     source_binary: &str,
     ticket: &checkpoint::Ticket,
     stream: &UnixStream,
+    deadline: Option<Instant>,
 ) -> CliResult<ProcessOutcome> {
-    let mut replies = std::io::BufReader::new(stream);
+    stream
+        .set_read_timeout(None)
+        .map_err(|error| unknown_surrender(io_failure(error)))?;
+    let mut replies = std::io::BufReader::new(DeadlineRead { stream, deadline });
     loop {
+        if deadline.is_some_and(|end| Instant::now() >= end) {
+            return Err(unknown_surrender(io_failure(std::io::Error::from(
+                std::io::ErrorKind::TimedOut,
+            ))));
+        }
         match read_frame::<Answer>(&mut replies).map_err(unknown_surrender)? {
             Answer::Progress {
                 detail,
@@ -457,13 +466,31 @@ fn finish_request(
     }
 }
 
+struct DeadlineRead<'a> {
+    stream: &'a UnixStream,
+    deadline: Option<Instant>,
+}
+
+impl std::io::Read for DeadlineRead<'_> {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        if let Some(deadline) = self.deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(std::io::ErrorKind::TimedOut.into());
+            }
+            self.stream.set_read_timeout(Some(remaining))?;
+        }
+        std::io::Read::read(&mut self.stream, bytes)
+    }
+}
+
 fn wait_host(
     paths: &PlakPaths,
     binary: &str,
     source_binary: &str,
     ticket: &checkpoint::Ticket,
 ) -> CliResult<()> {
-    let deadline = Instant::now() + SUCCESSOR_BOUND;
+    let deadline = Instant::now() + timing::SUCCESSOR;
     let mut absent_since = None::<Instant>;
     while Instant::now() < deadline {
         let verdict = ticket.outcome(paths).map_err(|failure| {
@@ -479,8 +506,11 @@ fn wait_host(
             &socket(paths),
             Instant::now() + Duration::from_millis(100),
         ) {
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
-            if let Ok(identity) = read::<Identity>(&stream)
+            let mut reader = std::io::BufReader::new(DeadlineRead {
+                stream: &stream,
+                deadline: Some(deadline.min(Instant::now() + Duration::from_secs(1))),
+            });
+            if let Ok(identity) = read_frame::<Identity>(&mut reader)
                 && identity.key == crate::home::state::state_key()
                 && ticket.successor(&identity)
             {
@@ -892,10 +922,14 @@ mod tests {
         };
         let ticket = checkpoint::Ticket::new(&identity, binary).unwrap();
         let (reader, _unanswered) = UnixStream::pair().unwrap();
-        reader
-            .set_read_timeout(Some(Duration::from_millis(20)))
-            .unwrap();
-        let result = finish_request(&paths, binary, binary, &ticket, &reader);
+        let result = finish_request(
+            &paths,
+            binary,
+            binary,
+            &ticket,
+            &reader,
+            Some(Instant::now() + Duration::from_millis(20)),
+        );
         assert!(
             result
                 .unwrap_err()

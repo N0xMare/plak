@@ -6,7 +6,6 @@ pub(super) const PROBE: u64 = 30;
 pub(super) const DOCTOR: u64 = 45;
 pub(super) const BINDINGS: u64 = 75;
 pub(super) const CANARY: u64 = 105;
-pub(super) const UPGRADE: u64 = 720;
 pub(super) const RUNNER_INSPECTION: u64 = 60;
 pub(super) const GATEWAY_WAIT: u64 = 60;
 
@@ -32,18 +31,10 @@ pub(super) fn host(op: &HostOp) -> u64 {
             HostOp::StageHost { .. } => TRANSFER,
             HostOp::DestinationUnit { .. } => PROBE,
             HostOp::DestinationCanaryPreflight { .. } => PREFLIGHT,
-            HostOp::Upgrade {
-                drain, previous, ..
-            } => {
+            HostOp::Upgrade { drain, .. } => {
                 OBSERVE
                     + 2 * PROBE
-                    + UPGRADE
-                    + u64::from(*drain)
-                    + if previous.paired.is_empty() {
-                        0
-                    } else {
-                        3 * RUNNER_INSPECTION
-                    }
+                    + crate::carry::upgrade::timing::deploy_request(*drain).as_secs()
             }
             HostOp::WithdrawUpgrade { .. } => OBSERVE,
             HostOp::MarkProduction { .. } => 0,

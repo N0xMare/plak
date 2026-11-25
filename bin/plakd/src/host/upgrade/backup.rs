@@ -2,15 +2,15 @@
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use plakous_recursive_subagents_store::admission::copy_snapshot_bounded;
 
+use crate::carry::upgrade::timing::BACKUP as COPY_TIME;
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliResult};
 
 const MAX_BYTES: u64 = 512 * 1024 * 1024;
-const COPY_TIME: Duration = Duration::from_secs(60);
 const KEEP: usize = 3;
 
 pub(super) fn create(paths: &PlakPaths) -> CliResult<PathBuf> {

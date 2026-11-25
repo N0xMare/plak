@@ -310,33 +310,38 @@ pub(super) fn upgrade(
         "--drain",
         &format!("{drain}s"),
     ]);
-    let inspection = if previous.paired.is_empty() {
-        0
-    } else {
+    if !previous.paired.is_empty() {
         command.args(["--inspect-source", &previous.instance]);
         for runner in previous.paired.keys() {
             command.args(["--inspect-runner", runner]);
         }
-        3 * timing::RUNNER_INSPECTION
-    };
-    let reply = crate::operator_process::capture(
+    }
+    let reply = crate::operator_process::capture_with_stderr(
         command,
         Some(requester_input),
-        std::time::Duration::from_secs(timing::UPGRADE + u64::from(drain) + inspection),
+        crate::carry::upgrade::timing::deploy_request(drain),
         shipping::LIMIT,
-    )?;
+    ).map_err(|_| fail("host_upgrade_outcome_unknown: requester did not return; use deploy status before any new handoff"))?;
     if reply.status.success() {
         return Ok(());
     }
-    let refusal = super::RUNNER_INSPECTION_REFUSAL;
     let detail = std::str::from_utf8(&reply.stderr).ok().and_then(|stderr| {
         stderr
             .lines()
             .map(|line| line.strip_prefix("plakd: ").unwrap_or(line))
-            .find(|line| line.starts_with(refusal))
+            .find(|line| {
+                [
+                    super::RUNNER_INSPECTION_REFUSAL,
+                    "host_upgrade_outcome_unknown:",
+                    "host_upgrade_fix_forward_required:",
+                    "host_upgrade_source_restored:",
+                ]
+                .into_iter()
+                .any(|prefix| line.starts_with(prefix))
+            })
     });
     Err(fail(detail.unwrap_or(
-        "target host upgrade failed; inspect the requester on the target",
+        "host_upgrade_outcome_unknown: requester did not report a definite outcome; use deploy status before any new handoff",
     )))
 }
 

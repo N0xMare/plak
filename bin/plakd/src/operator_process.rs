@@ -21,10 +21,29 @@ pub(crate) struct Output {
 }
 
 pub(crate) fn capture(
+    command: Command,
+    input: Option<File>,
+    timeout: Duration,
+    limit: u64,
+) -> CliResult<Output> {
+    capture_bounded(command, input, timeout, limit, 4096)
+}
+
+pub(crate) fn capture_with_stderr(
+    command: Command,
+    input: Option<File>,
+    timeout: Duration,
+    limit: u64,
+) -> CliResult<Output> {
+    capture_bounded(command, input, timeout, limit, 64 * 1024)
+}
+
+fn capture_bounded(
     mut command: Command,
     input: Option<File>,
     timeout: Duration,
     limit: u64,
+    stderr_limit: u64,
 ) -> CliResult<Output> {
     let mut output = tempfile::tempfile().map_err(io)?;
     let mut errors = tempfile::tempfile().map_err(io)?;
@@ -50,7 +69,10 @@ pub(crate) fn capture(
         .take(limit + 1)
         .read_to_end(&mut stdout)
         .map_err(io)?;
-    errors.take(4096).read_to_end(&mut stderr).map_err(io)?;
+    errors
+        .take(stderr_limit)
+        .read_to_end(&mut stderr)
+        .map_err(io)?;
     check(
         stdout.len() as u64 <= limit,
         "command exceeded its output bound",

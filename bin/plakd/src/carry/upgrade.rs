@@ -8,6 +8,7 @@ use crate::{CliFailure, CliResult};
 #[cfg(feature = "web")]
 pub(crate) mod process;
 pub(crate) mod remote;
+pub(crate) mod timing;
 
 pub(crate) const PROTOCOL: u32 = 3;
 pub(crate) const RECEIPT_VERSION: u32 = 1;

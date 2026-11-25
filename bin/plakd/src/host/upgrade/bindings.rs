@@ -8,13 +8,12 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 // The explicit 200-head / 28.5 MB retained-state measurement emits 49 KB in
 // about 14 seconds. Leave headroom without making a pre-surrender probe unbounded.
 const OUTPUT_BYTES: u64 = 8 * 1024 * 1024;
-pub(in crate::host) const INSPECTION_TIME: Duration = Duration::from_secs(120);
+use crate::carry::upgrade::timing::BINDINGS as INSPECTION_TIME;
 
 #[cfg(test)]
 mod tests;
