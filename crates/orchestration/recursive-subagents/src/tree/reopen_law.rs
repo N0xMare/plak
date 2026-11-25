@@ -86,7 +86,13 @@ impl ProductAgentTree {
                 node.agent_id != self.root_agent_id
                     && matches!(node.status, NodeStatus::Running | NodeStatus::Interrupted)
             })
-            .filter(|node| self.has_turn_owner(&node.agent_id))
+            .filter(|node| {
+                self.has_turn_owner(&node.agent_id)
+                    || self.current_attempt(&node.agent_id).is_some_and(|attempt| {
+                        attempt.status == super::AttemptStatus::Submitted
+                            && attempt.turn_id.is_some()
+                    })
+            })
             .map(|node| node.agent_id.clone())
             .collect::<Vec<String>>();
         for (agent_id, attempt_id) in lost {

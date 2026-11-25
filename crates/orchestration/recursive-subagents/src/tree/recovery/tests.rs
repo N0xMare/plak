@@ -7,6 +7,81 @@ use crate::tree::test_support::*;
 use crate::tree::turn_outcome::FailedTurnDisposition;
 use crate::tree::*;
 
+#[test]
+fn recycled_submission_requires_exact_bound_fence_and_submitted_state() {
+    use plakous::sessions::feed::FeedTurnOutcome;
+
+    let (_tmp, mut tree) = tree();
+    let id = tree
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    tree.bind_attempt_turn(&id, "bound-turn").unwrap();
+    let mut terminal = ChildTerminal {
+        attempt_id: tree.attempt(&id).unwrap().attempt_id.clone(),
+        turn_id: "bound-turn".into(),
+        committed_at_ms: 5,
+        outcome: FeedTurnOutcome::RecoveryRequired,
+        seq: 1,
+    };
+    let eligible = |tree: &ProductAgentTree, terminal: &ChildTerminal| {
+        tree.has_recyclable_submission(&id, terminal)
+    };
+    assert!(!eligible(&tree, &terminal), "running with no submission");
+    let turn_token = tree.attempt(&id).unwrap().turn_token;
+    tree.submit_result(
+        &id,
+        &SubmitResultRequest {
+            turn_token,
+            output_json: r#"{"ok":true}"#.into(),
+        },
+        None,
+    )
+    .unwrap();
+    assert!(eligible(&tree, &terminal));
+
+    terminal.turn_id = "different-turn".into();
+    assert!(!eligible(&tree, &terminal), "terminal names another turn");
+    terminal.turn_id = "bound-turn".into();
+    let attempt = std::mem::replace(&mut terminal.attempt_id, AttemptId::new(&id, 2));
+    assert!(
+        !eligible(&tree, &terminal),
+        "terminal names another attempt"
+    );
+    terminal.attempt_id = attempt;
+
+    terminal.outcome = FeedTurnOutcome::Cancelled {
+        cause: plakous::sessions::feed::FeedCancelCause::Requested,
+    };
+    assert!(!eligible(&tree, &terminal), "terminal is not a fence");
+    terminal.outcome = FeedTurnOutcome::RecoveryRequired;
+
+    tree.nodes.get_mut(&id).unwrap().status = NodeStatus::Interrupted;
+    assert!(!eligible(&tree, &terminal), "the node is not running");
+    tree.nodes.get_mut(&id).unwrap().status = NodeStatus::Running;
+
+    tree.current_attempt_mut(&id).unwrap().status = AttemptStatus::Running;
+    assert!(
+        !eligible(&tree, &terminal),
+        "output without the submitted state"
+    );
+    tree.current_attempt_mut(&id).unwrap().status = AttemptStatus::Submitted;
+    let output = tree.current_attempt_mut(&id).unwrap().output_json.take();
+    assert!(
+        !eligible(&tree, &terminal),
+        "submitted state without stored output"
+    );
+    tree.current_attempt_mut(&id).unwrap().output_json = output;
+    tree.current_attempt_mut(&id).unwrap().failure = Some(AttemptFailure {
+        kind: "turn_failed".into(),
+        message: "recorded failure".into(),
+    });
+    assert!(
+        !eligible(&tree, &terminal),
+        "authoritative failure already recorded"
+    );
+}
+
 fn stuck_child(tree: &mut ProductAgentTree) -> String {
     let id = tree
         .spawn_agent("root", &spawn_req(), None)

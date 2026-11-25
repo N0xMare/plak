@@ -288,6 +288,7 @@ pub(crate) async fn lost_root_turn(
 pub(crate) enum RecoveryFence {
     LeaseLoss,
     Other,
+    Unproved,
 }
 
 pub(crate) async fn child_fence(
@@ -303,11 +304,7 @@ pub(crate) async fn child_fence(
         .run(sessions, scan, Some(locator.branch_id()))
         .await?;
     if let Some(fence) = scanned.fence.filter(|fence| fence.turn.turn_id == turn_id) {
-        return Ok(Some(if fence.lease_lost(sessions).await {
-            RecoveryFence::LeaseLoss
-        } else {
-            RecoveryFence::Other
-        }));
+        return Ok(Some(fence.classify(sessions).await));
     }
     Ok(None)
 }
@@ -319,17 +316,32 @@ struct FencedTerminal {
 
 impl FencedTerminal {
     async fn lease_lost(&self, sessions: &AgentSessions) -> bool {
+        self.classify(sessions).await == RecoveryFence::LeaseLoss
+    }
+
+    async fn classify(&self, sessions: &AgentSessions) -> RecoveryFence {
         let Some(request) = self.request else {
-            return false;
+            return RecoveryFence::Unproved;
         };
-        matches!(
-            sessions.feed_terminal(request).await,
+        match sessions.feed_terminal(request).await {
             Ok(FeedTerminalOutcome::Terminal(terminal))
-                if terminal.checkpoint() == request.checkpoint
-                    && matches!(terminal.result().outcome(),
-                        plakous::agent::TurnResultOutcome::RecoveryRequired(error)
-                            if error.is_durable_lease_loss())
-        )
+                if terminal.checkpoint() == request.checkpoint =>
+            {
+                match terminal.result().outcome() {
+                    plakous::agent::TurnResultOutcome::RecoveryRequired(error) => {
+                        if error.is_durable_lease_loss() {
+                            RecoveryFence::LeaseLoss
+                        } else if terminal.abandoned_turn().is_none() {
+                            RecoveryFence::Other
+                        } else {
+                            RecoveryFence::Unproved
+                        }
+                    }
+                    _ => RecoveryFence::Unproved,
+                }
+            }
+            _ => RecoveryFence::Unproved,
+        }
     }
 }
 

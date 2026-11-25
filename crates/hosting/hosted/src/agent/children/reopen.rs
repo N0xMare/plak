@@ -97,6 +97,26 @@ pub(in crate::agent) async fn recover_owed_children(
             ) => continue,
         };
         if let Some(child) = bound.get(&agent_id) {
+            if runtime
+                .read(|tree| {
+                    tree.attempt(&agent_id).is_some_and(|attempt| {
+                        attempt.status == crate::agent_tree_protocol::AttemptStatus::Submitted
+                            && attempt.failure.is_none()
+                    })
+                })
+                .unwrap_or(false)
+            {
+                let port = crate::agent::recovery::ParentSessionPort {
+                    parent: parent.clone(),
+                };
+                if let Err(reason) =
+                    crate::agent::recovery::recover_claimed_child(runtime, &port, &agent_id, None)
+                        .await
+                {
+                    faults.push((agent_id, reason.message));
+                }
+                continue;
+            }
             match recover_bound_child(parent, runtime, child).await {
                 Ok(()) => {}
                 Err(reason) => faults.push((agent_id, reason)),

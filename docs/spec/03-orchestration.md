@@ -1368,14 +1368,17 @@ Code Cell abandonment and local finalization debt alone are not missing
 executor evidence and must not be labelled `recovery_effect_evidence_refused`.
 An already-terminal root with only exact same-turn finalization debt closes
 quiescently on reopen (chapter 01 §5.5), without another result or
-abandonment report. A live waiter that closes such debt and releases the
-quiescent session without abandoning or restoring a turn completes an
-already-submitted attempt if the fence belongs to its exact bound turn.
-The host records this as attempt recovery; it does not publish a second
-runtime terminal. Absent that submission, the live waiter's successful
-recycle of a non-lease fence ends the attempt as `turn_abandoned`. When the
-waiter did not settle it, later recovery can keep the attempt open and
-record an interrupt without an owner-loss cause. A new parent followup
+abandonment report. A live waiter or successor that closes such debt and
+releases the quiescent session without abandoning or restoring a turn
+completes an already-submitted attempt with no recorded failure if the
+non-lease fence belongs to its exact bound turn. The host records this as
+attempt recovery; it does not publish a second runtime terminal. A
+successor owes this recovery even if the last process projected the fence
+and cleared the active-turn flag: the submitted attempt still binds the
+turn. Absent that submission, the live waiter's successful recycle of a
+non-lease fence ends the attempt as `turn_abandoned`. When the waiter did
+not settle it, later recovery can keep the attempt open and record an
+interrupt without an owner-loss cause. A new parent followup
 requires `acknowledge_recovery`;
 ordinary mail cannot start it. A fence
 whose reopen has not settled stays `recovery_required`. A proven lease
@@ -1383,6 +1386,9 @@ fence instead uses the owner-loss path (§14.1).
 An abandonment report already proves a successful recycle; only a reopen
 without that report needs a quiescent-head probe. A probe failure is logged as
 such and keeps the attempt recovery-required; it is not a reopen failure.
+After reopening, the waiter projects the child's feed even if release is
+refused. Refused release keeps a quiescent recycle recovery-required and
+reports the release failure, not a reopen refusal.
 
 Two refusals are terminal, because no retry can get past them: a head that
 needs effect evidence (`recovery_effect_evidence_refused`, any phase) and a
@@ -4636,8 +4642,9 @@ one that already ended or submitted and whose release alone was uncertain, and
 one whose startup never produced a session, which ends `failed` with kind
 `spawn_refused` (see the replay below). A quiescent reopen of retirement-only
 uncertainty with a durably submitted result settles `completed`, retaining that
-result and clearing the retirement failure. The live waiter's exact local
-finalization settlement is also a quiescent recovery of submitted output.
+result and clearing the retirement failure. Settling the exact bound
+turn's local finalization debt after submission also preserves the result,
+whether the waiter or a successor recovers it.
 An actually abandoned turn, or a recorded authoritative terminal failure,
 still settles failed even with submitted output. Close intent takes
 precedence over either outcome: any unresolved session

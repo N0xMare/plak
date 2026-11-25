@@ -184,10 +184,11 @@ impl ProductAgentTree {
         {
             return Ok(RecoveryNeed::NotRequired);
         }
-        if let Some(attempt) = self
-            .current_attempt(agent_id)
-            .filter(|attempt| node.fold_order.is_none() || attempt.session_outcome_unresolved())
-        {
+        if let Some(attempt) = self.current_attempt(agent_id).filter(|attempt| {
+            node.fold_order.is_none()
+                || attempt.session_outcome_unresolved()
+                || self.recovery_owed(agent_id) && attempt.status == AttemptStatus::Submitted
+        }) {
             return Ok(RecoveryNeed::Session {
                 attempt_id: attempt.attempt_id.clone(),
                 locator: if node.fold_order.is_none() {
@@ -371,7 +372,7 @@ impl ProductAgentTree {
 
     /// Replaces an unresolved session failure with the settled one a recovery
     /// reopen established. The attempt ends `failed`, except a quiescent
-    /// retirement-only recovery preserves a submitted result as `completed`.
+    /// recovery of submitted work can preserve its result as `completed`.
     /// When nothing else is pending the node is idle, so `followup` and `close_agent`
     /// work again, and partial work in the copy is sealed like any failed
     /// attempt's (a seal that failed earlier for the attempt is tried once
@@ -395,6 +396,7 @@ impl ProductAgentTree {
         let submitted_retirement = decision.submitted_retirement;
         let never_created = matches!(decision.resolution, RecoveryResolution::NeverCreated { .. });
         self.apply_host_recovery_attempt(decision);
+        self.recovery_settled(agent_id);
         self.terminal_recovery.remove(agent_id);
         let workspace_blocked = self.has_faulted_vcs_obligation(agent_id);
         let seal_pending = self.seal_effect_pending(agent_id);

@@ -29,6 +29,8 @@ pub enum HostCut {
     BeforeRootHandoff,
     /// Same-key child handoffs are recorded, before releasing the roots.
     AfterChildHandoffs,
+    /// The child terminal was projected, before its waiter recycles the session.
+    AfterChildFence,
     /// A reopen fenced the resident session, before its worker is joined.
     ReopenFenced,
     /// A reopen joined the released worker, before the binding repair.
@@ -45,7 +47,7 @@ pub enum HostCut {
 )]
 impl HostCut {
     /// Every cut, for tests that iterate the set. Selection does not read it.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::SkipReadopt,
         Self::Lease,
         Self::Transfer,
@@ -54,6 +56,7 @@ impl HostCut {
         Self::Terminals,
         Self::BeforeRootHandoff,
         Self::AfterChildHandoffs,
+        Self::AfterChildFence,
         Self::ReopenFenced,
         Self::ReopenReleased,
         Self::ReopenCarried,
@@ -72,6 +75,7 @@ impl HostCut {
             Self::Terminals => "terminals",
             Self::BeforeRootHandoff => "before-root-handoff",
             Self::AfterChildHandoffs => "after-child-handoffs",
+            Self::AfterChildFence => "after-child-fence",
             Self::ReopenFenced => "reopen:fenced",
             Self::ReopenReleased => "reopen:released",
             Self::ReopenCarried => "reopen:carried",
@@ -92,6 +96,7 @@ impl HostCut {
             "terminals" => Self::Terminals,
             "before-root-handoff" => Self::BeforeRootHandoff,
             "after-child-handoffs" => Self::AfterChildHandoffs,
+            "after-child-fence" => Self::AfterChildFence,
             "reopen:fenced" => Self::ReopenFenced,
             "reopen:released" => Self::ReopenReleased,
             "reopen:carried" => Self::ReopenCarried,

@@ -52,10 +52,10 @@ impl ProductAgentTree {
                 resolution,
                 RecoveryResolution::RecoveredWithoutTurn { .. }
             ) && attempt.output_json.is_some()
-                && attempt
-                    .failure
-                    .as_ref()
-                    .is_some_and(|failure| failure.kind == "session_retirement"),
+                && match &attempt.failure {
+                    Some(failure) => failure.kind == "session_retirement",
+                    None => attempt.status == AttemptStatus::Submitted,
+                },
             resolution,
         };
         self.save_host_recovery(agent_id, &decision)

@@ -3370,7 +3370,55 @@ fn code_cell_scope_refusal_is_not_executor_evidence_refusal() {
 
 #[tokio::test]
 async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
-    let fixture = Fixture::new("recover-quiescent-recycle");
+    submitted_fence_waiter("recover-quiescent-recycle", false, None, false).await;
+}
+
+#[tokio::test]
+async fn submitted_lease_fence_does_not_complete() {
+    submitted_fence_waiter(
+        "recover-submitted-lease-fence",
+        true,
+        Some(crate::agent::children::recycle_tests::Fault::LeaseFence),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn submitted_fence_that_restored_a_turn_does_not_complete() {
+    submitted_fence_waiter(
+        "recover-submitted-restored-turn",
+        true,
+        Some(crate::agent::children::recycle_tests::Fault::RestoredTurn),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn submitted_fence_with_release_refusal_does_not_complete() {
+    submitted_fence_waiter(
+        "recover-submitted-release-refused",
+        true,
+        Some(crate::agent::children::recycle_tests::Fault::Release),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_submitted_fence_completes_after_another_reader_projected_its_terminal() {
+    submitted_fence_waiter("recover-submitted-already-projected", true, None, true).await;
+}
+
+async fn submitted_fence_waiter(
+    name: &str,
+    submitted: bool,
+    fault: Option<crate::agent::children::recycle_tests::Fault>,
+    preprojected: bool,
+) {
+    use crate::agent::children::{ChildFeedSource, recycle_tests};
+    let fixture = Fixture::new(name);
     let id = fixture.spawn();
     let (held, handle, control) = fixture.start_failing_turn(&fixture.sessions(), &id).await;
     let turn = handle.turn_id();
@@ -3379,17 +3427,62 @@ async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
     let locator = fixture.quiescent_after_reopen(locator).await;
     assert!(fixture.sessions().head_is_quiescent(locator).await.unwrap());
     fixture.bind_turn(&id, &locator, turn);
+    if submitted {
+        let child = id.clone();
+        fixture
+            .runtime
+            .mutate_then_emit(false, move |tree| {
+                let turn_token = tree.attempt(&child).unwrap().turn_token;
+                tree.submit_result(
+                    &child,
+                    &crate::agent_tree_protocol::SubmitResultRequest {
+                        turn_token,
+                        output_json: r#"{"ok":true}"#.into(),
+                    },
+                    None,
+                )
+                .map(|_| ())
+                .map_err(|error| error.message)
+            })
+            .await
+            .unwrap();
+    }
+    if preprojected {
+        crate::agent::ledger::project_feed(
+            &fixture.runtime,
+            &id,
+            &fixture.sessions(),
+            locator.session_id(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            fixture
+                .runtime
+                .read(|tree| {
+                    !tree.node(&id).unwrap().active_turn
+                        && tree.attempt(&id).unwrap().turn_id.as_deref()
+                            == Some(turn.to_string().as_str())
+                })
+                .unwrap()
+        );
+    }
+    if let Some(fault) = fault {
+        recycle_tests::install(fixture.runtime.driver(), fault);
+    }
+    let attached = AttachedCodingSession {
+        output_bound_rederived: None,
+        reachability_probe: None,
+        sessions: fixture.sessions(),
+        opened: None,
+        recovered_turn: None,
+        locator,
+        topology_owner: None,
+    };
+    let feed = preprojected.then(|| ChildFeedSource::of(&attached));
     let live = crate::agent::live::ChildActorHandle::new(
         &fixture.runtime.driver().release_owners(),
-        AttachedCodingSession {
-            output_bound_rederived: None,
-            reachability_probe: None,
-            sessions: fixture.sessions(),
-            opened: None,
-            recovered_turn: None,
-            locator,
-            topology_owner: None,
-        },
+        attached,
         turn,
         control,
     );
@@ -3407,7 +3500,7 @@ async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
             .unwrap(),
         Arc::clone(&fixture.runtime.live),
         None,
-        None,
+        feed,
         handle,
     );
     tokio::time::timeout(Duration::from_secs(30), async {
@@ -3420,8 +3513,53 @@ async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
     })
     .await
     .unwrap();
-    assert_eq!(fixture.status(&id), NodeStatus::Failed);
-    assert_eq!(fixture.failure_kind(&id).as_deref(), Some(TURN_ABANDONED));
+    match fault {
+        Some(recycle_tests::Fault::Release) => {
+            use plakous::sessions::feed::{FeedCursor, FeedPage, FeedPageRequest};
+
+            assert_eq!(fixture.status(&id), NodeStatus::RecoveryRequired);
+            let session = locator.session_id();
+            let FeedPage::Records { tail, .. } = fixture
+                .sessions()
+                .feed_page(FeedPageRequest::after(FeedCursor::start(session)))
+                .await
+                .unwrap()
+            else {
+                panic!("the reopen ledger should still be retained");
+            };
+            fixture
+                .runtime
+                .read(|tree| {
+                    let failure = tree.attempt(&id).unwrap().failure.as_ref().unwrap();
+                    assert!(
+                        failure.message.contains("reopened, but releasing"),
+                        "{failure:?}"
+                    );
+                    assert_eq!(tree.feed_read_cursor(&session.to_string()), tail.get());
+                })
+                .unwrap();
+        }
+        None if submitted => {
+            assert_eq!(fixture.status(&id), NodeStatus::Completed);
+            assert_eq!(
+                fixture
+                    .runtime
+                    .read(|tree| tree
+                        .messages()
+                        .values()
+                        .filter(|mail| {
+                            mail.from == id && mail.purpose == MessagePurpose::Result
+                        })
+                        .count())
+                    .unwrap(),
+                1
+            );
+        }
+        _ => {
+            assert_eq!(fixture.status(&id), NodeStatus::Failed);
+            assert_eq!(fixture.failure_kind(&id).as_deref(), Some(TURN_ABANDONED));
+        }
+    }
 }
 
 async fn bind_recorded_lease_fence(fixture: &Fixture, id: &str) {

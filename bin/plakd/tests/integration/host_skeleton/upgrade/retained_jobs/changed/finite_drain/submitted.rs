@@ -9,16 +9,26 @@ use plakous_recursive_subagents::protocol::AttemptStatus;
 
 #[test]
 fn an_automatically_continued_child_delivers_its_submission() {
-    continued_child_delivers_submission(false);
+    continued_child_delivers_submission(false, false);
 }
 
 #[test]
 fn a_manually_resumed_child_delivers_its_submission() {
-    continued_child_delivers_submission(true);
+    continued_child_delivers_submission(true, false);
 }
 
-fn continued_child_delivers_submission(manual: bool) {
+#[test]
+fn a_submitted_child_result_survives_a_crash_after_the_fence() {
+    continued_child_delivers_submission(false, true);
+}
+
+fn continued_child_delivers_submission(manual: bool, crash: bool) {
     let Some(fixture) = fixture() else { return };
+    let fixture = if crash {
+        fixture.with_session_lease_seconds(2)
+    } else {
+        fixture
+    };
     let mut sut = FiniteDrain::new(fixture);
     let cut = sut.fixture.root.join("process-cleanup-cut");
     std::fs::create_dir(&cut).unwrap();
@@ -26,6 +36,14 @@ fn continued_child_delivers_submission(manual: bool) {
         "PLAK_TEST_PROCESS_CLEANUP_CUT",
         cut.to_str().unwrap().to_owned(),
     ));
+    if crash {
+        sut.environment.push((
+            "PLAK_TEST_HOST_READOPT_CUT",
+            plakous_hosted::test_support_runner::HostCut::AfterChildFence
+                .name()
+                .into(),
+        ));
+    }
     let (mut host, child) = child_with_pending_root(
         &sut,
         manual.then(|| {
@@ -85,6 +103,33 @@ fn continued_child_delivers_submission(manual: bool) {
     let armed = cut.join(locator.session_id().to_string());
     std::fs::write(&armed, "").unwrap();
     std::fs::write(terminal, "").unwrap();
+    if crash {
+        use std::os::unix::process::ExitStatusExt as _;
+        assert_eq!(
+            runner::cut_exit(host.child.as_mut().unwrap()).signal(),
+            Some(9)
+        );
+        let crashed = read();
+        assert_eq!(
+            crashed.attempt(&id).unwrap().status,
+            AttemptStatus::Submitted
+        );
+        assert!(crashed.attempt(&id).unwrap().failure.is_none());
+        assert!(!crashed.node(&id).unwrap().active_turn);
+        let mut replacement = image_command(&sut.fixture, &sut.image);
+        replacement
+            .envs(
+                sut.environment
+                    .iter()
+                    .filter(|(key, _)| *key != "PLAK_TEST_HOST_READOPT_CUT")
+                    .cloned(),
+            )
+            .arg("host");
+        host = await_serving_host(spawn_host(&mut replacement)).unwrap();
+        let mut client = Client::connect(&host);
+        runner::remote_ready(&mut client, &sut.paired.id);
+        client.attach(12, &child.parent);
+    }
 
     let deadline = Instant::now() + WAIT;
     let command_id =

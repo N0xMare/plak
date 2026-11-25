@@ -51,6 +51,8 @@ pub use bind::{ChildBoundBind, spawn_child_start_composition, spawned_child_spec
 pub use turns::{persist_or_fault, retire_live_child, settle_or_fault};
 #[cfg(any(test, feature = "test-support"))]
 pub use waiter::finalize_topology_child_turn;
+#[cfg(test)]
+pub(in crate::agent) use waiter::recycle_tests;
 
 pub(crate) use bind::assignment_start_prompt;
 pub(crate) use reopen::incompatible_session_message;
