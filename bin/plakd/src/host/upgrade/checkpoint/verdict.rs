@@ -113,11 +113,6 @@ pub(in crate::host) fn operate(
     acknowledge: Option<Uuid>,
     output: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
-    let verdict = if let Some(id) = acknowledge {
-        acknowledge_verdict(paths, id)?
-    } else {
-        read(paths)?
-    };
     #[derive(Serialize)]
     struct Report {
         id: Option<Uuid>,
@@ -126,6 +121,11 @@ pub(in crate::host) fn operate(
         phase: Option<&'static str>,
         acknowledged: bool,
     }
+    let verdict = if let Some(id) = acknowledge {
+        acknowledge_verdict(paths, id)?
+    } else {
+        read(paths)?
+    };
     let phase = verdict
         .as_ref()
         .and_then(|verdict| verdict.outcome.get("Failed"))

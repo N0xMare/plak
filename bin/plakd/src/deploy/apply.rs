@@ -796,13 +796,12 @@ impl<F: Fleet> Deploy<'_, F> {
                 self.withdraw_host(&observed, pending, log, report)?;
                 return Err(error.into());
             }
-            let failure: CliFailure = error.into();
             return Err(
-                if failure
+                if error
                     .message()
                     .starts_with("host_upgrade_fix_forward_required:")
                 {
-                    Halt::reconcile(failure.message())
+                    Halt::reconcile(error.message())
                 } else {
                     detached()
                 },
