@@ -48,6 +48,7 @@ pub(crate) fn preflight_upgrade_service(
     if let Some(web) = &command.web {
         crate::web::preflight(services, web)?;
     }
+    upgrade::health::stores(paths)?;
     store_revisions::rehearse_for_service(paths, probe)
 }
 
@@ -126,7 +127,44 @@ pub(crate) fn run_host_command(
         crate::command::HostStart::Supervisor => return starter::supervise(services.paths()?),
         crate::command::HostStart::Foreground | crate::command::HostStart::Detached => {}
     }
-    serve_host(services, command, inherited)
+    let paths = services.paths()?;
+    let checkpoint = if inherited.is_some() {
+        upgrade::checkpoint::Checkpoint::inherited(paths, crate::build_identity::binary_id())?
+    } else {
+        None
+    };
+    let mut gate = UpgradeGate {
+        checkpoint,
+        stage: upgrade::checkpoint::Failure::Startup,
+    };
+    let outcome = serve_host(services, command, inherited, &mut gate);
+    if let (Err(error), Some(checkpoint)) = (&outcome, gate.checkpoint) {
+        eprintln!("host upgrade: {}", error.message());
+        checkpoint.ticket.record(paths, gate.stage);
+        return Err(gate.stage.fix_forward());
+    }
+    outcome
+}
+
+struct UpgradeGate {
+    checkpoint: Option<upgrade::checkpoint::Checkpoint>,
+    stage: upgrade::checkpoint::Failure,
+}
+
+impl UpgradeGate {
+    fn verify(&mut self, paths: &crate::home::paths::PlakPaths) -> CliResult<()> {
+        let Some(checkpoint) = &mut self.checkpoint else {
+            return Ok(());
+        };
+        let _writers = crate::carry::upgrade::admission(paths, true)?;
+        self.stage = upgrade::checkpoint::Failure::Health;
+        upgrade::health::stores(paths)?;
+        self.stage = upgrade::checkpoint::Failure::Preservation;
+        checkpoint.verify_destination(paths)?;
+        crate::carry::upgrade::crash_cut("after-destination-verification");
+        self.stage = upgrade::checkpoint::Failure::Startup;
+        Ok(())
+    }
 }
 
 pub(crate) fn abort_child_retirement(
@@ -181,6 +219,7 @@ fn serve_host(
     services: &Services,
     command: &HostCommand,
     inherited: Option<reexec::Inherited>,
+    gate: &mut UpgradeGate,
 ) -> CliResult<ProcessOutcome> {
     let host_arguments = Arc::new(upgrade::host_argv(command)?);
     // Arm reload before any startup I/O, even for a control-only host.
@@ -212,6 +251,7 @@ fn serve_host(
         inherited,
     )?;
     store_revisions::upgrade_stopped(paths, stores_pending, &ownership.state)?;
+    gate.verify(paths)?;
     let environment = environment.unwrap_or_else(environment::HostEnvironment::capture);
     let opened = open_host(
         services,
@@ -242,7 +282,7 @@ fn serve_host(
         stop,
         binary,
     };
-    owner.run(command.start, host_arguments)
+    owner.run(command.start, host_arguments, gate)
 }
 
 struct HostOwnership {
@@ -342,6 +382,7 @@ impl RunningHost {
         self,
         start: crate::command::HostStart,
         host_arguments: Arc<Vec<String>>,
+        gate: &mut UpgradeGate,
     ) -> CliResult<ProcessOutcome> {
         let Self {
             mut listeners,
@@ -387,6 +428,9 @@ impl RunningHost {
         let startup_failed = Arc::clone(&startup.failed);
         ownership.state.running()?;
         ownership.home.running()?;
+        // Startup failures after this point go through the existing host
+        // lifecycle. The coordinator still waits for continuation inventory.
+        gate.checkpoint = None;
         let stopping = runtime.block_on(listeners.control.serve(
             &host,
             move || {

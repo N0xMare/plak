@@ -7,6 +7,9 @@ use super::{
 use plakous_agent::internal::CheckpointRecoveryVerdict;
 use {plakous_store::SqliteSessionStore, std::path::Path};
 
+#[doc(hidden)]
+pub use plakous_store::PreservationReader;
+
 /// Construct a verification-only facade over exact SQLite reads, without
 /// opening its writer or bootstrapping supported legacy DDL.
 ///

@@ -271,7 +271,14 @@ pub(crate) fn copy(path: &Path, output: &mut impl Write, expected: &FileFacts) -
 }
 
 fn hash_file(path: &Path, limit: u64, output: &mut impl Write) -> CliResult<(u64, String)> {
-    let mut source = open(path)?;
+    hash_reader(open(path)?, limit, output)
+}
+
+pub(crate) fn hash_reader(
+    mut source: impl Read,
+    limit: u64,
+    output: &mut impl Write,
+) -> CliResult<(u64, String)> {
     let mut sha = Sha256::new();
     let mut buffer = vec![0; 64 * 1024];
     let mut length = 0;
@@ -317,7 +324,7 @@ pub(crate) fn digest(bytes: &[u8]) -> String {
     hex_digest(&Sha256::digest(bytes))
 }
 
-fn hex_digest(bytes: &[u8]) -> String {
+pub(crate) fn hex_digest(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 16] = b"0123456789abcdef";
     bytes
         .iter()

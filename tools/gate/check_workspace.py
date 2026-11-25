@@ -1527,6 +1527,9 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     ("plakd", "src/carry/upgrade.rs"): {"runner": {"protocol", "VersionTriple"}},
     ("plakd", "src/host/upgrade.rs"): {"runner": {"protocol", "VersionTriple"}},
+    ("plakd", "src/host/upgrade/preservation/runtime.rs"): {
+        "sessions": {"rehearsal::PreservationReader"},
+    },
     ("plakd", "src/host/upgrade/runner_carry.rs"): {
         "runner": {"protocol", "LineStatus", "VersionTriple"}
     },

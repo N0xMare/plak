@@ -7,6 +7,62 @@ use super::{
 };
 use std::path::Path;
 
+/// Host upgrade's read-only view of a single runtime transaction.
+#[doc(hidden)]
+pub struct PreservationReader<'a>(&'a Connection);
+
+impl PreservationReader<'_> {
+    /// Run a preservation read over one admitted snapshot.
+    ///
+    /// # Errors
+    /// Returns the usual read-only runtime admission failures.
+    pub fn inspect<T>(
+        path: &Path,
+        read: impl FnOnce(&PreservationReader<'_>) -> T,
+    ) -> Result<T, SessionStoreError> {
+        let connection =
+            SqliteSessionStore::open_inspection(path)?.ok_or(SessionStoreError::NotFound)?;
+        let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
+        admit_inspection_snapshot(&snapshot)?;
+        Ok(read(&PreservationReader(&snapshot)))
+    }
+
+    /// Borrows the admitted reader for preservation row hashing.
+    #[must_use]
+    pub const fn connection(&self) -> &Connection {
+        self.0
+    }
+
+    /// Verify the native seal of a horizon retained in this snapshot.
+    ///
+    /// # Errors
+    /// Refuses a missing, malformed or unsealed horizon.
+    pub fn validate_horizon(
+        &self,
+        session: super::SessionId,
+        branch: plakous_agent::internal::BranchId,
+    ) -> Result<(), SessionStoreError> {
+        super::rows::load_horizon(self.0, SessionRef::new(session, branch))?
+            .ok_or_else(SessionStoreError::corrupt)?;
+        Ok(())
+    }
+
+    /// Visit sealed Advanced records on the exact branch beyond the anchor.
+    /// Retention never substitutes for evidence of acceptance.
+    ///
+    /// # Errors
+    /// Refuses a malformed row, payload or seal.
+    pub fn visit_advances(
+        &self,
+        session: super::SessionId,
+        branch: plakous_agent::internal::BranchId,
+        after: u64,
+        visit: impl FnMut(plakous_agent::internal::FeedRecord) -> bool,
+    ) -> Result<(), SessionStoreError> {
+        super::feed::visit_advances(self.0, SessionRef::new(session, branch), after, visit)
+    }
+}
+
 impl SqliteSessionStore {
     /// Checks the irreversible facts for a child-retirement abort.
     /// The caller must exclude every writer until the tree intent is removed.

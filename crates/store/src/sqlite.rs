@@ -59,6 +59,7 @@ mod gc_tests;
 mod index_tests;
 mod inspection;
 mod inspection_backend;
+pub use inspection::PreservationReader;
 #[cfg(test)]
 mod lease_sync_tests;
 mod lines;

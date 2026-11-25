@@ -119,6 +119,28 @@ impl Schema {
         self.classify(&snapshot)
     }
 
+    /// Read a known revision and its rows from the same snapshot, without a writer.
+    ///
+    /// # Errors
+    /// Refuses an absent, unsupported, or unreadable store.
+    pub fn inspect_existing<T>(
+        &self,
+        path: &Path,
+        read: impl FnOnce(&Connection, Status) -> T,
+    ) -> Result<T, AdmissionError> {
+        let connection = self
+            .open_reader(path)?
+            .ok_or_else(|| self.unavailable("is not initialized"))?;
+        let snapshot = connection
+            .unchecked_transaction()
+            .map_err(|_| self.unavailable("inspection could not start"))?;
+        let status = self.classify(&snapshot)?;
+        if status == Status::Fresh {
+            return Err(self.unavailable("is not initialized"));
+        }
+        Ok(read(&snapshot, status))
+    }
+
     /// Check only the revision, without creating the file or inspecting its shape.
     /// Callers that only fence incompatible builds leave other errors to open.
     pub fn check_revision(&self, path: &Path) -> Result<(), AdmissionError> {

@@ -491,23 +491,48 @@ pub fn inspect_state_database(path: &Path, current: i64) -> DatabaseStatus {
         Ok(_) => return DatabaseStatus::Incompatible,
         Err(error) => return state_database_error(error),
     }
-    let checks = (|| -> rusqlite::Result<Option<String>> {
-        let integrity: String =
-            connection.query_row("PRAGMA integrity_check(1)", [], |row| row.get(0))?;
-        if integrity != "ok" {
-            return Ok(Some(integrity));
-        }
-        let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
-        if statement.query([])?.next()?.is_some() {
-            return Ok(Some("foreign key check failed".to_owned()));
-        }
-        Ok(None)
-    })();
-    match checks {
+    match sqlite_integrity(&connection, "PRAGMA integrity_check(1)") {
         Ok(None) => DatabaseStatus::Available,
         Ok(Some(reason)) => DatabaseStatus::Corrupt(reason),
         Err(error) => state_database_error(error),
     }
+}
+
+fn sqlite_integrity(
+    connection: &rusqlite::Connection,
+    check: &str,
+) -> rusqlite::Result<Option<String>> {
+    let integrity: String = connection.query_row(check, [], |row| row.get(0))?;
+    if integrity != "ok" {
+        return Ok(Some(integrity));
+    }
+    let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
+    if statement.query([])?.next()?.is_some() {
+        return Ok(Some("foreign key check failed".to_owned()));
+    }
+    Ok(None)
+}
+
+#[cfg(feature = "web")]
+pub(crate) fn upgrade_database_healthy(path: &Path, deadline: std::time::Instant) -> bool {
+    use rusqlite::{Connection, OpenFlags};
+    use std::time::{Duration, Instant};
+
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+        Ok(metadata) if metadata.is_file() => {}
+        _ => return false,
+    }
+    let check = || -> rusqlite::Result<bool> {
+        let mut connection = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        connection.busy_timeout(Duration::from_millis(250))?;
+        connection.progress_handler(4096, Some(move || Instant::now() >= deadline))?;
+        Ok(sqlite_integrity(&connection, "PRAGMA quick_check(1)")?.is_none())
+    };
+    Instant::now() < deadline && check().unwrap_or(false)
 }
 
 fn state_database_error(error: rusqlite::Error) -> DatabaseStatus {

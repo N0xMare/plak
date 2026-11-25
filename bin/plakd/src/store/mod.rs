@@ -1289,7 +1289,7 @@ fn sync_queue(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), RecordStore
         .iter()
         .filter(|(id, _, _)| !s.pending_queue.iter().any(|item| &item.id == id))
     {
-        let binding = digest_parts(&[&s.id, &revision.to_string(), &digest_parts(&[text])]);
+        let binding = queue_tombstone_digest(&s.id, &revision.to_string(), text);
         let changed=tx.execute("UPDATE identity_bindings SET binding_digest=?3,terminal_disposition=?4,terminal_outcome=?5 WHERE identity=?1 AND kind='queue' AND owner_session_id=?2 AND binding_digest=?2 AND terminal_disposition IS NULL",params![item_id,s.id,binding,"deleted",None::<&str>]).map_err(|_|"could not seal removed queue identity".to_owned())?;
         if changed != 1 {
             return Err("queue tombstone contradicts durable state"
@@ -1349,6 +1349,10 @@ fn sync_queue(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), RecordStore
         }
     }
     Ok(())
+}
+
+pub(crate) fn queue_tombstone_digest(root: &str, revision: &str, text: &str) -> String {
+    digest_parts(&[root, revision, &digest_parts(&[text])])
 }
 
 fn sync_prompt_history(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), RecordStoreError> {

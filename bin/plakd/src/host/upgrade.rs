@@ -2,6 +2,9 @@
 
 mod backup;
 mod bindings;
+pub(super) mod checkpoint;
+pub(super) mod health;
+mod preservation;
 mod progress;
 mod qualification;
 mod reopen;
@@ -299,18 +302,21 @@ pub(super) fn request(
     if source.key != crate::home::state::state_key() {
         return Err(CliFailure::new(OFFLINE_MIGRATION_REQUIRED));
     }
+    let _checkpoint_owner = checkpoint::claim(paths)?;
     if let Some(inspection) = &inspection {
         requester::prove_deploy_source(paths, inspection)?;
     }
     super::store_revisions::rehearse_runtime(paths)?;
-    let mut stream = connect(paths, Some(PROBE_BOUND))?;
+    let stream = connect(paths, Some(PROBE_BOUND))?;
     let identity: Identity = read(&stream)?;
+    drop(stream);
     if identity.protocol != crate::carry::upgrade::PROTOCOL {
         return Err(CliFailure::new(
             "host_upgrade_unsupported_source: coordinator protocol differs; settle and drain using the retained source build before starting this destination",
         ));
     }
     if identity.key != source.key
+        || identity.deploy_idle == Some(false)
         || !crate::carry::upgrade::binary_id_valid(&identity.binary)
         || plakous_recursive_subagents::tree::HostInstance::parse(&identity.instance).is_err()
         || inspection
@@ -330,17 +336,20 @@ pub(super) fn request(
     let destination =
         std::fs::canonicalize(std::env::current_exe().map_err(io_failure)?).map_err(io_failure)?;
     process::verify_image(&destination, expected)?;
+    let ticket = checkpoint::Ticket::new(&identity, expected);
     if backup_store {
-        drop(stream);
         let backup = backup::create(paths)?;
         eprintln!("host upgrade: store backup saved at {}", backup.display());
-        stream = connect(paths, Some(PROBE_BOUND))?;
-        if read::<Identity>(&stream)? != identity {
-            return Err(CliFailure::new(
-                "host upgrade source identity changed during backup; no upgrade requested",
-            ));
-        }
     }
+    let (baseline, _) = preservation::Snapshot::capture(paths, None)?;
+    let staged = ticket.stage(paths, &baseline)?;
+    let mut stream = connect(paths, Some(PROBE_BOUND))?;
+    if read::<Identity>(&stream)? != identity {
+        return Err(CliFailure::new(
+            "host upgrade source identity changed during checkpoint; no upgrade requested",
+        ));
+    }
+    checkpoint::Ticket::publish(paths, staged)?;
     stream
         .set_read_timeout(
             drain
@@ -348,7 +357,7 @@ pub(super) fn request(
                 .map(|duration| duration + Duration::from_secs(600)),
         )
         .map_err(io_failure)?;
-    let prior_instance = identity.instance.clone();
+    let source_binary = identity.binary.clone();
     write(
         &mut stream,
         &Request {
@@ -364,7 +373,7 @@ pub(super) fn request(
                 .map_or_else(Vec::new, |inspection| inspection.deploy_inspect_runners),
         },
     )?;
-    finish_request(paths, expected, &prior_instance, &stream)
+    finish_request(paths, expected, &source_binary, &ticket, &stream)
 }
 
 fn connect(paths: &PlakPaths, timeout: Option<Duration>) -> CliResult<UnixStream> {
@@ -380,7 +389,8 @@ fn connect(paths: &PlakPaths, timeout: Option<Duration>) -> CliResult<UnixStream
 fn finish_request(
     paths: &PlakPaths,
     expected: &str,
-    prior_instance: &str,
+    source_binary: &str,
+    ticket: &checkpoint::Ticket,
     stream: &UnixStream,
 ) -> CliResult<ProcessOutcome> {
     let mut replies = std::io::BufReader::new(stream);
@@ -394,34 +404,58 @@ fn finish_request(
                 eprintln!("host upgrade: {detail}");
             }
             Answer::Abandoned { .. } | Answer::Ready { receipt: Some(_) } => {
+                checkpoint::Ticket::clear(paths);
                 return Err(CliFailure::new(OFFLINE_MIGRATION_REQUIRED));
             }
-            Answer::Refused(refusal) => return Err(CliFailure::new(refusal.detail)),
+            Answer::Refused(refusal) => {
+                checkpoint::Ticket::clear(paths);
+                return Err(CliFailure::new(refusal.detail));
+            }
             Answer::Ready { receipt: None } => {
-                wait_host(paths, expected, prior_instance)?;
+                wait_host(paths, expected, source_binary, ticket)?;
+                checkpoint::Ticket::clear(paths);
                 return Ok(ProcessOutcome::Success);
             }
         }
     }
 }
 
-fn wait_host(paths: &PlakPaths, binary: &str, prior_instance: &str) -> CliResult<()> {
-    let deadline = Instant::now() + Duration::from_secs(90);
+fn wait_host(
+    paths: &PlakPaths,
+    binary: &str,
+    source_binary: &str,
+    ticket: &checkpoint::Ticket,
+) -> CliResult<()> {
+    let deadline = Instant::now() + Duration::from_secs(180);
     while Instant::now() < deadline {
+        if let Some(failure) = ticket.failure(paths)? {
+            return Err(failure.fix_forward());
+        }
         if let Ok(stream) = crate::wire_transport::hosts::socket_until(
             &socket(paths),
             Instant::now() + Duration::from_millis(100),
         ) {
             let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
-            if matches!(read::<Identity>(&stream), Ok(identity) if identity.key == crate::home::state::state_key() && identity.binary == binary && identity.instance != prior_instance)
+            if let Ok(identity) = read::<Identity>(&stream)
+                && identity.key == crate::home::state::state_key()
+                && ticket.successor(&identity)
             {
-                return Ok(());
+                if identity.binary == binary {
+                    return Ok(());
+                }
+                if identity.binary == source_binary {
+                    return Err(CliFailure::classified(
+                        crate::CliFailureKind::Retryable,
+                        "host_upgrade_source_restored: destination exec did not take ownership; source is serving again",
+                    ));
+                }
             }
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    Err(CliFailure::new(
-        "host_upgrade_outcome_unknown: expected host has not acknowledged readiness; if it stopped, start the destination build",
+    Err(CliFailure::classified(
+        crate::CliFailureKind::RecoveryRequired,
+        "host_upgrade_outcome_unknown: destination readiness is unproven after surrender; inspect the live owner and logs before starting the destination build",
     ))
 }
 
@@ -708,6 +742,7 @@ fn prepare(
     if inspect_runner {
         runner_carry::held(&request, services, runtime)?;
     }
+    checkpoint::Checkpoint::held(paths, &request.source_instance, &request.expected_binary)?;
     image.recheck(&request.destination)?;
     check_cancel(cancelled)?;
     Ok(Ready {
