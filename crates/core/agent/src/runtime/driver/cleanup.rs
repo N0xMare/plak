@@ -454,6 +454,15 @@ impl Driver {
     }
 
     async fn cleanup_joined_process_sessions(&mut self, turn_id: TurnId) -> Result<(), AgentError> {
+        if crate::test_hooks::take_process_cleanup_cut(|| {
+            self.authority.checkpoint().manifest().topology().session_id
+        }) {
+            self.process_session_cleanup_uncertainty = Some(turn_id);
+            return Err(AgentError::new(
+                AgentErrorKind::OutcomeUnknown,
+                "injected loss of the process cleanup proof",
+            ));
+        }
         if self.process_session_cleanup_uncertainty == Some(turn_id) {
             return Err(AgentError::new(
                 AgentErrorKind::OutcomeUnknown,

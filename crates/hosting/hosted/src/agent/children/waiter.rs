@@ -296,8 +296,7 @@ impl crate::node::TurnRole<()> for ChildTurns {
                     error_kind = ?error.kind(), "child recovery left to the committed handoff");
                 return AfterTerminal::Settled(());
             }
-            warn_recovery_required(&agent_id, attempt, completed_turn, error.kind());
-            project_turn_end(&driver, feed.as_ref(), &agent_id, completed_turn).await;
+            let ended = project_turn_end(&driver, feed.as_ref(), &agent_id, completed_turn).await;
             if driver
                 .read(|tree| identity.still_owns(tree, &agent_id))
                 .unwrap_or(false)
@@ -321,6 +320,36 @@ impl crate::node::TurnRole<()> for ChildTurns {
             retire_live_child(&driver, live, &agent_id, completed_turn).await;
             let lease_fence = error.is_durable_lease_loss().then_some(completed_turn);
             let recycled = recycle_fenced_child(&driver, &agent_id, lease_fence).await;
+            if lease_fence.is_none()
+                && matches!(
+                    recycled,
+                    Some(FencedChildRecycle::Quiescent {
+                        restored_turn: false
+                    })
+                )
+                && let Some(ended) = ended.filter(|ended| {
+                    ended.turn_id == completed_turn.to_string()
+                        && driver
+                            .read(|tree| tree.has_recyclable_submission(&agent_id, ended))
+                            .unwrap_or(false)
+                })
+            {
+                if end_attempt_work(&driver, live, &agent_id, &identity)
+                    .await
+                    .is_ok()
+                {
+                    finalize_recycled_submission(
+                        &driver,
+                        &agent_id,
+                        ended,
+                        result,
+                        observer.as_ref(),
+                    )
+                    .await;
+                }
+                return AfterTerminal::Settled(());
+            }
+            warn_recovery_required(&agent_id, attempt, completed_turn, error.kind());
             let (disposition, message) = match recycled {
                 Some(FencedChildRecycle::Abandoned(report)) => (
                     crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
@@ -328,7 +357,7 @@ impl crate::node::TurnRole<()> for ChildTurns {
                     },
                     crate::runtime::events::abandoned_turn_operator_line(&report).to_owned(),
                 ),
-                Some(FencedChildRecycle::Quiescent) => (
+                Some(FencedChildRecycle::Quiescent { .. }) => (
                     crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
                         kind: crate::agent_tree::TURN_ABANDONED,
                     },
@@ -850,7 +879,7 @@ async fn end_failed_wake(
 
 enum FencedChildRecycle {
     Abandoned(plakous::agent::AbandonedTurnReport),
-    Quiescent,
+    Quiescent { restored_turn: bool },
     QuiescenceUnproved,
     LeaseLoss(Vec<(String, bool)>),
 }
@@ -889,6 +918,7 @@ async fn recycle_fenced_child(
     };
     // A turn the open restored (a hosted continuation) is never resumed by a
     // recycle: it is cancelled within the host's bound before the release.
+    let restored_turn = recovered.is_some();
     if let Some(recovered) = recovered {
         let _ = crate::interrupt::settle_cancel(
             recovered.control().cancel(),
@@ -904,7 +934,7 @@ async fn recycle_fenced_child(
         FencedChildRecycle::Abandoned(report)
     } else {
         match session.sessions.head_is_quiescent(session.locator()).await {
-            Ok(true) => FencedChildRecycle::Quiescent,
+            Ok(true) => FencedChildRecycle::Quiescent { restored_turn },
             Ok(false) => FencedChildRecycle::QuiescenceUnproved,
             Err(error) => {
                 tracing::error!(target: "plak.topology", agent_id, error = %error,
@@ -915,7 +945,7 @@ async fn recycle_fenced_child(
     };
     let recycled = match (recycled, lease_fence) {
         (
-            recycled @ (FencedChildRecycle::Quiescent | FencedChildRecycle::Abandoned(_)),
+            recycled @ (FencedChildRecycle::Quiescent { .. } | FencedChildRecycle::Abandoned(_)),
             Some(turn_id),
         ) => {
             use crate::runtime::root_loss::{RecoveryFence, child_fence};
@@ -944,13 +974,65 @@ async fn recycle_fenced_child(
     let sessions = Arc::clone(&session.sessions);
     let session_id = session.locator().session_id();
     let release = session.release_opened().await;
-    if release.is_err() && matches!(recycled, FencedChildRecycle::LeaseLoss(_)) {
+    if release.is_err()
+        && matches!(
+            recycled,
+            FencedChildRecycle::LeaseLoss(_) | FencedChildRecycle::Quiescent { .. }
+        )
+    {
         return None;
     }
     crate::agent::ledger::project_feed(&runtime, agent_id, &sessions, session_id)
         .await
         .ok()?;
     Some(recycled)
+}
+
+async fn finalize_recycled_submission(
+    driver: &TreeDriver,
+    agent_id: &str,
+    terminal: crate::agent_tree::ChildTerminal,
+    result: &TurnResult,
+    observer: Option<&Arc<dyn crate::agent_tree::TopologyObserver>>,
+) {
+    let attempt = terminal.attempt_id.clone();
+    let completed = mutate_child(driver, agent_id, {
+        let (driver, id, result) = (driver.clone(), agent_id.to_owned(), result.clone());
+        move |tree| {
+            if !tree.has_recyclable_submission(&id, &terminal) {
+                return false;
+            }
+            let waits = crate::agent::wait_evidence_in(&result, tree.retained_wait_receipts(&id));
+            let completed = tree
+                .settle_wait_receipts(&id, &waits)
+                .and_then(|_| tree.record_recycled_submission(&id, &terminal))
+                .and_then(|recorded| {
+                    driver.apply_recorded(tree, &id)?;
+                    Ok(recorded)
+                });
+            match completed {
+                Ok(recorded) => recorded,
+                Err(error) => {
+                    tree.record_fault(&id, error.message);
+                    false
+                }
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+    if completed {
+        let (id, observer) = (agent_id.to_owned(), observer.cloned());
+        mutate_child(driver, agent_id, move |tree| {
+            if let Ok(node) = tree.node(&id)
+                && node.attempt_id.as_ref() == Some(&attempt)
+                && let Some(detach) = crate::agent_tree::NodeDetach::from_node_status(node.status)
+            {
+                tree.try_emit_tree_node_detached(observer.as_ref(), &id, detach);
+            }
+        })
+        .await;
+    }
 }
 
 /// The result channel's success means a terminal was delivered, not that the

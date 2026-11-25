@@ -8,6 +8,8 @@ use plakous_recursive_subagents_store::SqliteTreeStore;
 use std::fs::OpenOptions;
 use std::os::unix::fs::OpenOptionsExt as _;
 
+mod submitted;
+
 struct FiniteDrain {
     _cleanup: HomeHost,
     paired: Paired,

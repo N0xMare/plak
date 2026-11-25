@@ -1,4 +1,7 @@
-use super::{AttemptStatus, ProductAgentTree, RecoveryNeed, RecoveryResolution, TopologyError};
+use super::{
+    AttemptStatus, ChildTerminal, FeedTurnOutcome, NodeStatus, ProductAgentTree, RecoveryNeed,
+    RecoveryResolution, TopologyError,
+};
 use crate::protocol::AttemptId;
 
 pub(crate) const HOST_RECOVERY_KIND: &str = "host_recovery";
@@ -26,16 +29,12 @@ impl ProductAgentTree {
     ) -> Result<bool, TopologyError> {
         self.require_fold_started(agent_id)?;
         self.require_expected_attempt(agent_id, Some(attempt_id))?;
-        let id = format!("plak:host-recovery:{agent_id}:{attempt_id}");
         match self.recovery_need(agent_id)? {
             RecoveryNeed::NotRequired => return Ok(false),
             RecoveryNeed::Workspace { code, reason } => {
                 return Err(TopologyError::new(code, reason));
             }
             RecoveryNeed::Session { .. } => {}
-        }
-        if self.operations.contains_key(&id) {
-            return Ok(false);
         }
         let attempt = self.current_attempt(agent_id).ok_or_else(|| {
             TopologyError::new(
@@ -59,7 +58,66 @@ impl ProductAgentTree {
                     .is_some_and(|failure| failure.kind == "session_retirement"),
             resolution,
         };
-        let canonical = super::super::canonical_json(&decision)?;
+        self.save_host_recovery(agent_id, &decision)
+    }
+
+    /// Whether this exact fenced turn still owns the durably submitted result.
+    #[must_use]
+    pub fn has_recyclable_submission(&self, agent_id: &str, terminal: &ChildTerminal) -> bool {
+        terminal.outcome == FeedTurnOutcome::RecoveryRequired
+            && self
+                .node(agent_id)
+                .is_ok_and(|node| node.status == NodeStatus::Running)
+            && self.current_attempt(agent_id).is_some_and(|attempt| {
+                attempt.attempt_id == terminal.attempt_id
+                    && attempt.turn_id.as_deref() == Some(terminal.turn_id.as_str())
+                    && attempt.status == AttemptStatus::Submitted
+                    && attempt.output_json.is_some()
+                    && attempt.failure.is_none()
+            })
+    }
+
+    /// Saves completion of a submitted attempt after the host closed exact
+    /// local finalization debt and released the quiescent session without
+    /// abandoning a turn. Does not replace the runtime's terminal.
+    ///
+    /// # Errors
+    /// Refuses an unstarted fold or a recovery intent that cannot be saved.
+    pub fn record_recycled_submission(
+        &mut self,
+        agent_id: &str,
+        terminal: &ChildTerminal,
+    ) -> Result<bool, TopologyError> {
+        self.require_fold_started(agent_id)?;
+        if !self.has_recyclable_submission(agent_id, terminal) {
+            return Ok(false);
+        }
+        self.save_host_recovery(
+            agent_id,
+            &HostRecovery {
+                attempt_id: terminal.attempt_id.clone(),
+                resolution: RecoveryResolution::RecoveredWithoutTurn {
+                    message: "the child's submitted result survived exact local finalization"
+                        .to_owned(),
+                },
+                observed_at_ms: terminal.committed_at_ms,
+                closed: false,
+                submitted_retirement: true,
+            },
+        )
+    }
+
+    fn save_host_recovery(
+        &mut self,
+        agent_id: &str,
+        decision: &HostRecovery,
+    ) -> Result<bool, TopologyError> {
+        let attempt_id = &decision.attempt_id;
+        let id = format!("plak:host-recovery:{agent_id}:{attempt_id}");
+        if self.operations.contains_key(&id) {
+            return Ok(false);
+        }
+        let canonical = super::super::canonical_json(decision)?;
         // The recovery and its opening-envelope retirement publish together.
         self.record_recovered_followup_mail(attempt_id)?;
         self.operations.insert(

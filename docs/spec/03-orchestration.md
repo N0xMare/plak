@@ -1368,10 +1368,15 @@ Code Cell abandonment and local finalization debt alone are not missing
 executor evidence and must not be labelled `recovery_effect_evidence_refused`.
 An already-terminal root with only exact same-turn finalization debt closes
 quiescently on reopen (chapter 01 §5.5), without another result or
-abandonment report. The live waiter's successful recycle of a non-lease
-fence ends the attempt as `turn_abandoned`. When the waiter did not settle
-it, later recovery can keep the attempt open and record an interrupt without
-an owner-loss cause. A new parent followup requires `acknowledge_recovery`;
+abandonment report. A live waiter that closes such debt and releases the
+quiescent session without abandoning or restoring a turn completes an
+already-submitted attempt if the fence belongs to its exact bound turn.
+The host records this as attempt recovery; it does not publish a second
+runtime terminal. Absent that submission, the live waiter's successful
+recycle of a non-lease fence ends the attempt as `turn_abandoned`. When the
+waiter did not settle it, later recovery can keep the attempt open and
+record an interrupt without an owner-loss cause. A new parent followup
+requires `acknowledge_recovery`;
 ordinary mail cannot start it. A fence
 whose reopen has not settled stays `recovery_required`. A proven lease
 fence instead uses the owner-loss path (§14.1).
@@ -4631,9 +4636,11 @@ one that already ended or submitted and whose release alone was uncertain, and
 one whose startup never produced a session, which ends `failed` with kind
 `spawn_refused` (see the replay below). A quiescent reopen of retirement-only
 uncertainty with a durably submitted result settles `completed`, retaining that
-result and clearing the retirement failure. An actually abandoned turn, or a
-recorded authoritative terminal failure, still settles failed even with submitted
-output. Close intent takes precedence over either outcome: any unresolved session
+result and clearing the retirement failure. The live waiter's exact local
+finalization settlement is also a quiescent recovery of submitted output.
+An actually abandoned turn, or a recorded authoritative terminal failure,
+still settles failed even with submitted output. Close intent takes
+precedence over either outcome: any unresolved session
 failure makes the node `recovery_required`, including a fault after close. Only
 the attempt retains close intent as `closed`, through both successful and failed
 completion of an already dispatched seal. This keeps the child visible to

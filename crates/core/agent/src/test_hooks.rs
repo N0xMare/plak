@@ -3,6 +3,12 @@
 
 pub mod commit_classes;
 
+pub(crate) fn take_process_cleanup_cut(session: impl FnOnce() -> plakous_model::SessionId) -> bool {
+    std::env::var_os("PLAK_TEST_PROCESS_CLEANUP_CUT").is_some_and(|directory| {
+        std::fs::remove_file(std::path::Path::new(&directory).join(session().to_string())).is_ok()
+    })
+}
+
 pub(crate) fn final_runner_probe() {
     if let Some(directory) = std::env::var_os("PLAK_TEST_FINAL_RUNNER_PROBE") {
         let directory = std::path::Path::new(&directory);

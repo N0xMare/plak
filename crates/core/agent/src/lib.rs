@@ -96,6 +96,10 @@ mod test_hooks {
     pub(crate) fn credential_wait_clear_refused(_: &dyn std::fmt::Debug) {}
     pub(crate) const fn final_runner_probe() {}
 
+    pub(crate) fn take_process_cleanup_cut(_: impl FnOnce() -> plakous_model::SessionId) -> bool {
+        false
+    }
+
     pub(crate) const fn working_prune_minimum(production: u64) -> u64 {
         production
     }
