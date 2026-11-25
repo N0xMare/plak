@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub(in crate::host) use crate::carry::upgrade::timing::ADMISSION as ADMISSION_TIME;
 use crate::carry::upgrade::timing::STORE as STORE_TIME;
@@ -29,9 +29,18 @@ pub(in crate::host) fn store(label: &str, path: &Path, deadline: Instant) -> Cli
 }
 
 pub(in crate::host) fn stores(paths: &PlakPaths) -> CliResult<()> {
+    timed_stores(paths).map(drop)
+}
+
+/// The serial check with each store's elapsed time, for the gate projection.
+pub(in crate::host) fn timed_stores(paths: &PlakPaths) -> CliResult<Vec<(&'static str, Duration)>> {
     let deadline = deadline();
-    for (label, path) in databases(paths) {
-        store(label, &path, deadline)?;
-    }
-    Ok(())
+    databases(paths)
+        .into_iter()
+        .map(|(label, path)| {
+            let started = Instant::now();
+            store(label, &path, deadline)?;
+            Ok((label, started.elapsed()))
+        })
+        .collect()
 }

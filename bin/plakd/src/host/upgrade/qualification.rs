@@ -131,6 +131,14 @@ pub(super) fn legacy_child_preflight(
     )
 }
 
+/// The requester's timing of the destination gate's binding inspection.
+pub(super) fn measure_destination_bindings(paths: &PlakPaths) -> CliResult<std::time::Duration> {
+    let scratch = Workspace::new(paths)?;
+    let stores = scratch.stores();
+    super::super::store_revisions::rehearse(paths, &stores)?;
+    bindings::measure_destination(paths, stores.is_dir().then_some(stores.as_path()))
+}
+
 struct Workspace {
     directory: tempfile::TempDir,
     _rehearsal: std::fs::File,

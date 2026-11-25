@@ -25,6 +25,10 @@ pub(super) fn pending(paths: &PlakPaths) -> CliResult<bool> {
     Ok(revisions_pending(paths)? || runtime)
 }
 
+pub(super) fn runtime_pending(paths: &PlakPaths) -> CliResult<bool> {
+    Ok(runtime_bootstrap_pending(&paths.runtime_database())?)
+}
+
 pub(super) fn upgrade_stopped(
     paths: &PlakPaths,
     needs_upgrade: bool,

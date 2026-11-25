@@ -6162,6 +6162,25 @@ as the same line when it reads that verdict. The timings are optional
 diagnostics in the version-1 verdict: they never decide an outcome, and
 readers ignore an absent or unfamiliar field.
 
+A destination gate check that times out after surrender is a fix-forward
+outage, so the requester refuses before surrender when one is plausible.
+It projects the gate from checks it already runs against the live stores
+before the request: each store's integrity check, its preservation capture
+(standing for the destination's capture and comparison), and one
+destination `--gating` binding inspection, on rehearsed copies when product
+or tree revisions are pending. It prints `gate projection <phase>=<ms>...
+projected_ms=<ms> successor_ms=<ms>`. The projected gate is the admission
+wait, plus the revision backup bound when stopped-store revisions are
+pending, plus every measured check run serially; the concurrent gate cannot
+take longer. The requester refuses with
+`host_upgrade_gate_projection_refused`, while the source keeps serving and
+before any request, when a measured check takes more than half of its own
+post-surrender bound or twice the projected gate exceeds the successor
+bound. A destination binding inspection that fails before surrender also
+refuses, except while a runtime bootstrap is pending, which only the
+destination's stopped startup applies; that projection omits bindings. The
+bounds themselves do not change.
+
 The existing root owner freezes outer actions, the hub defers host-initiated
 wakes and recovery claims, and each admitted root/child driver
 parks before its next operation through the hidden host seam (chapter 01 §3.1).

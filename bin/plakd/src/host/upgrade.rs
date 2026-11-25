@@ -7,6 +7,7 @@ pub(super) mod gate;
 pub(super) mod health;
 mod preservation;
 mod progress;
+mod projection;
 mod qualification;
 mod reopen;
 mod requester;
@@ -346,7 +347,20 @@ pub(super) fn request(
         let backup = backup::create(paths)?;
         eprintln!("host upgrade: store backup saved at {}", backup.display());
     }
-    health::stores(paths)?;
+    let stores = health::timed_stores(paths)?;
+    let measured_bindings = match qualification::measure_destination_bindings(paths) {
+        Ok(elapsed) => Some(elapsed),
+        // The live runtime store is only readable by this build after its
+        // stopped bootstrap; any other failure would recur after surrender.
+        Err(error) if super::store_revisions::runtime_pending(paths)? => {
+            eprintln!(
+                "host upgrade: destination binding inspection was not measured before the runtime bootstrap: {}",
+                error.message()
+            );
+            None
+        }
+        Err(error) => return Err(projection::unmeasured(&error)),
+    };
     let (bindings, legacy_child_audit) = bindings::requester_baseline(paths, &identity)?;
     if !identity.child_reopen_baseline {
         qualification::legacy_child_preflight(
@@ -357,11 +371,19 @@ pub(super) fn request(
             &legacy_child_audit,
         )?;
     }
+    let captured = Instant::now();
     let (baseline, _) = preservation::Snapshot::capture_at(
         paths,
         None,
         preservation::Evidence::BaselinePredatesDrain,
     )?;
+    projection::Measured {
+        stores,
+        preservation: captured.elapsed(),
+        bindings: measured_bindings,
+        revisions_pending: super::store_revisions::pending(paths)?,
+    }
+    .check()?;
     let staged = ticket.stage(paths, &baseline, &bindings)?;
     let mut stream = connect(paths, Some(PROBE_BOUND))?;
     if read::<Identity>(&stream)? != identity {

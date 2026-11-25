@@ -142,6 +142,20 @@ pub(in crate::host) fn inspect_destination(paths: &PlakPaths) -> CliResult<Repor
     })
 }
 
+/// Times the destination's own inspection before surrender, on scratch
+/// copies when the destination needs store revisions.
+pub(super) fn measure_destination(
+    paths: &PlakPaths,
+    scratch: Option<&Path>,
+) -> CliResult<std::time::Duration> {
+    let image = std::env::current_exe().map_err(super::io_failure)?;
+    let started = std::time::Instant::now();
+    let output = probe(&image, paths, &crate::home::state::state_key(), scratch)?;
+    serde_json::from_slice::<Report>(&output.stdout)
+        .map_err(|_| CliFailure::new("destination binding inspection gave no verdict"))?;
+    Ok(started.elapsed())
+}
+
 pub(in crate::host) fn health(baseline: &Baseline, report: &Report) -> CliResult<()> {
     // A working head can be unavailable until planned recovery. The paired
     // exact-reopen and preservation checks own that case, not a strict fleet
