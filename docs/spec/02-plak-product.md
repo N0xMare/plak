@@ -6212,8 +6212,12 @@ ambiguously accepted submission. After exec, a definite destination startup,
 health or preservation refusal is `host_upgrade_fix_forward_required`;
 it neither reverses custody nor restores a backup. The inherited destination
 records a private durable pending verdict before verification, and publishes
-Ready only after health and preservation pass. A failed or unfinished gate
-blocks ordinary startup, including a service manager's automatic restart.
+Ready only after health and preservation pass. A definite inherited refusal
+is a controlled service stop, not a failing service exit: a manager configured
+to restart failures must not relaunch a link still pointing at a predecessor
+that does not know about the verdict. The requester still reports the typed
+failure. A failed or unfinished gate also blocks ordinary startup of a host
+that understands the verdict.
 After investigating and repairing the cause, the operator clears the
 verdict while the home is stopped and restarts the destination on the same
 stores. Ready disarms the gate; a later normal lifecycle failure does not

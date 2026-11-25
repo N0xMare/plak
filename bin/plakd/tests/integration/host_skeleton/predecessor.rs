@@ -211,7 +211,8 @@ fn production_predecessor_never_observes_ready_after_destination_preservation_re
         "{detail}"
     );
     let status = host.child.take().unwrap().wait().unwrap();
-    assert_eq!(status.code(), Some(5));
+    // Restart-on-failure must not relaunch the predecessor's service link.
+    assert!(status.success());
     assert!(!fixture.home().join("host/upgrade.sock").exists());
 }
 

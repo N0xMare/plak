@@ -138,10 +138,12 @@ pub(crate) fn run_host_command(
     };
     if let Some(checkpoint) = &checkpoint {
         if let Err(error) = checkpoint.ticket.record_pending(paths) {
-            let stage = upgrade::checkpoint::Failure::Startup;
-            eprintln!("host upgrade: {}", error.message());
-            checkpoint.ticket.record_failure(paths, stage);
-            return Err(stage.fix_forward());
+            return Ok(stop_refused_upgrade(
+                paths,
+                checkpoint,
+                upgrade::checkpoint::Failure::Startup,
+                &error,
+            ));
         }
     }
     let mut gate = UpgradeGate {
@@ -151,11 +153,25 @@ pub(crate) fn run_host_command(
     };
     let outcome = serve_host(services, command, inherited, &mut gate);
     if let (Err(error), Some(checkpoint)) = (&outcome, gate.checkpoint) {
-        eprintln!("host upgrade: {}", error.message());
-        checkpoint.ticket.record_failure(paths, gate.stage);
-        return Err(gate.stage.fix_forward());
+        return Ok(stop_refused_upgrade(paths, &checkpoint, gate.stage, error));
     }
     outcome
+}
+
+fn stop_refused_upgrade(
+    paths: &crate::home::paths::PlakPaths,
+    checkpoint: &upgrade::checkpoint::Checkpoint,
+    stage: upgrade::checkpoint::Failure,
+    error: &CliFailure,
+) -> ProcessOutcome {
+    eprintln!("host upgrade: {}", error.message());
+    checkpoint.ticket.record_failure(paths, stage);
+    eprintln!("{}", stage.fix_forward().message());
+    // Both installed managers restart failures. A stable service link can
+    // still point to a predecessor that cannot read the verdict. Stop the
+    // service intentionally; the requester, not the service exit, reports
+    // the typed failure.
+    ProcessOutcome::Success
 }
 
 struct UpgradeGate {

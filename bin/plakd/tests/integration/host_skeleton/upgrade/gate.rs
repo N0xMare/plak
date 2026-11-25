@@ -93,9 +93,11 @@ fn a_post_surrender_integrity_failure_blocks_service_manager_restarts() {
         .unwrap();
     });
     assert_health_refused(&result);
-    assert_eq!(host.child.take().unwrap().wait().unwrap().code(), Some(5));
-    // Both service managers may immediately run the ordinary start command
-    // again. Even a restart after the cause is repaired needs acknowledgement.
+    // A manager configured to restart failures must not launch the old
+    // service link. The requester still reported the typed failure.
+    assert!(host.child.take().unwrap().wait().unwrap().success());
+    // Forcing an ordinary start on the successor is also fenced, even
+    // after the cause has been repaired but not acknowledged.
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let db = rusqlite::Connection::open(paths.product_database()).unwrap();
     db.execute("DELETE FROM queue_attachments WHERE item_id='missing'", [])
@@ -142,7 +144,7 @@ fn a_binding_regression_after_preflight_withholds_readiness() {
         || std::fs::write(cut, []).unwrap(),
     );
     assert_health_refused(&result);
-    assert_eq!(host.child.take().unwrap().wait().unwrap().code(), Some(5));
+    assert!(host.child.take().unwrap().wait().unwrap().success());
     let log = host.lines.try_iter().collect::<Vec<_>>().join("\n");
     assert!(
         log.contains("destination binding compatibility did not pass"),
