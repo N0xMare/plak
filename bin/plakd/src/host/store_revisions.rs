@@ -2,6 +2,8 @@
 //! after handoff, never on a live source.
 
 mod cleanup;
+#[cfg(test)]
+mod tests;
 
 use std::fs::File;
 use std::path::Path;

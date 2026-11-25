@@ -20,6 +20,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 mod browser;
+mod source;
 use browser::Browser;
 
 const HISTORY: [&str; 3] = [
@@ -593,10 +594,11 @@ fn seed(
 ) -> Root {
     let (session, node) = create_root(client, workspace);
     let attachment = client.attach(2, &node);
+    let product = source::open(fixture);
     for (index, answer) in HISTORY.into_iter().enumerate() {
         client.prompt(3, attachment, &format!("fixture prompt {index}"), answer);
         if index == 1 {
-            root_wake::idle_turns(fixture, &session, 2);
+            source::idle_locator(&product, &session, 2);
             run(fixture
                 .base_command_from(predecessor)
                 .current_dir(workspace)
@@ -604,9 +606,8 @@ fn seed(
                 .arg(document));
         }
     }
-    root_wake::idle_turns(fixture, &session, HISTORY.len().try_into().unwrap());
     Root {
-        locator: locator(fixture, &session),
+        locator: source::idle_locator(&product, &session, HISTORY.len().try_into().unwrap()),
         id: session,
         node,
     }

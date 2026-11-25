@@ -159,6 +159,10 @@ case "$target_dir" in
   /*) ;;
   *) target_dir="$PWD/$target_dir" ;;
 esac
+predecessor_source=()
+if [[ -n "${PLAK_PREDECESSOR_SOURCE_ARCHIVE:-}" ]]; then
+  predecessor_source=(--source-archive "$PLAK_PREDECESSOR_SOURCE_ARCHIVE")
+fi
 jobs="${CARGO_BUILD_JOBS:-$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN)}"
 if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then jobs=1; fi
 py_host=''
@@ -722,11 +726,7 @@ run_group() {
       fi
       PLAK_INSTALL_PREDECESSOR="$predecessor" run_weighted_lane install ;;
     predecessor-build)
-      local source=()
-      if [[ -n "${PLAK_PREDECESSOR_SOURCE_ARCHIVE:-}" ]]; then
-        source=(--source-archive "$PLAK_PREDECESSOR_SOURCE_ARCHIVE")
-      fi
-      nice -n 5 python3 tools/gate/build_predecessor.py --target-dir "$target_dir" ${source[@]+"${source[@]}"} \
+      nice -n 5 python3 tools/gate/build_predecessor.py --target-dir "$target_dir" ${predecessor_source[@]+"${predecessor_source[@]}"} \
         >"$group_spool/predecessor.build"
       mv "$group_spool/predecessor.build" "$group_spool/predecessor.path" ;;
     contracts)
@@ -845,7 +845,7 @@ if selected standalone && [[ "$standalone_started" != true ]]; then
 fi
 if selected contracts; then compile_only+=(contracts); fi
 if selected tests-install; then
-  if ! python3 tools/gate/build_predecessor.py --target-dir "$target_dir" --check \
+  if ! python3 tools/gate/build_predecessor.py --target-dir "$target_dir" --check ${predecessor_source[@]+"${predecessor_source[@]}"} \
     >"$group_spool/predecessor.path" || [[ ! -s "$group_spool/predecessor.path" ]]; then
     rm -f "$group_spool/predecessor.path"
     compile_only+=(predecessor-build)

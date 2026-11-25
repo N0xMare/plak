@@ -18,6 +18,8 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[2]
 BINARIES = ("plakd", "plakous-js-host", "plakous-py-host")
 PROFILE = "dev"
+CACHE_VERSION = 2
+MANIFEST = "manifest.json"
 
 
 def revision():
@@ -31,6 +33,13 @@ def archive(output, rev):
     subprocess.run(
         ["git", "archive", "--format=tar", f"--output={output}", rev], cwd=ROOT, check=True
     )
+
+
+def verify_archive(path, rev):
+    with path.open("rb") as stream:
+        archived = subprocess.check_output(["git", "get-tar-commit-id"], stdin=stream, text=True)
+    if archived.strip() != rev:
+        raise ValueError("predecessor archive does not match .config/install-predecessor")
 
 
 def build_recipe(triple, build_target):
@@ -63,8 +72,8 @@ def build_recipe(triple, build_target):
         for key, value in os.environ.items()
         if key.startswith(f"CARGO_PROFILE_{PROFILE.upper()}_")
     )
-    recipe = json.dumps((args, env), sort_keys=True)
-    return args, hashlib.sha256(recipe.encode()).hexdigest()[:16]
+    recipe = json.dumps((CACHE_VERSION, args, env), sort_keys=True)
+    return args, hashlib.sha256(recipe.encode()).hexdigest()
 
 
 def build_inputs(target, rev):
@@ -79,8 +88,45 @@ def build_inputs(target, rev):
     return root, root / rev / channel / triple / recipe, channel, build_target, args
 
 
-def cache_ready(cache):
-    return all((cache / name).is_file() and os.access(cache / name, os.X_OK) for name in BINARIES)
+def manifest(directory, rev, recipe):
+    images = {}
+    for name in BINARIES:
+        path = directory / name
+        if path.is_symlink() or not path.is_file() or not os.access(path, os.X_OK):
+            raise ValueError(f"missing or invalid predecessor image: {name}")
+        with path.open("rb") as image:
+            images[name] = hashlib.file_digest(image, "sha256").hexdigest()
+    return {"revision": rev, "recipe": recipe, "images": images}
+
+
+def cache_ready(cache, rev):
+    record = cache / MANIFEST
+    if cache.is_symlink() or record.is_symlink() or not record.is_file():
+        return False
+    try:
+        return json.loads(record.read_text()) == manifest(cache, rev, cache.name)
+    except (OSError, ValueError):
+        return False
+
+
+def verify_image(binary, rev):
+    with tempfile.TemporaryDirectory() as directory:
+        scratch = Path(directory)
+        info = json.loads(
+            subprocess.check_output(
+                [binary, "version", "--build-info"],
+                cwd=scratch,
+                env={"PLAK_HOME": str(scratch / "home"), "XDG_STATE_HOME": str(scratch / "state")},
+                timeout=30,
+            )
+        )
+    if (
+        not isinstance(info, dict)
+        or info.get("revision") != rev
+        or info.get("test_hooks") is not True
+        or info.get("flavor") not in ("maintainer debug", "maintainer release")
+    ):
+        raise ValueError("predecessor image did not report the pinned source and test build")
 
 
 def prune_revisions(root, rev):
@@ -109,14 +155,14 @@ def build(root, cache, channel, target_args, args, rev, source_archive):
             if scratch.is_dir() and not scratch.is_symlink():
                 shutil.rmtree(scratch)
         started = time.monotonic()
-        if cache_ready(cache):
+        if cache_ready(cache, rev):
             print(
                 f"== predecessor {rev}: cache hit ({time.monotonic() - started:.2f} s) ==",
                 file=sys.stderr,
             )
             return cache
-        if cache.exists():
-            raise ValueError(f"incomplete predecessor cache: {cache}")
+        if cache.exists() or cache.is_symlink():
+            raise ValueError(f"invalid predecessor cache; remove this entry and retry: {cache}")
         with tempfile.TemporaryDirectory(prefix="build-", dir=root) as temp:
             temp = Path(temp)
             src, artifacts, publish = (temp / name for name in ("source", "target", "bin"))
@@ -125,15 +171,6 @@ def build(root, cache, channel, target_args, args, rev, source_archive):
             if source_archive is None:
                 source_archive = temp / "predecessor.tar"
                 archive(source_archive, rev)
-            else:
-                with source_archive.open("rb") as stream:
-                    archived_revision = subprocess.check_output(
-                        ["git", "get-tar-commit-id"], stdin=stream, text=True
-                    ).strip()
-                if archived_revision != rev:
-                    raise ValueError(
-                        "predecessor archive does not match .config/install-predecessor"
-                    )
             subprocess.run(["tar", "-xf", source_archive, "-C", src], check=True)
             env = dict(os.environ, CARGO_TARGET_DIR=str(artifacts), PLAK_SOURCE_REVISION=rev)
             cargo = ["cargo", f"+{channel}"]
@@ -151,6 +188,10 @@ def build(root, cache, channel, target_args, args, rev, source_archive):
             )
             for name in BINARIES:
                 shutil.move(binaries / name, publish / name)
+            verify_image(publish / "plakd", rev)
+            (publish / MANIFEST).write_text(
+                json.dumps(manifest(publish, rev, cache.name), sort_keys=True) + "\n"
+            )
             cache.parent.mkdir(parents=True, exist_ok=True)
             publish.rename(cache)
         os.utime(root / rev, None)
@@ -170,24 +211,26 @@ def main():
     archive_mode = parser.add_mutually_exclusive_group()
     archive_mode.add_argument("--write-archive", type=Path)
     archive_mode.add_argument("--source-archive", type=Path)
-    archive_mode.add_argument(
-        "--check", action="store_true", help="report a cache hit without building"
-    )
+    parser.add_argument("--check", action="store_true", help="report a cache hit without building")
     args = parser.parse_args()
+    if args.check and args.write_archive is not None:
+        parser.error("--check cannot be used with --write-archive")
     try:
         rev = revision()
         if args.write_archive is not None:
             archive(args.write_archive, rev)
             return
+        if args.source_archive is not None:
+            verify_archive(args.source_archive, rev)
         root, cache, channel, target_args, recipe = build_inputs(args.target_dir, rev)
         if args.check:
-            if not cache_ready(cache):
+            if not cache_ready(cache, rev):
                 raise SystemExit(1)
             print(f"== predecessor {rev}: cache hit ==", file=sys.stderr)
             print(cache)
             return
         print(build(root, cache, channel, target_args, recipe, rev, args.source_archive))
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
         raise SystemExit(
             f"install suite requires a build of its pinned predecessor: {error}"
         ) from error

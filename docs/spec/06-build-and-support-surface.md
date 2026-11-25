@@ -1917,12 +1917,15 @@ the gate.
 The install gate resolves `.config/install-predecessor` to the exact deployed
 Git revision and builds its host and workers with the candidate toolchain
 and the predecessor's lockfile. It fetches dependencies offline first and
-reuses a complete revision/toolchain/target/recipe cache beside the candidate
-target directory. A cache hit does not reserve candidate build jobs. A
-successful publication retains the current and one previous revision's images.
+verifies the image reports the pinned source revision before publishing the
+cache entry. It reuses a revision/toolchain/target/recipe entry only when its
+record and all executable digests match. A cache hit does not reserve
+candidate build jobs. A successful publication retains the current and one
+previous revision's images.
 The offline qualification container takes the pinned
-revision's archive as a read-only input; its registry cache must cover both
-lockfiles. A missing revision, dependency or build is a gate failure.
+revision's archive as a read-only input and verifies its revision even on a
+cache hit; its registry cache must cover both lockfiles. A missing revision,
+dependency or build is a gate failure.
 
 Cut checklist: confirm that the pin names the serving revision before gating
 the new cut. After a successful production cut, update

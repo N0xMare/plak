@@ -708,12 +708,16 @@ os.execv(real, [real, *sys.argv[1:]])
     def test_predecessor_miss_builds_once_with_candidate_then_joins_before_all_lanes(self):
         self.env['GATE_PREDECESSOR_PHASES'] = str(self.root)
         self.env['GATE_TEST_BUILD_WAITS_FOR'] = str(self.root / 'predecessor-started')
+        archive = str(self.root / 'predecessor source.tar')
+        self.env['PLAK_PREDECESSOR_SOURCE_ARCHIVE'] = archive
         result, calls, _ = self.run_gate('--steps', 'tests-parallel,tests-durability,tests-install')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.profiles(calls), ['offline', 'durability', 'install'])
         checks, builds = self.predecessor_calls()
         self.assertEqual(len(checks), 1)
         self.assertEqual(len(builds), 1)
+        for call in (checks[0], builds[0]):
+            self.assertEqual(call['python'][-2:], ['--source-archive', archive])
         self.assertEqual(builds[0]['jobs'], '4')
         self.assertEqual(next(c['jobs'] for c in calls if c['args'][0] == 'test'), '4')
         self.assertEqual(
