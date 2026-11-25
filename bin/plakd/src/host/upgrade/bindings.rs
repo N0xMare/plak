@@ -76,10 +76,17 @@ fn binding_key(row: &Row) -> String {
     branch_key(&row.session, &row.branch)
 }
 
+/// A source that qualifies child reopen itself also inspects its own
+/// bindings during qualification and restages that verdict with the held
+/// checkpoint, so a second source-image scan here would only repeat it. An
+/// older source still needs this report for the legacy child audit.
 pub(super) fn requester_baseline(
     paths: &PlakPaths,
     identity: &super::Identity,
 ) -> CliResult<(Baseline, LegacyChildBaseline)> {
+    if identity.child_reopen_baseline {
+        return Ok((Baseline(None), LegacyChildBaseline::default()));
+    }
     let instance = plakous_recursive_subagents::tree::HostInstance::parse(&identity.instance)
         .map_err(CliFailure::new)?;
     let image = source_image(instance.pid())?;
@@ -88,9 +95,7 @@ pub(super) fn requester_baseline(
     verified.recheck(&image)?;
     let report = serde_json::from_slice::<Report>(&output.stdout).ok();
     let mut legacy = LegacyChildBaseline::default();
-    if !identity.child_reopen_baseline
-        && let Some(report) = &report
-    {
+    if let Some(report) = &report {
         for row in report
             .sessions
             .iter()

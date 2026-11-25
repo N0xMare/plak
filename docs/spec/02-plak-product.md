@@ -1173,7 +1173,10 @@ to restore the earlier state.
 Before surrender in a same-key upgrade, source and destination run independent
 read-only binding inspections concurrently (§4.5). Neither inspection borrows
 the other build's verdict or substitutes for the destination's exact-reopen
-checks (§4.6).
+checks (§4.6). The source's own inspection is its only binding verdict: a
+source that qualifies child reopen restages it with the held checkpoint, and
+the requester inspects the source image itself only for an older source,
+whose report the legacy child audit also needs.
 
 Session commands, including `run --session`, recovery, inspection and
 export, use the same incompatible-build refusal for an id (or uniquely
@@ -5872,9 +5875,9 @@ closed children. A node of an archived root's tree counts as archived. It
 decodes only those heads, with the same decoder, and reports only those rows.
 They are exactly the rows `--all` marks neither archived, superseded nor
 closed, with the same verdicts, and `compatible` is the same in both scopes.
-Every same-key upgrade probe uses `--gating`: the requester's source
-baseline, the source's own and destination inspections during qualification,
-and the destination's health gate. An image that refuses the option as an
+Every same-key upgrade probe uses `--gating`: the source's own and
+destination inspections during qualification, the destination's health
+gate, and the requester's source baseline where it runs (§2.5). An image that refuses the option as an
 unknown argument gets `--all` within the same bound.
 Inspection checks checkpoint/plan and presentation integrity, current
 release-owned executor bindings (including both
