@@ -6,6 +6,12 @@ use crate::shell::services::Services;
 
 pub(crate) const AVAILABLE: bool = false;
 
+pub(crate) fn legacy_child_audit(
+    _paths: &crate::product_paths::PlakPaths,
+) -> CliResult<Option<crate::carry::child_reopen::LegacyChildBaseline>> {
+    Ok(None)
+}
+
 pub(crate) fn abort_child_retirement(
     _paths: &crate::product_paths::PlakPaths,
     _tree: &str,

@@ -116,6 +116,7 @@ pub(super) fn legacy_child_preflight(
     request_image: &Path,
     key: &str,
     deadline: std::time::Instant,
+    audit: &crate::carry::child_reopen::LegacyChildBaseline,
 ) -> CliResult<()> {
     let scratch = Workspace::new(paths)?;
     let stores = scratch.stores();
@@ -126,6 +127,7 @@ pub(super) fn legacy_child_preflight(
         key,
         stores.is_dir().then_some(stores.as_path()),
         deadline,
+        audit,
     )
 }
 

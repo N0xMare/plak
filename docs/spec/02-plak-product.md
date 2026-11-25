@@ -5859,10 +5859,10 @@ listing and loading. It opens no runtime, runner, credential source or
 diagnostics writer and acquires no custody or runtime lease. Product archival
 and succession metadata and tree node locators are read separately without
 reopening a tree. Every retained head is decoded and its actual verdict reported.
-Rows for children carry `child: true` and their audit verdict under
-`child_binding`; closed children also carry `closed: true`. Child audit rows
-do not gate upgrade; §4.6 qualifies children separately. Archived and
-superseded rows are reported but do not gate upgrade.
+Rows for children carry `child: true`; closed children also carry `closed: true`.
+Bindings of a decoded child are reported under `child_binding` and qualified
+by §4.6. Failures decoding a full child checkpoint remain in the general
+audit differential. Archived, superseded and closed rows do not gate upgrade.
 Inspection checks checkpoint/plan and presentation integrity, current
 release-owned executor bindings (including both
 fetch image-result variants and optional web/image packs), and native selected
@@ -5877,9 +5877,9 @@ inspection does not maintain a separate prefix inventory. IDs with fewer than
 two dots use their exact pinned ID rather than a namespace prefix.
 
 Same-key host upgrade waits for both inspections before exact reopen and
-surrender. It refuses only a live root row that the source found compatible
-and the destination no longer does, printing the offending rows while the
-source keeps running. A source without the command is explicitly reported as baseline
+surrender. It refuses a live root binding or full child decode that the source
+verified and the destination no longer can, printing the offending rows while
+the source keeps running. A source without the command is explicitly reported as baseline
 unavailable; no source verdict is invented. In that first-upgrade case only
 real live binding refusals gate surrender, not external availability or an
 unknown executor alone. The existing exact-reopen probes still run. Inspection
@@ -6065,15 +6065,22 @@ does not resolve child credentials, start runners or evaluators, or take
 custody. Qualification refuses before drain only for a build-attributable
 child reopen regression: the destination cannot reopen a child that the
 source can. The coordinator compares the same child head against the verified
-source image when available. If the source predates the comparison probe,
-qualification uses the typed cause: a changed evaluator contract or engine,
-executor binding, or other release-owned binding is a refusal. A recorded
-artifact absent, unreadable, or with mismatching bytes on disk already prevents
-either build from restoring it; it does not refuse the cut. Qualification
-reports pre-existing child faults to the operator by kind and count, separately
-from the number of regressed children and their binding change. A child-only
-change never asks to carry the root. Other external availability remains a
-live-open check.
+source image when available. If the source predates the comparison probe, a
+changed evaluator contract or engine, executor binding, or other release-owned
+binding is a refusal. An unreadable binding refuses unless the verified source
+audit already found a fault on the same session and branch. An unreadable or
+missing child head cannot prove a pre-existing fault and refuses.
+The evaluator contract is checked before the file: a missing file cannot
+mask a contract regression. A matching contract with a missing, unreadable,
+or byte-mismatched artifact does not refuse the cut.
+Qualification prints `host_upgrade_child_reopen_pre_existing` once per request,
+with the total affected child count and counts by kind:
+`evaluator_artifact_missing`, `evaluator_artifact_bytes_mismatch`,
+`evaluator_artifact_unavailable`, `binding_change`, and `binding_unreadable`.
+The operator may proceed; restore the exact recorded artifact or resolve the
+binding fault before reopening a child, or close the child if no longer needed.
+A child-only change never asks to carry the root. Other external availability
+remains a live-open check.
 A root probe also refuses known configuration and credential changes. Neither
 an unfinished turn nor an observed advance of the same runtime branch is a
 reusable pre-pause verdict. The coordinator records each root's product
@@ -6083,7 +6090,8 @@ tree without moving the root branch; a change to the child roster or any
 child branch locator invalidates the tree's verdict. The reuse stamp predates the probes or,
 for revision rehearsal, the scratch copies. After admission closes and the
 step drain joins, it rechecks new, changed, or unproven roots under the
-reversible holds. A non-child refusal stops qualification without starting more
+reversible holds. A child comparison still unproven under the holds refuses.
+A non-child refusal stops qualification without starting more
 root probes. A refusal under the holds rolls back preparation; no source
 surrenders on a stale verdict. A still-unfinished turn at that boundary keeps
 the existing planned-handoff recovery law. Revision qualification takes fresh

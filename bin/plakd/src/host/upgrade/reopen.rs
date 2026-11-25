@@ -10,7 +10,9 @@ use std::{
 use super::{PROBE_BOUND, Request, process, progress};
 use crate::carry::{
     ChildReopenRefusal, REOPEN_HEAD_ADVANCED, ReopenProbe, UpgradeReopenProbe,
-    child_reopen::{ChildReopenInspection, ChildReopenQualification, PreExistingChildFaults},
+    child_reopen::{
+        ChildBaseline, ChildReopenInspection, ChildReopenQualification, LegacyChildBaseline,
+    },
 };
 use crate::home::paths::PlakPaths;
 use crate::store::ProductStore;
@@ -172,49 +174,49 @@ fn probe_roots(
         |root: &Root| exact_reopen(paths, request, scratch, &root.id, source, allow_advance);
     let mut verdicts = Vec::with_capacity(roots.len());
     let mut failures = ChildReopenRefusal::default();
-    let mut pre_existing = PreExistingChildFaults::default();
-    let mut collect = |result: CliResult<Proof>| -> CliResult<()> {
+    let mut collect = |root: &Root, result: CliResult<Proof>| -> CliResult<()> {
         let proof = result?;
         failures.merge(proof.children.regressions);
-        pre_existing.merge(proof.children.pre_existing);
+        report(progress::Event::ChildFaults(
+            &root.id,
+            proof.children.pre_existing,
+        ))?;
+        if !allow_advance && proof.children.unproven {
+            return Err(CliFailure::new(
+                "host_upgrade_child_reopen_unproven: an exact child head could not be compared under the holds",
+            ));
+        }
         verdicts.push(proof.root? && !proof.children.unproven);
         Ok(())
     };
-    let probes = (|| -> CliResult<()> {
-        for placement in roots.chunk_by(|a, b| a.local == b.local) {
-            let width = if placement[0].local { local_width } else { 1 };
-            for wave in placement.chunks(width) {
-                if let [record] = wave {
-                    collect(probe(record))?;
-                } else {
-                    thread::scope(|scope| {
-                        let pending = wave
-                            .iter()
-                            .map(|record| scope.spawn(|| probe(record)))
-                            .collect::<Vec<_>>();
-                        // Join the already dispatched wave before returning a refusal.
-                        let joined = pending
-                            .into_iter()
-                            .map(|task| {
-                                task.join().unwrap_or_else(|_| {
-                                    Err(CliFailure::new("host upgrade exact-reopen worker failed"))
-                                })
+    for placement in roots.chunk_by(|a, b| a.local == b.local) {
+        let width = if placement[0].local { local_width } else { 1 };
+        for wave in placement.chunks(width) {
+            if let [record] = wave {
+                collect(record, probe(record))?;
+            } else {
+                thread::scope(|scope| {
+                    let pending = wave
+                        .iter()
+                        .map(|record| scope.spawn(|| probe(record)))
+                        .collect::<Vec<_>>();
+                    // Join the already dispatched wave before returning a refusal.
+                    let joined = pending
+                        .into_iter()
+                        .map(|task| {
+                            task.join().unwrap_or_else(|_| {
+                                Err(CliFailure::new("host upgrade exact-reopen worker failed"))
                             })
-                            .collect::<Vec<_>>();
-                        for result in joined {
-                            collect(result)?;
-                        }
-                        Ok::<_, CliFailure>(())
-                    })?;
-                }
+                        })
+                        .collect::<Vec<_>>();
+                    for (record, result) in wave.iter().zip(joined) {
+                        collect(record, result)?;
+                    }
+                    Ok::<_, CliFailure>(())
+                })?;
             }
         }
-        Ok(())
-    })();
-    if !pre_existing.is_empty() {
-        report(progress::Event::ChildFaults(&pre_existing))?;
     }
-    probes?;
     if let Some(children) = failures.into_report() {
         Err(CliFailure::new(children.to_string()))
     } else {
@@ -264,7 +266,11 @@ fn exact_reopen(
                 Ok::<_, CliFailure>(baseline)
             })
             .transpose()?;
-        let children = children.qualify(baseline.as_ref());
+        let children = children.qualify(
+            baseline
+                .as_ref()
+                .map_or(ChildBaseline::Legacy(None), ChildBaseline::Exact),
+        );
         return Ok(Proof {
             // As before, aggregate child refusals across roots before reporting.
             root: if children.regressions.is_empty() {
@@ -348,6 +354,7 @@ pub(super) fn legacy_preflight(
     key: &str,
     scratch: Option<&Path>,
     deadline: Instant,
+    audit: &LegacyChildBaseline,
 ) -> CliResult<()> {
     let store_paths = scratch.map(|scratch| paths.clone().with_probe_stores(scratch.to_path_buf()));
     let records = ProductStore::inspect_upgrade_roots(store_paths.as_ref().unwrap_or(paths))
@@ -365,7 +372,8 @@ pub(super) fn legacy_preflight(
                 "host_upgrade_preflight_timeout: no surrender was requested",
             ));
         }
-        let children = child_probe(image, paths, key, scratch, &record.id, bound)?.qualify(None);
+        let children = child_probe(image, paths, key, scratch, &record.id, bound)?
+            .qualify(ChildBaseline::Legacy(Some(audit)));
         report.regressions.merge(children.regressions);
         report.pre_existing.merge(children.pre_existing);
     }

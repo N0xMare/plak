@@ -60,6 +60,7 @@ impl fmt::Display for ChildReopenRefusal {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Fault {
     Binding { detail: String },
+    EvaluatorContract { detail: String },
     Unreadable { detail: String },
     ArtifactMissing,
     ArtifactBytesMismatch,
@@ -69,7 +70,7 @@ enum Fault {
 impl Fault {
     fn pre_existing_kind(&self) -> FaultKind {
         match self {
-            Self::Binding { .. } => FaultKind::BindingChange,
+            Self::Binding { .. } | Self::EvaluatorContract { .. } => FaultKind::BindingChange,
             Self::Unreadable { .. } => FaultKind::BindingUnreadable,
             Self::ArtifactMissing => FaultKind::EvaluatorArtifactMissing,
             Self::ArtifactBytesMismatch => FaultKind::EvaluatorArtifactBytesMismatch,
@@ -77,9 +78,18 @@ impl Fault {
         }
     }
 
+    fn environmental(&self) -> bool {
+        matches!(
+            self,
+            Self::ArtifactMissing | Self::ArtifactBytesMismatch | Self::ArtifactUnavailable
+        )
+    }
+
     fn record_refusal(&self, refused: &mut ChildReopenRefusal) {
         match self {
-            Self::Binding { detail } => refused.record(Some(detail), None),
+            Self::Binding { detail } | Self::EvaluatorContract { detail } => {
+                refused.record(Some(detail), None);
+            }
             Self::Unreadable { detail } => refused.record(None, Some(detail)),
             Self::ArtifactMissing => {
                 refused.record(None, Some("recorded evaluator artifact is missing"));
@@ -100,6 +110,24 @@ impl Fault {
 pub(crate) struct ChildReopenInspection {
     opened: BTreeSet<String>,
     faults: Vec<(Option<String>, Fault)>,
+}
+
+/// Verified source audit failures for the same session and branch.
+pub(crate) type LegacyChildBaseline = BTreeSet<String>;
+
+pub(crate) fn branch_key(session: &str, branch: &str) -> String {
+    use sha2::{Digest as _, Sha256};
+    let mut digest = Sha256::new();
+    for field in [session, branch] {
+        digest.update((field.len() as u64).to_be_bytes());
+        digest.update(field.as_bytes());
+    }
+    crate::shipping_artifact::hex_digest(&digest.finalize())
+}
+
+pub(crate) enum ChildBaseline<'a> {
+    Exact(&'a ChildReopenInspection),
+    Legacy(Option<&'a LegacyChildBaseline>),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -177,37 +205,52 @@ impl ChildReopenInspection {
     }
 
     pub(crate) fn needs_source(&self) -> bool {
-        self.faults.iter().any(|(head, fault)| {
-            head.is_some() && matches!(fault, Fault::Binding { .. } | Fault::Unreadable { .. })
-        })
+        self.faults
+            .iter()
+            .any(|(head, fault)| head.is_some() && !fault.environmental())
     }
 
-    pub(crate) fn qualify(&self, source: Option<&Self>) -> ChildReopenQualification {
+    pub(super) fn needs_legacy_audit(&self) -> bool {
+        self.faults
+            .iter()
+            .any(|(head, fault)| head.is_some() && matches!(fault, Fault::Unreadable { .. }))
+    }
+
+    pub(crate) fn qualify(&self, source: ChildBaseline<'_>) -> ChildReopenQualification {
         let mut report = ChildReopenQualification::default();
         for (head, fault) in &self.faults {
-            let regression = match fault {
-                Fault::Binding { .. } | Fault::Unreadable { .. } => match source {
-                    Some(source) => {
-                        if let Some(head) = head {
-                            if source.opened.contains(head) {
-                                true
-                            } else if source
-                                .faults
-                                .iter()
-                                .any(|(other, _)| other.as_ref() == Some(head))
-                            {
-                                false
-                            } else {
-                                report.unproven = true;
-                                continue;
-                            }
-                        } else {
-                            false
-                        }
+            let Some(head) = head else {
+                fault.record_refusal(&mut report.regressions);
+                continue;
+            };
+            let regression = if fault.environmental() {
+                false
+            } else {
+                match source {
+                    ChildBaseline::Exact(source) if source.opened.contains(head) => true,
+                    ChildBaseline::Exact(source) => {
+                        let Some((_, prior)) = source
+                            .faults
+                            .iter()
+                            .find(|(other, _)| other.as_ref() == Some(head))
+                        else {
+                            report.unproven = true;
+                            continue;
+                        };
+                        matches!(fault, Fault::EvaluatorContract { .. }) && prior.environmental()
                     }
-                    None => matches!(fault, Fault::Binding { .. }),
-                },
-                _ => false,
+                    ChildBaseline::Legacy(audit) => {
+                        !matches!(fault, Fault::Unreadable { .. })
+                            || !audit.is_some_and(|audit| {
+                                head.parse::<SessionLocator>().is_ok_and(|locator| {
+                                    audit.contains(&branch_key(
+                                        &locator.session_id().to_string(),
+                                        &locator.branch_id().to_string(),
+                                    ))
+                                })
+                            })
+                    }
+                }
             };
             if regression {
                 fault.record_refusal(&mut report.regressions);
@@ -246,12 +289,16 @@ pub(crate) fn inspect(paths: &PlakPaths, tree_id: &str) -> Result<ChildReopenIns
         }
     }
     let executor_cut = crate::test_hooks::child_binding_cut();
+    let unreadable = crate::test_hooks::child_binding_unreadable();
     rehearsal::inspect_child_bindings_sqlite(
         &paths.runtime_database(),
         &locators,
         |head, child| {
             let fault = match child {
                 Ok(frozen) => match plakous_hosted::agent::check_frozen_child_binding(&frozen) {
+                    Ok(None) if unreadable => Some(Fault::Unreadable {
+                        detail: "child binding is unreadable in this image".into(),
+                    }),
                     Ok(None) if executor_cut => Some(Fault::Binding {
                         detail: "executor binding for child tool".into(),
                     }),
@@ -267,6 +314,11 @@ pub(crate) fn inspect(paths: &PlakPaths, tree_id: &str) -> Result<ChildReopenIns
                     EvaluatorArtifactFault::BytesMismatch => Fault::ArtifactBytesMismatch,
                     EvaluatorArtifactFault::Unavailable => Fault::ArtifactUnavailable,
                 }),
+                Err(ChildBindingInspectionError::EvaluatorContract(error)) => {
+                    Some(Fault::EvaluatorContract {
+                        detail: bounded(&format!("execution environment: {error}")),
+                    })
+                }
                 Err(ChildBindingInspectionError::Binding(error)) => {
                     Some(match error.binding_change() {
                         Some(BindingChange::ExecutionEnvironment) => Fault::Binding {
@@ -297,3 +349,6 @@ pub(crate) fn inspect(paths: &PlakPaths, tree_id: &str) -> Result<ChildReopenIns
 fn bounded(message: &str) -> String {
     crate::cli_output::safe_terminal_block(&message.chars().take(512).collect::<String>())
 }
+
+#[cfg(test)]
+mod tests;

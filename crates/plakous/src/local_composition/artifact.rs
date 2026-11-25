@@ -357,20 +357,9 @@ pub(crate) fn inspect_stored_artifact(
     if !path.is_absolute() {
         return Err(refused());
     }
-    // Check the saved bytes before the build contract. A missing or changed
-    // file already prevents the source from restoring this evaluator.
-    let (path, _, _, sha256) = file_identity(&path)
-        .map_err(|error| StoredArtifactError::Environment(error.artifact_fault()))?;
-    if sha256 != host[path_end..] {
-        return Err(StoredArtifactError::Environment(
-            EvaluatorArtifactFault::BytesMismatch,
-        ));
-    }
-    let artifact = LocalCompositionEngineArtifact::from_verified_file(engine, path, sha256)?;
-    if artifact.identity().identity_bytes() != stored.artifact_identity {
-        return Err(StoredArtifactError::Binding(inconsistent_evaluator()));
-    }
-    if artifact.engine_contract_identity().identity_bytes() != stored.engine_contract_identity {
+    if cell_engine_contract_identity(&engine.worker())?.identity_bytes()
+        != stored.engine_contract_identity
+    {
         let evaluator = match engine {
             CellEngine::Quickjs => "JavaScript",
             CellEngine::Monty => "Python",
@@ -382,6 +371,17 @@ pub(crate) fn inspect_stored_artifact(
             ),
         )
         .into());
+    }
+    let (path, _, _, sha256) = file_identity(&path)
+        .map_err(|error| StoredArtifactError::Environment(error.artifact_fault()))?;
+    if sha256 != host[path_end..] {
+        return Err(StoredArtifactError::Environment(
+            EvaluatorArtifactFault::BytesMismatch,
+        ));
+    }
+    let artifact = LocalCompositionEngineArtifact::from_verified_file(engine, path, sha256)?;
+    if artifact.identity().identity_bytes() != stored.artifact_identity {
+        return Err(StoredArtifactError::Binding(inconsistent_evaluator()));
     }
     Ok(artifact)
 }
@@ -545,9 +545,8 @@ mod quickjs_upgrade_tests {
         std::fs::remove_file(path)?;
         assert!(matches!(
             inspect_stored_artifact(&stored),
-            Err(StoredArtifactError::Environment(
-                EvaluatorArtifactFault::Missing
-            ))
+            Err(StoredArtifactError::Binding(refusal))
+                if refusal.message().contains("JavaScript evaluator engine contract changed")
         ));
         Ok(())
     }

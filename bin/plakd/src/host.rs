@@ -30,6 +30,8 @@ mod starter;
 mod store_revisions;
 mod upgrade;
 
+pub(crate) use upgrade::legacy_child_audit;
+
 use crate::terminal_registry as terminals;
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ use super::{
     Identity, bindings,
     preservation::{Evidence, Snapshot, StoreIdentities},
 };
+use crate::carry::child_reopen::LegacyChildBaseline;
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliFailureKind, CliResult};
 
@@ -25,6 +26,13 @@ pub(in crate::host) use verdict::operate;
 
 const LIMIT: u64 = 512 << 20;
 const FRAME: u64 = 1024;
+const CHILD_AUDIT_LIMIT: u64 = 8 << 20;
+
+#[derive(Deserialize, Serialize)]
+struct LegacyChildEvidence<A> {
+    nonce: Uuid,
+    audit: A,
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 pub(in crate::host) struct Ticket {
@@ -114,8 +122,28 @@ impl Ticket {
         publish(staging, &baseline(paths))
     }
 
+    pub(super) fn publish_child_audit(
+        &self,
+        paths: &PlakPaths,
+        audit: &LegacyChildBaseline,
+    ) -> CliResult<()> {
+        if audit.is_empty() {
+            return Ok(());
+        }
+        let path = child_audit_path(paths);
+        let evidence = LegacyChildEvidence {
+            nonce: self.nonce,
+            audit,
+        };
+        let temp = stage(&path, CHILD_AUDIT_LIMIT, |out| {
+            serde_json::to_writer(out, &evidence).map_err(error)
+        })?;
+        publish(temp, &path)
+    }
+
     pub(super) fn clear(paths: &PlakPaths) {
         let _ = fs::remove_file(baseline(paths));
+        let _ = fs::remove_file(child_audit_path(paths));
         let _ = fs::remove_file(verdict_path(paths));
     }
 
@@ -330,6 +358,29 @@ fn baseline(paths: &PlakPaths) -> PathBuf {
 
 fn verdict_path(paths: &PlakPaths) -> PathBuf {
     root(paths).join("upgrade-checkpoint-verdict")
+}
+
+fn child_audit_path(paths: &PlakPaths) -> PathBuf {
+    root(paths).join("upgrade-child-audit")
+}
+
+pub(crate) fn legacy_child_audit(paths: &PlakPaths) -> CliResult<Option<LegacyChildBaseline>> {
+    let Some(file) = open(&child_audit_path(paths), CHILD_AUDIT_LIMIT)? else {
+        return Ok(None);
+    };
+    let Some((ticket, _)) = open_checkpoint(paths)? else {
+        return Ok(None);
+    };
+    let source = HostInstance::parse(&ticket.source).map_err(error)?;
+    let caller = rustix::process::getppid().and_then(|pid| u32::try_from(pid.as_raw_pid()).ok());
+    if caller != Some(source.pid())
+        || ticket.destination != crate::build_identity::binary_id()
+        || process_birth(source.pid())? != ticket.process_birth
+    {
+        return Ok(None);
+    }
+    let evidence: LegacyChildEvidence<LegacyChildBaseline> = decode(file, CHILD_AUDIT_LIMIT)?;
+    Ok((evidence.nonce == ticket.nonce).then_some(evidence.audit))
 }
 
 fn open(path: &Path, limit: u64) -> CliResult<Option<File>> {

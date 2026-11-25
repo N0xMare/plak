@@ -95,11 +95,16 @@ fn differential_binding_preflight_refuses_only_new_live_regressions() {
 
 #[test]
 fn the_binding_audit_does_not_preempt_child_reopen_qualification() {
+    let diagnostic = serde_json::from_value(serde_json::json!({
+        "binding_change": "provider configuration",
+        "unavailable": null
+    }))
+    .unwrap();
     let report = Report {
         compatible: false,
         sessions: vec![Row {
             child: true,
-            binding_change: Some("provider configuration".into()),
+            child_binding: Some(diagnostic),
             ..row("child")
         }],
     };
@@ -111,4 +116,25 @@ fn the_binding_audit_does_not_preempt_child_reopen_qualification() {
     };
     assert!(finish(None, &report).is_ok());
     assert!(finish(Some(&source), &report).is_ok());
+}
+
+#[test]
+fn a_new_full_decode_failure_in_a_child_still_refuses() {
+    let clean = Row {
+        child: true,
+        ..row("child")
+    };
+    let source = Report {
+        compatible: true,
+        sessions: vec![clean],
+    };
+    let destination = Report {
+        compatible: false,
+        sessions: vec![Row {
+            child: true,
+            unavailable: Some("checkpoint could not be decoded".into()),
+            ..row("child")
+        }],
+    };
+    assert!(finish(Some(&source), &destination).is_err());
 }

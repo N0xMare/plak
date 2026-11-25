@@ -1,9 +1,12 @@
 //! Categorical progress on the private host-upgrade connection.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
 use crate::CliResult;
+use crate::carry::child_reopen::PreExistingChildFaults;
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,7 +46,34 @@ impl Timing {
 pub(super) enum Event<'a> {
     Waiting(&'a str),
     Qualification(Timing),
-    ChildFaults(&'a crate::carry::child_reopen::PreExistingChildFaults),
+    ChildFaults(&'a str, PreExistingChildFaults),
+}
+
+#[derive(Default)]
+pub(super) struct ChildFaults(Mutex<BTreeMap<String, PreExistingChildFaults>>);
+
+impl ChildFaults {
+    pub(super) fn record(&self, root: &str, faults: PreExistingChildFaults) {
+        let mut latest = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if faults.is_empty() {
+            latest.remove(root);
+        } else {
+            latest.insert(root.to_owned(), faults);
+        }
+    }
+
+    pub(super) fn finish(self) -> PreExistingChildFaults {
+        let mut total = PreExistingChildFaults::default();
+        for faults in self
+            .0
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner)
+            .into_values()
+        {
+            total.merge(faults);
+        }
+        total
+    }
 }
 
 pub(super) type Report<'a> = dyn Fn(Event<'_>) -> CliResult<()> + Sync + 'a;

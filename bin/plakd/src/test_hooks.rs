@@ -133,6 +133,11 @@ pub(crate) fn child_binding_cut() -> bool {
     })
 }
 
+pub(crate) fn child_binding_unreadable() -> bool {
+    hook_environment("PLAK_TEST_CHILD_BINDING_UNREADABLE_IMAGE")
+        .is_some_and(|image| running_image(&image))
+}
+
 /// Whether `image` names this executable. Both sides are canonical: a
 /// symlinked build directory must not hide the match.
 fn running_image(image: &std::ffi::OsStr) -> bool {

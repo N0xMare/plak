@@ -78,6 +78,10 @@ pub(crate) const fn binding_executor_cut() -> bool {
 pub(crate) const fn child_binding_cut() -> bool {
     false
 }
+
+pub(crate) const fn child_binding_unreadable() -> bool {
+    false
+}
 pub(crate) fn upgrade_state_key() -> Option<String> {
     None
 }

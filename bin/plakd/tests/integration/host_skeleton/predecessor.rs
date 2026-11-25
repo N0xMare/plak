@@ -52,6 +52,51 @@ fn production_predecessor_with_a_missing_child_evaluator_can_upgrade() {
 }
 
 #[test]
+fn production_predecessor_refuses_a_destination_only_unreadable_child() {
+    let old = PathBuf::from(std::env::var_os("PLAK_INSTALL_PREDECESSOR").unwrap()).join("plakd");
+    let candidate = PathBuf::from(std::env::var_os("PLAK_TEST_BINARY").unwrap());
+    let (fixture, _) = root_wake::child_fixture(false).expect("short fixture socket paths");
+    let (before, after) = probe_pair(&fixture, &old, &candidate);
+    if before["state_key"] != after["state_key"] {
+        return;
+    }
+    let _cleanup = upgrade::HomeHost(fixture.home());
+    let mut host =
+        await_serving_host(spawn_host(image_command(&fixture, &old).arg("host"))).unwrap();
+    let (mut client, _, node) =
+        upgrade::reopen::children::spawn_child_with_idle(&fixture, &host, |session| {
+            source::idle_locator(&source::open(&fixture), session, 1);
+        });
+    let id = after["binary_id"].as_str().unwrap();
+    let result = image_command(&fixture, &candidate)
+        .env("PLAK_TEST_CHILD_BINDING_UNREADABLE_IMAGE", &candidate)
+        .args(["host", "upgrade", "--expect-binary", id, "--drain", "0"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(!result.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("host_upgrade_child_reopen_refused: 1 affected child session(s)"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("child binding is unreadable in this image"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("resolving earlier admission verdicts"),
+        "{stderr}"
+    );
+    assert!(matches!(
+        client.request(4, new_session(&fixture.workspace())),
+        Outcome::Ok(Answer::Created { .. })
+    ));
+    std::fs::write(fixture.root.join("release-child"), []).unwrap();
+    root_wake::submitted_result(&fixture, &node);
+    stop(&mut host);
+}
+
+#[test]
 fn production_predecessor_upgrade_preserves_live_work() {
     let directory = std::env::var_os("PLAK_INSTALL_PREDECESSOR")
         .expect("prepare the pinned predecessor with tools/gate/build_predecessor.py");

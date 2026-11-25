@@ -1,5 +1,6 @@
 //! Upgrade binding regressions, not pre-existing or external availability failures.
 
+use crate::carry::child_reopen::{LegacyChildBaseline, branch_key};
 use crate::commands::session::check_binding::{Report, Row};
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliResult};
@@ -35,7 +36,7 @@ fn probe(
 pub(in crate::host) struct Baseline(Option<BTreeSet<String>>);
 
 fn comparable(row: &Row) -> bool {
-    !row.archived && !row.superseded && !row.child && !row.closed
+    !row.archived && !row.superseded && !row.closed
 }
 
 impl Baseline {
@@ -54,19 +55,13 @@ impl Baseline {
 }
 
 fn binding_key(row: &Row) -> String {
-    use sha2::{Digest as _, Sha256};
-    let mut digest = Sha256::new();
-    for field in [&row.session, &row.branch] {
-        digest.update((field.len() as u64).to_be_bytes());
-        digest.update(field.as_bytes());
-    }
-    crate::shipping_artifact::hex_digest(&digest.finalize())
+    branch_key(&row.session, &row.branch)
 }
 
 pub(super) fn requester_baseline(
     paths: &PlakPaths,
     identity: &super::Identity,
-) -> CliResult<Baseline> {
+) -> CliResult<(Baseline, LegacyChildBaseline)> {
     let instance = plakous_recursive_subagents::tree::HostInstance::parse(&identity.instance)
         .map_err(CliFailure::new)?;
     let image = source_image(instance.pid())?;
@@ -74,7 +69,21 @@ pub(super) fn requester_baseline(
     let output = probe(&image, paths, &identity.key, None)?;
     verified.recheck(&image)?;
     let report = serde_json::from_slice::<Report>(&output.stdout).ok();
-    Ok(Baseline::from_report(report.as_ref()))
+    let mut legacy = LegacyChildBaseline::default();
+    if !identity.child_reopen_baseline
+        && let Some(report) = &report
+    {
+        for row in report
+            .sessions
+            .iter()
+            .filter(|row| comparable(row) && row.audit_failed())
+        {
+            // Some predecessors did not mark child rows. Match by branch only
+            // when the destination's bounded tree probe identifies it as a child.
+            legacy.insert(binding_key(row));
+        }
+    }
+    Ok((Baseline::from_report(report.as_ref()), legacy))
 }
 
 #[cfg(target_os = "linux")]

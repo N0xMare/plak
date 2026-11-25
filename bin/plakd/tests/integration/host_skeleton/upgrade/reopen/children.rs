@@ -16,7 +16,7 @@ fn spawn_child(fixture: &Fixture, host: &Host) -> (Client, String, NodeAddress) 
     })
 }
 
-fn spawn_child_with_idle(
+pub(in crate::host_skeleton) fn spawn_child_with_idle(
     fixture: &Fixture,
     host: &Host,
     wait_idle: impl FnOnce(&str),
@@ -314,6 +314,13 @@ pub(in crate::host_skeleton) fn missing_evaluator_upgrade(
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(
         stderr.contains("host_upgrade_child_reopen_pre_existing: 1 affected child session(s); evaluator_artifact_missing=1"),
+        "{stderr}"
+    );
+    assert_eq!(
+        stderr
+            .matches("host_upgrade_child_reopen_pre_existing:")
+            .count(),
+        1,
         "{stderr}"
     );
 

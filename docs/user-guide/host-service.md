@@ -159,9 +159,24 @@ success. Installation does not itself replace the running host.
 
 Same-key upgrade uses planned handoff and the existing session identities,
 not cross-key carry. The destination checks saved child bindings before drain.
-If it reports affected child sessions and a binding change, the current host
-keeps running. Use a destination that can reopen those bindings or settle and
-close the affected children before retrying. On Linux the upgrade replaces
+If it reports `host_upgrade_child_reopen_refused`, the current host keeps
+running. Use a destination that can reopen those bindings or settle and close
+the affected children before retrying.
+
+`host_upgrade_child_reopen_pre_existing` is a separate, non-blocking line. It
+appears once and gives a total child count and counts by kind:
+
+- `evaluator_artifact_missing`: the recorded evaluator file is absent.
+- `evaluator_artifact_bytes_mismatch`: the file is present but its bytes changed.
+- `evaluator_artifact_unavailable`: the file cannot be read at its recorded location.
+- `binding_change` or `binding_unreadable`: the source also reported a binding fault.
+
+You can continue the upgrade. Before reopening the affected children, restore
+the original evaluator file with its exact bytes and read access, or resolve
+the binding fault using a compatible build. If you no longer need the children,
+close them.
+
+On Linux the upgrade replaces
 the image in the running process:
 the unit's `MainPID` stays the same, but the host generation changes. If you
 then replace a legacy unit, stop it and start the new unit as a separate

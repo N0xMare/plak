@@ -149,7 +149,13 @@ pub(crate) fn upgrade_reopen_probe(
         let (paths, record) = probe_session(services, id)?;
         crate::test_hooks::gate_upgrade_reopen(&record.id)?;
         let children = inspect_children(paths, &record)?;
-        let mut qualification = children.qualify(None);
+        let audit = if children.needs_legacy_audit() {
+            crate::host::legacy_child_audit(paths).map_err(|error| error.message().to_owned())?
+        } else {
+            None
+        };
+        let mut qualification =
+            children.qualify(child_reopen::ChildBaseline::Legacy(audit.as_ref()));
         let root = probe_root(services, paths, record, true).unwrap_or_else(ReopenProbe::refused);
         let (verdict, root) = match std::mem::take(&mut qualification.regressions).into_report() {
             Some(regressions) => {

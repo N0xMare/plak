@@ -11,6 +11,7 @@ mod reopen;
 mod requester;
 mod runner_carry;
 mod step_drain;
+pub(crate) use checkpoint::legacy_child_audit;
 
 use std::io::{BufRead as _, Write as _};
 use std::os::unix::net::UnixStream;
@@ -345,9 +346,15 @@ pub(super) fn request(
         eprintln!("host upgrade: store backup saved at {}", backup.display());
     }
     health::stores(paths)?;
-    let bindings = bindings::requester_baseline(paths, &identity)?;
+    let (bindings, legacy_child_audit) = bindings::requester_baseline(paths, &identity)?;
     if !identity.child_reopen_baseline {
-        qualification::legacy_child_preflight(paths, &destination, &identity.key, before_request)?;
+        qualification::legacy_child_preflight(
+            paths,
+            &destination,
+            &identity.key,
+            before_request,
+            &legacy_child_audit,
+        )?;
     }
     let (baseline, _) = preservation::Snapshot::capture_at(
         paths,
@@ -362,6 +369,7 @@ pub(super) fn request(
         ));
     }
     checkpoint::Ticket::publish(paths, staged)?;
+    ticket.publish_child_audit(paths, &legacy_child_audit)?;
     if Instant::now() >= before_request {
         checkpoint::Ticket::clear(paths);
         return Err(CliFailure::new(
@@ -697,10 +705,14 @@ fn handle(
     let output = Mutex::new(stream.try_clone().map_err(io_failure)?);
     let progress_start = Instant::now();
     let last_progress = Mutex::new(None::<Instant>);
+    let child_faults = progress::ChildFaults::default();
     let progress = |event: progress::Event<'_>| {
         let (detail, qualification) = match event {
             progress::Event::Qualification(timing) => (timing.detail(), Some(timing)),
-            progress::Event::ChildFaults(faults) => (faults.to_string(), None),
+            progress::Event::ChildFaults(root, faults) => {
+                child_faults.record(root, faults);
+                return Ok(());
+            }
             progress::Event::Waiting(detail) => {
                 let mut last = last_progress
                     .lock()
@@ -737,6 +749,19 @@ fn handle(
         runtime,
         &progress,
     );
+    let faults = child_faults.finish();
+    let result = if faults.is_empty() {
+        result
+    } else {
+        let reported = write(
+            &mut stream,
+            &Answer::Progress {
+                detail: faults.to_string(),
+                qualification: None,
+            },
+        );
+        result.and_then(|ready| reported.map(|()| ready).map_err(Refusal::from))
+    };
     match result {
         Ok(ready) => {
             runtime.block_on(super::lifecycle::restarting(host));

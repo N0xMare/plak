@@ -37,6 +37,17 @@ pub(crate) struct ChildBinding {
     unavailable: Option<String>,
 }
 
+impl Row {
+    pub(crate) fn audit_failed(&self) -> bool {
+        self.binding_change.is_some()
+            || self.unavailable.is_some()
+            || self
+                .child_binding
+                .as_ref()
+                .is_some_and(|child| child.binding_change.is_some() || child.unavailable.is_some())
+    }
+}
+
 /// No `Services` or config resolution: neither inspection path opens a writer,
 /// a runtime, a runner, credential sources or diagnostics.
 pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
@@ -66,6 +77,7 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
             .filter(|(_, id, _)| id.as_str().starts_with("plakous.mcp."))
             .map(|(name, _, _)| format!("MCP external contract unaffected: {name}"))
             .collect();
+        let decoded = head.presentation.as_ref().is_some_and(Result::is_ok);
         let (mut binding_change, mut unavailable) = match head.presentation {
             None => (None, None),
             Some(Err(error)) => (
@@ -80,16 +92,13 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
                 Err(error) => (None, Some(error.message().to_owned())),
             },
         };
-        if !archived && !superseded && !closed {
-            compatible &= binding_change.is_none() && unavailable.is_none();
-        }
-        // A predecessor compares the flat fields without checking child
-        // reopen. Keep the audit details, but let the child probe qualify them.
-        let child_binding = child.then(|| ChildBinding {
+        // Only the full audit can prove decode failures outside the binding
+        // projection. Binding findings on decoded children go to the child probe.
+        let child_binding = (child && decoded).then(|| ChildBinding {
             binding_change: binding_change.take(),
             unavailable: unavailable.take(),
         });
-        rows.push(Row {
+        let row = Row {
             session: locator.session_id().to_string(),
             branch: locator.branch_id().to_string(),
             checkpoint: locator.checkpoint_id().to_string(),
@@ -101,7 +110,11 @@ pub(crate) fn inspect(paths: &PlakPaths) -> CliResult<Report> {
             closed,
             child_binding,
             unaffected,
-        });
+        };
+        if !archived && !superseded && !closed {
+            compatible &= !row.audit_failed();
+        }
+        rows.push(row);
     }
     Ok(Report {
         compatible,

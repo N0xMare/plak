@@ -19,16 +19,18 @@ pub use crate::EvaluatorArtifactFault;
 pub enum ChildBindingInspectionError {
     /// The binding could not be decoded or does not agree with this build.
     Binding(AgentSessionsError),
+    /// This build does not accept the recorded evaluator engine or contract.
+    EvaluatorContract(AgentSessionsError),
     /// A recorded evaluator artifact cannot be used on this machine.
     EvaluatorArtifact(EvaluatorArtifactFault),
 }
 
 impl ChildBindingInspectionError {
     pub(crate) fn evaluator_binding(message: &str) -> Self {
-        Self::Binding(
-            AgentSessionsError::new(super::AgentSessionsErrorKind::IncompatibleBuild, message)
-                .with_binding_change(plakous_agent::BindingChange::ExecutionEnvironment),
-        )
+        Self::EvaluatorContract(AgentSessionsError::new(
+            super::AgentSessionsErrorKind::IncompatibleBuild,
+            message,
+        ))
     }
 
     pub(crate) fn evaluator_record(message: &str) -> Self {
