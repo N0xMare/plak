@@ -226,7 +226,7 @@ fn identity(db: &Connection, status: Status) -> CliResult<SchemaIdentity> {
     };
     Ok(SchemaIdentity {
         version,
-        instance: texts([instance.as_str()]),
+        instance: super::identity::instance_key(&instance),
         pin: texts([pin.as_str()]),
     })
 }

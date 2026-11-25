@@ -166,6 +166,34 @@ fn crash(flag: &str, cut: &str, lose_original: bool, paired: bool) {
                     .contains("host_upgrade_acknowledge_wrong_state"),
             "{refused:?}"
         );
+        let runtime = rusqlite::Connection::open(&db).unwrap();
+        let original: Vec<u8> = runtime
+            .query_row(
+                "SELECT lease_domain FROM store_meta WHERE id=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        runtime
+            .execute(
+                "UPDATE store_meta SET lease_domain=randomblob(48) WHERE id=1",
+                [],
+            )
+            .unwrap();
+        let mismatch = acknowledge();
+        let detail = String::from_utf8_lossy(&mismatch.stderr);
+        assert_eq!(mismatch.status.code(), Some(5), "{detail}");
+        assert!(
+            detail.contains("host_upgrade_acknowledge_identity_mismatch: the runtime store"),
+            "{detail}"
+        );
+        runtime
+            .execute(
+                "UPDATE store_meta SET lease_domain=?1 WHERE id=1",
+                [original],
+            )
+            .unwrap();
+        drop(runtime);
         let acknowledge = acknowledge();
         assert!(acknowledge.status.success(), "{acknowledge:?}");
     }

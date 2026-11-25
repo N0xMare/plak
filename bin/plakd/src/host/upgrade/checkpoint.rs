@@ -15,7 +15,7 @@ use uuid::Uuid;
 pub(in crate::host) use super::preservation::Evidence as EvidenceLevel;
 use super::{
     Identity, bindings,
-    preservation::{Evidence, Snapshot},
+    preservation::{Evidence, Snapshot, StoreIdentities},
 };
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliFailureKind, CliResult};
@@ -183,6 +183,42 @@ struct Payload<S, B> {
     bindings: B,
 }
 
+fn check_store_identities(paths: &PlakPaths, nonce: Uuid) -> CliResult<()> {
+    let unproven = |_| {
+        CliFailure::classified(
+            CliFailureKind::RecoveryRequired,
+            "host_upgrade_acknowledge_baseline_unproven: keep the fence; recover the original staged checkpoint before acknowledging",
+        )
+    };
+    let (_, body) = open_checkpoint(paths)
+        .and_then(|found| {
+            found
+                .filter(|(ticket, _)| ticket.nonce == nonce)
+                .ok_or_else(|| error("no matching checkpoint"))
+        })
+        .map_err(unproven)?;
+    let evidence: Payload<StoreIdentities, serde::de::IgnoredAny> =
+        decode(body, LIMIT).map_err(unproven)?;
+    evidence.snapshot.verify(paths)
+}
+
+fn open_checkpoint(paths: &PlakPaths) -> CliResult<Option<(Ticket, BufReader<File>)>> {
+    let Some(file) = open(&baseline(paths), LIMIT)? else {
+        return Ok(None);
+    };
+    let mut body = BufReader::new(file);
+    let mut header = Vec::new();
+    (&mut body)
+        .take(FRAME)
+        .read_until(b'\n', &mut header)
+        .map_err(error)?;
+    if header.last() != Some(&b'\n') {
+        return Err(error("missing checkpoint identity"));
+    }
+    let ticket = serde_json::from_slice(&header).map_err(error)?;
+    Ok(Some((ticket, body)))
+}
+
 fn refuse_cold_start(paths: &PlakPaths) -> CliResult<()> {
     if verdict::fenced(paths)? {
         return Err(CliFailure::classified(
@@ -210,19 +246,9 @@ impl Checkpoint {
         binary: &str,
         matches: impl FnOnce(&Ticket) -> CliResult<bool>,
     ) -> CliResult<Option<Self>> {
-        let Some(file) = open(&baseline(paths), LIMIT)? else {
+        let Some((ticket, body)) = open_checkpoint(paths)? else {
             return Ok(None);
         };
-        let mut body = BufReader::new(file);
-        let mut header = Vec::new();
-        (&mut body)
-            .take(FRAME)
-            .read_until(b'\n', &mut header)
-            .map_err(error)?;
-        if header.last() != Some(&b'\n') {
-            return Err(error("missing checkpoint identity"));
-        }
-        let ticket: Ticket = serde_json::from_slice(&header).map_err(error)?;
         Ok(
             (ticket.destination == binary && matches(&ticket)?).then_some(Self {
                 ticket,

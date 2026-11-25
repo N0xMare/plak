@@ -212,12 +212,27 @@ unchanged service link. Do not restore a backup or rerun the handoff to clear
 this failure.
 
 Run `plakd host upgrade-verdict --acknowledge <id>` with the ID you inspected.
-The command checks that the home is stopped and that the destination databases
-pass read-only integrity checks. It does not certify preservation or start
-the host. Point the service at the destination and start it deliberately. If
+The command checks that the home is stopped, that the product, runtime and
+tree store identities match the staged checkpoint, and that the databases
+pass read-only integrity checks. A missing or nonmatching checkpoint leaves
+the fence in place. Acknowledgement does not certify preservation, recognize
+an older copy with the same store identity, or start the host. Point the
+service at the destination and start it deliberately. If
 systemd reached its restart limit, run
 `systemctl --user reset-failed plakd-host.service` before starting. On macOS,
 bootstrap the stopped LaunchAgent again if you unloaded it.
+
+If startup or verdict inspection reports `host_upgrade_verdict_unreadable`,
+keep the verdict and staged checkpoint. Stop restart attempts, the host, and
+other writers first. The verdict is `upgrade-checkpoint-verdict` in the
+product home's host directory. If only its permissions changed and you have
+verified it is the original, user-owned regular file, set its mode to 0600
+and retry inspection. For bad contents or a replaced file, recover only a
+verified copy of the original verdict for that exact checkpoint and retry
+normal acknowledgement. Never delete the unreadable verdict to bypass the
+fence or invent an ID. If you cannot recover the original evidence, leave
+the affected home stopped and retain it for diagnosis; use the offline
+recovery procedure to recover into a separate home.
 
 If the source build used Monty or an earlier micro-monty release for Python
 cells, check Python-bound sessions before handoff. The micro-monty 0.0.3

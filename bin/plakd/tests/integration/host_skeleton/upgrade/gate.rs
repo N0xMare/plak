@@ -81,6 +81,8 @@ fn during_exec(
 
 #[test]
 fn a_post_surrender_integrity_failure_blocks_service_manager_restarts() {
+    use std::os::unix::fs::PermissionsExt as _;
+
     let Some(fixture) = fixture() else { return };
     let image = replacement_image(&fixture);
     let (mut host, result) = during_exec(&fixture, &image, &[], || {
@@ -136,6 +138,74 @@ fn a_post_surrender_integrity_failure_blocks_service_manager_restarts() {
     let stale = ack(&uuid::Uuid::new_v4().to_string());
     assert!(!stale.status.success(), "{stale:?}");
     assert!(String::from_utf8_lossy(&stale.stderr).contains("host_upgrade_verdict_changed"));
+    let fence = fixture.home().join("host/upgrade-checkpoint-verdict");
+    let checkpoint = fixture.home().join("host/upgrade-checkpoint");
+    let original_verdict = std::fs::read(&fence).unwrap();
+    for (phase, label, path, table) in [
+        (
+            "Health",
+            "product",
+            paths.product_database(),
+            "product_schema",
+        ),
+        (
+            "Startup",
+            "tree",
+            paths.subagents_database(),
+            "subagents_schema",
+        ),
+    ] {
+        let mut payload: serde_json::Value = serde_json::from_slice(&original_verdict).unwrap();
+        payload["outcome"] = serde_json::json!({"Failed": phase});
+        std::fs::write(&fence, serde_json::to_vec(&payload).unwrap()).unwrap();
+        let store = rusqlite::Connection::open(path).unwrap();
+        let original: String = store
+            .query_row(&format!("SELECT instance_id FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let replace = |id: &str| {
+            store
+                .execute(&format!("UPDATE {table} SET instance_id=?1"), [id])
+                .unwrap()
+        };
+        replace(&uuid::Uuid::new_v4().to_string());
+        let refused = ack(id);
+        let detail = String::from_utf8_lossy(&refused.stderr);
+        assert_eq!(refused.status.code(), Some(5), "{detail}");
+        assert!(
+            detail.contains("host_upgrade_acknowledge_identity_mismatch:"),
+            "{detail}"
+        );
+        assert!(detail.contains(&format!("the {label} store")), "{detail}");
+        assert!(checkpoint.is_file() && fence.is_file());
+        replace(&original);
+    }
+    for (data, mode) in [
+        (&b"broken"[..], 0o600),
+        (original_verdict.as_slice(), 0o644),
+    ] {
+        std::fs::write(&fence, data).unwrap();
+        std::fs::set_permissions(&fence, std::fs::Permissions::from_mode(mode)).unwrap();
+        for result in [
+            verdict.output().unwrap(),
+            ack(id),
+            image_command(&fixture, &image)
+                .arg("host")
+                .output()
+                .unwrap(),
+        ] {
+            let detail = String::from_utf8_lossy(&result.stderr);
+            assert_eq!(result.status.code(), Some(5), "{detail}");
+            assert!(
+                detail.contains("host_upgrade_verdict_unreadable:"),
+                "{detail}"
+            );
+        }
+        assert_eq!(std::fs::read(&fence).unwrap(), data);
+        assert!(checkpoint.is_file());
+    }
+    std::fs::set_permissions(&fence, std::fs::Permissions::from_mode(0o600)).unwrap();
     let cleared = ack(id);
     assert!(cleared.status.success(), "{cleared:?}");
     let cleared: serde_json::Value = serde_json::from_slice(&cleared.stdout).unwrap();

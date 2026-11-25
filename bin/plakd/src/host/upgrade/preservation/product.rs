@@ -256,7 +256,7 @@ fn capture_product(
     )?;
     Ok((
         Product {
-            instance: texts([instance.as_str()]),
+            instance: super::identity::instance_key(&instance),
             roots,
             queues,
             removed_drafts,

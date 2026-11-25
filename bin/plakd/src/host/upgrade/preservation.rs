@@ -1,6 +1,7 @@
 //! Read-only preservation across bounded, individually pinned SQLite snapshots.
 
 mod facts;
+mod identity;
 mod product;
 mod runtime;
 #[cfg(test)]
@@ -15,6 +16,7 @@ use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliResult};
 
 use self::facts::{Budget, Key};
+pub(super) use self::identity::StoreIdentities;
 
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 pub(in crate::host) enum Evidence {

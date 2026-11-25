@@ -192,9 +192,14 @@ fn a_serving_predecessor_blocks_upgrade_verdict_acknowledgement() {
         Outcome::Ok(Answer::Pong)
     );
     stop(&mut host);
-    let report: Value = serde_json::from_str(&run(&mut recovery)).unwrap();
-    assert_eq!(report["acknowledged"], true);
-    assert!(!path.exists());
+    let missing = recovery.output().unwrap();
+    assert!(
+        !missing.status.success()
+            && String::from_utf8_lossy(&missing.stderr)
+                .contains("host_upgrade_acknowledge_baseline_unproven"),
+        "{missing:?}"
+    );
+    assert_eq!(std::fs::read_to_string(path).unwrap(), pending);
 }
 
 #[test]

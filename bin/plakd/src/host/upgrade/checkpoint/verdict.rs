@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::{FRAME, Outcome, baseline, claim, decode, error, open, root, verdict_path};
+use super::{
+    FRAME, Outcome, baseline, check_store_identities, claim, decode, error, open, root,
+    verdict_path,
+};
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
 
@@ -92,9 +95,12 @@ impl ReadVerdict {
 }
 
 fn read(paths: &PlakPaths) -> CliResult<Option<ReadVerdict>> {
-    open(&verdict_path(paths), FRAME)?
-        .map(|file| decode(file, FRAME))
-        .transpose()
+    open(&verdict_path(paths), FRAME)
+        .and_then(|file| file.map(|file| decode(file, FRAME)).transpose())
+        .map_err(|_| CliFailure::classified(
+            CliFailureKind::RecoveryRequired,
+            "host_upgrade_verdict_unreadable: stop the service and all home writers; keep the verdict and checkpoint, and repair the original verdict or recover the home offline (see the host service guide)",
+        ))
 }
 
 pub(super) fn outcome(paths: &PlakPaths, nonce: Uuid) -> CliResult<Option<Outcome>> {
@@ -188,15 +194,13 @@ fn acknowledge_verdict(paths: &PlakPaths, id: Uuid) -> CliResult<Option<ReadVerd
         ));
     }
     super::super::health::stores(paths)?;
-    match fs::remove_file(baseline(paths)) {
-        Ok(()) => {}
-        Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => {}
-        Err(failure) => return Err(error(failure)),
-    }
+    check_store_identities(paths, id)?;
+    let directory = fs::File::open(root(paths)).map_err(error)?;
     fs::remove_file(verdict_path(paths)).map_err(error)?;
-    fs::File::open(root(paths))
-        .and_then(|directory| directory.sync_all())
-        .map_err(error)?;
+    directory.sync_all().map_err(error)?;
+    // A crash before the fence is durably cleared must leave its evidence.
+    // The next cold start also removes a leftover checkpoint.
+    let _ = fs::remove_file(baseline(paths));
     Ok(Some(verdict))
 }
 

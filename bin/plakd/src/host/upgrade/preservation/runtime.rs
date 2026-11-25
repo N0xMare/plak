@@ -140,13 +140,8 @@ fn capture_runtime(
     budget: &mut Budget,
 ) -> CliResult<Runtime> {
     let db = reader.connection();
-    let instance = db
-        .query_row(
-            "SELECT lease_domain FROM store_meta WHERE id=1",
-            [],
-            |row| row.get::<_, [u8; 48]>(0),
-        )
-        .map_err(|_| unreadable("runtime store identity"))?;
+    let instance =
+        super::identity::runtime_instance(db).map_err(|_| unreadable("runtime store identity"))?;
     let mut sessions = Map::new();
     scan(
         db,
@@ -286,7 +281,7 @@ fn capture_runtime(
         Map::new()
     };
     Ok(Runtime {
-        instance: crate::shipping_artifact::digest(&instance),
+        instance,
         sessions,
         lines,
         deleted,
