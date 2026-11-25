@@ -6141,10 +6141,23 @@ and paid compaction finish under their ordinary clocks; there is no absolute
 freeze deadline while they run. Neither mode waits for background jobs to exit.
 Before the admission barrier the requester prints each completed qualification
 phase as `qualification phase=<phase> elapsed_ms=<integer>` from a typed
-progress reply, without throttling these phase timings. The requester prints
-categorical waiting time and active driver identities to
+progress reply, without throttling these phase timings. The source reports
+the earlier admission-verdict barrier as `admission barrier: resolving
+earlier admission verdicts` when it starts and `admission barrier: resolved
+earlier admission verdicts elapsed_ms=<integer>`, the barrier's own
+duration, when it returns; neither is throttled. During the step drain the
+requester prints categorical waiting time, counted from the end of the
+barrier, and active driver identities to
 stderr at most once per second; no prompt, tool arguments or credentials are
 included. Ctrl-C or requester loss aborts reversible preparation.
+After surrender the destination logs `destination phase=<phase>
+elapsed_ms=<integer>` as each step completes: `stopped_revisions`, then
+`store_health_product`, `store_health_tree`, `store_health_runtime`,
+`preservation` and `bindings`. Its Ready or Failed verdict carries the
+timings of the steps that ran, in that order, and the requester prints each
+as the same line when it reads that verdict. The timings are optional
+diagnostics in the version-1 verdict: they never decide an outcome, and
+readers ignore an absent or unfamiliar field.
 
 The existing root owner freezes outer actions, the hub defers host-initiated
 wakes and recovery claims, and each admitted root/child driver

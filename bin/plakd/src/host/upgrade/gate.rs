@@ -6,38 +6,65 @@
 //! order, not in completion order, so the failure stage is stable.
 
 use std::thread::{Scope, ScopedJoinHandle};
+use std::time::Instant;
 
-use super::checkpoint::{Checkpoint, EvidenceLevel, Failure};
+use super::checkpoint::{Checkpoint, EvidenceLevel, Failure, GatePhase, GateTiming};
 use super::{bindings, health};
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliResult};
 
-/// On failure `stage` names the failed check.
+/// Logs a destination step when it completes; the verdict carries the same timing.
+pub(in crate::host) fn timed<T>(phase: GatePhase, step: impl FnOnce() -> T) -> (T, GateTiming) {
+    let started = Instant::now();
+    let result = step();
+    let timing = GateTiming::new(phase, started.elapsed());
+    eprintln!("host upgrade: {}", timing.detail());
+    (result, timing)
+}
+
+/// Returns the timings of the checks that ran, in reporting order, beside
+/// the verdict. On failure `stage` names the failed check.
 pub(in crate::host) fn verify(
     paths: &PlakPaths,
     checkpoint: &mut Checkpoint,
     stage: &mut Failure,
-) -> CliResult<EvidenceLevel> {
+) -> (Vec<GateTiming>, CliResult<EvidenceLevel>) {
     let deadline = health::deadline();
+    let phases = [
+        GatePhase::StoreHealthProduct,
+        GatePhase::StoreHealthTree,
+        GatePhase::StoreHealthRuntime,
+    ];
     std::thread::scope(|scope| {
-        let stores = health::databases(paths).map(|(label, path)| {
-            spawn(scope, "store health", move || {
-                health::store(label, &path, deadline)
+        let stores = health::databases(paths)
+            .into_iter()
+            .zip(phases)
+            .map(|((label, path), phase)| {
+                spawn(scope, "store health", move || {
+                    timed(phase, || health::store(label, &path, deadline))
+                })
+            })
+            .collect::<Vec<_>>();
+        let preservation = spawn(scope, "preservation", || {
+            timed(GatePhase::Preservation, || {
+                checkpoint.verify_destination(paths)
             })
         });
-        let preservation = spawn(scope, "preservation", || {
-            checkpoint.verify_destination(paths)
-        });
         let bindings = spawn(scope, "binding inspection", || {
-            bindings::inspect_destination(paths)
+            timed(GatePhase::Bindings, || bindings::inspect_destination(paths))
         });
         // Join every check before reporting, so none outlives the exclusion.
-        let stores = stores.map(join);
-        let preservation = join(preservation);
-        let bindings = join(bindings);
-        first_failure(stage, stores, preservation, bindings, |baseline, report| {
+        let mut timings = Vec::new();
+        let stores = stores
+            .into_iter()
+            .map(|store| finish(&mut timings, store))
+            .collect::<Vec<_>>();
+        let preservation = finish(&mut timings, preservation);
+        let bindings = finish(&mut timings, bindings);
+        let verdict = first_failure(stage, stores, preservation, bindings, |baseline, report| {
             bindings::health(baseline, report)
-        })
+        });
+        (timings, verdict)
     })
 }
 
@@ -59,12 +86,12 @@ fn first_failure<E, B, R>(
     Ok(evidence)
 }
 
-type Check<'scope, T> = CliResult<ScopedJoinHandle<'scope, CliResult<T>>>;
+type Check<'scope, T> = CliResult<ScopedJoinHandle<'scope, (CliResult<T>, GateTiming)>>;
 
 fn spawn<'scope, T: Send + 'scope>(
     scope: &'scope Scope<'scope, '_>,
     name: &str,
-    check: impl FnOnce() -> CliResult<T> + Send + 'scope,
+    check: impl FnOnce() -> (CliResult<T>, GateTiming) + Send + 'scope,
 ) -> Check<'scope, T> {
     std::thread::Builder::new()
         .name(format!("upgrade {name}"))
@@ -72,10 +99,12 @@ fn spawn<'scope, T: Send + 'scope>(
         .map_err(|error| CliFailure::new(format!("could not start the {name} check: {error}")))
 }
 
-fn join<T>(check: Check<'_, T>) -> CliResult<T> {
-    check?
+fn finish<T>(timings: &mut Vec<GateTiming>, check: Check<'_, T>) -> CliResult<T> {
+    let (result, timing) = check?
         .join()
-        .map_err(|_| CliFailure::new("an upgrade gate check panicked"))?
+        .map_err(|_| CliFailure::new("an upgrade gate check panicked"))?;
+    timings.push(timing);
+    result
 }
 
 #[cfg(test)]

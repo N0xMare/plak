@@ -152,6 +152,7 @@ pub(crate) fn run_host_command(
                 paths,
                 checkpoint,
                 upgrade::checkpoint::Failure::Startup,
+                &[],
                 &error,
             ));
         }
@@ -160,10 +161,17 @@ pub(crate) fn run_host_command(
         checkpoint,
         evidence: None,
         stage: upgrade::checkpoint::Failure::Startup,
+        timings: Vec::new(),
     };
     let outcome = serve_host(services, command, inherited, &mut gate);
-    if let (Err(error), Some(checkpoint)) = (&outcome, gate.checkpoint) {
-        return Ok(stop_refused_upgrade(paths, &checkpoint, gate.stage, error));
+    if let (Err(error), Some(checkpoint)) = (&outcome, &gate.checkpoint) {
+        return Ok(stop_refused_upgrade(
+            paths,
+            checkpoint,
+            gate.stage,
+            &gate.timings,
+            error,
+        ));
     }
     outcome
 }
@@ -172,10 +180,11 @@ fn stop_refused_upgrade(
     paths: &crate::home::paths::PlakPaths,
     checkpoint: &upgrade::checkpoint::Checkpoint,
     stage: upgrade::checkpoint::Failure,
+    timings: &[upgrade::checkpoint::GateTiming],
     error: &CliFailure,
 ) -> ProcessOutcome {
     eprintln!("host upgrade: {}", error.message());
-    checkpoint.ticket.record_failure(paths, stage);
+    checkpoint.ticket.record_failure(paths, stage, timings);
     eprintln!("{}", stage.fix_forward().message());
     // Both installed managers restart failures. A stable service link can
     // still point to a predecessor that cannot read the verdict. Stop the
@@ -188,9 +197,21 @@ struct UpgradeGate {
     checkpoint: Option<upgrade::checkpoint::Checkpoint>,
     evidence: Option<upgrade::checkpoint::EvidenceLevel>,
     stage: upgrade::checkpoint::Failure,
+    timings: Vec<upgrade::checkpoint::GateTiming>,
 }
 
 impl UpgradeGate {
+    /// Stopped-store revisions run before the gate, on every startup.
+    fn stopped_revisions(&mut self, revise: impl FnOnce() -> CliResult<()>) -> CliResult<()> {
+        if self.checkpoint.is_none() {
+            return revise();
+        }
+        let (result, timing) =
+            upgrade::gate::timed(upgrade::checkpoint::GatePhase::StoppedRevisions, revise);
+        self.timings.push(timing);
+        result
+    }
+
     fn verify(&mut self, paths: &crate::home::paths::PlakPaths) -> CliResult<()> {
         let Some(checkpoint) = &mut self.checkpoint else {
             return Ok(());
@@ -201,7 +222,9 @@ impl UpgradeGate {
             true,
             Instant::now() + upgrade::health::ADMISSION_TIME,
         )?;
-        self.evidence = Some(upgrade::gate::verify(paths, checkpoint, &mut self.stage)?);
+        let (timings, verdict) = upgrade::gate::verify(paths, checkpoint, &mut self.stage);
+        self.timings.extend(timings);
+        self.evidence = Some(verdict?);
         crate::carry::upgrade::crash_cut("after-destination-verification");
         self.stage = upgrade::checkpoint::Failure::Startup;
         Ok(())
@@ -212,7 +235,9 @@ impl UpgradeGate {
             let evidence = self
                 .evidence
                 .ok_or_else(|| CliFailure::new("missing preservation verdict"))?;
-            checkpoint.ticket.record_ready(paths, evidence)?;
+            checkpoint
+                .ticket
+                .record_ready(paths, evidence, &self.timings)?;
             self.checkpoint = None;
         }
         Ok(())
@@ -308,7 +333,9 @@ fn serve_host(
         &ownership.state,
         inherited,
     )?;
-    store_revisions::upgrade_stopped(paths, stores_pending, &ownership.state)?;
+    gate.stopped_revisions(|| {
+        store_revisions::upgrade_stopped(paths, stores_pending, &ownership.state)
+    })?;
     gate.verify(paths)?;
     let environment = environment.unwrap_or_else(environment::HostEnvironment::capture);
     let opened = open_host(

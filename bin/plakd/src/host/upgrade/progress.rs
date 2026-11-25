@@ -44,9 +44,29 @@ impl Timing {
 }
 
 pub(super) enum Event<'a> {
+    /// Step-drain waiting, timed from the start of the drain.
     Waiting(&'a str),
     Qualification(Timing),
+    Barrier(Barrier),
     ChildFaults(&'a str, PreExistingChildFaults),
+}
+
+/// The earlier admission-verdict barrier, timed by itself.
+pub(super) enum Barrier {
+    Started,
+    Resolved(std::time::Duration),
+}
+
+impl Barrier {
+    pub(super) fn detail(&self) -> String {
+        match self {
+            Self::Started => "admission barrier: resolving earlier admission verdicts".to_owned(),
+            Self::Resolved(elapsed) => format!(
+                "admission barrier: resolved earlier admission verdicts elapsed_ms={}",
+                u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+            ),
+        }
+    }
 }
 
 #[derive(Default)]

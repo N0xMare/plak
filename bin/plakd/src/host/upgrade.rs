@@ -513,7 +513,9 @@ fn wait_host(
                 format!("host_upgrade_outcome_unknown: destination readiness verdict could not be verified ({})", failure.message()),
             )
         })?;
+        let (verdict, timings) = verdict.unzip();
         if let Some(checkpoint::Outcome::Failed(failure)) = verdict {
+            print_destination(timings.as_deref());
             return Err(failure.fix_forward());
         }
         if let Ok(stream) = crate::wire_transport::hosts::socket_until(
@@ -532,6 +534,7 @@ fn wait_host(
                     && let Some(checkpoint::Outcome::Ready(instance, evidence)) = verdict
                     && instance == identity.instance
                 {
+                    print_destination(timings.as_deref());
                     if evidence == preservation::Evidence::BaselinePredatesDrain {
                         eprintln!(
                             "host upgrade: host_upgrade_baseline_predates_drain: only durable preservation invariants were verified"
@@ -566,6 +569,12 @@ fn wait_host(
         crate::CliFailureKind::RecoveryRequired,
         "host_upgrade_outcome_unknown: destination readiness is unproven after surrender; inspect the live owner and logs before starting the destination build",
     ))
+}
+
+fn print_destination(timings: Option<&[checkpoint::GateTiming]>) {
+    for timing in timings.unwrap_or_default() {
+        eprintln!("host upgrade: {}", timing.detail());
+    }
 }
 
 pub(super) fn bind(paths: &PlakPaths) -> CliResult<tokio::net::UnixListener> {
@@ -704,12 +713,20 @@ fn handle(
         .set_write_timeout(Some(Duration::from_secs(1)))
         .map_err(io_failure)?;
     let output = Mutex::new(stream.try_clone().map_err(io_failure)?);
-    let progress_start = Instant::now();
+    let drain_start = Mutex::new(Instant::now());
     let last_progress = Mutex::new(None::<Instant>);
     let child_faults = progress::ChildFaults::default();
     let progress = |event: progress::Event<'_>| {
         let (detail, qualification) = match event {
             progress::Event::Qualification(timing) => (timing.detail(), Some(timing)),
+            progress::Event::Barrier(barrier) => {
+                if matches!(barrier, progress::Barrier::Resolved(_)) {
+                    *drain_start
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Instant::now();
+                }
+                (barrier.detail(), None)
+            }
             progress::Event::ChildFaults(root, faults) => {
                 child_faults.record(root, faults);
                 return Ok(());
@@ -724,10 +741,11 @@ fn handle(
                     return Ok(());
                 }
                 *last = Some(Instant::now());
-                (
-                    format!("waiting {}s: {detail}", progress_start.elapsed().as_secs()),
-                    None,
-                )
+                let waited = drain_start
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .elapsed();
+                (format!("waiting {}s: {detail}", waited.as_secs()), None)
             }
         };
         let mut output = output
@@ -859,8 +877,12 @@ fn prepare(
     let pause = host.pause_admissions_for_upgrade(Arc::clone(cancelled))?;
     super::lifecycle::draining(host, &request.expected_binary, &request.destination_key);
     let budget = step_drain::Budget::new(request.drain)?;
-    progress("resolving earlier admission verdicts")?;
+    report(progress::Event::Barrier(progress::Barrier::Started))?;
+    let barrier = Instant::now();
     host.resolve_paused_drafts(&pause, budget.barrier_deadline, cancelled)?;
+    report(progress::Event::Barrier(progress::Barrier::Resolved(
+        barrier.elapsed(),
+    )))?;
     let step_drain = step_drain::prepare(
         host, services, &pause, budget, cancelled, runtime, &progress,
     )?;

@@ -7,7 +7,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::{
-    FRAME, Outcome, baseline, check_store_identities, claim, decode, error, open, root,
+    FRAME, GateTiming, Outcome, baseline, check_store_identities, claim, decode, error, open, root,
     verdict_path,
 };
 use crate::home::paths::PlakPaths;
@@ -20,6 +20,9 @@ pub(super) struct WriteVerdict {
     nonce: Uuid,
     runtime_expected: Option<bool>,
     outcome: Outcome,
+    // Optional diagnostics: every version-1 reader ignores the field.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    timings: Vec<GateTiming>,
 }
 
 impl WriteVerdict {
@@ -28,6 +31,7 @@ impl WriteVerdict {
         nonce: Uuid,
         baseline_runtime: Option<bool>,
         outcome: Outcome,
+        timings: Vec<GateTiming>,
     ) -> CliResult<Self> {
         let previously_expected = read(paths)?
             .filter(|prior| prior.nonce == nonce)
@@ -43,6 +47,7 @@ impl WriteVerdict {
             nonce,
             runtime_expected,
             outcome,
+            timings,
         })
     }
 }
@@ -55,6 +60,8 @@ struct ReadVerdict {
     nonce: Uuid,
     runtime_expected: Option<bool>,
     outcome: Value,
+    #[serde(default)]
+    timings: Value,
 }
 
 fn runtime_present(paths: &PlakPaths) -> CliResult<bool> {
@@ -103,10 +110,20 @@ fn read(paths: &PlakPaths) -> CliResult<Option<ReadVerdict>> {
         ))
 }
 
-pub(super) fn outcome(paths: &PlakPaths, nonce: Uuid) -> CliResult<Option<Outcome>> {
+pub(super) fn outcome(
+    paths: &PlakPaths,
+    nonce: Uuid,
+) -> CliResult<Option<(Outcome, Vec<GateTiming>)>> {
     read(paths)?
         .filter(|verdict| verdict.nonce == nonce)
-        .map(|verdict| serde_json::from_value(verdict.outcome).map_err(error))
+        .map(|verdict| {
+            let outcome = serde_json::from_value(verdict.outcome).map_err(error)?;
+            // Diagnostics never decide the outcome.
+            Ok((
+                outcome,
+                serde_json::from_value(verdict.timings).unwrap_or_default(),
+            ))
+        })
         .transpose()
 }
 
@@ -220,7 +237,7 @@ mod tests {
         let id = Uuid::new_v4();
         let (_root, paths) = PlakPaths::isolated_test_home();
         let written = serde_json::to_value(
-            WriteVerdict::new(&paths, id, Some(false), Outcome::Pending).unwrap(),
+            WriteVerdict::new(&paths, id, Some(false), Outcome::Pending, Vec::new()).unwrap(),
         )
         .unwrap();
         let legacy: Legacy = serde_json::from_value(written).unwrap();
@@ -240,5 +257,41 @@ mod tests {
             assert_eq!(decoded.version, 0);
             assert_eq!(serde_json::to_value(decoded.state()).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn gate_timings_are_optional_diagnostics_in_the_verdict() {
+        let id = Uuid::new_v4();
+        let (_root, paths) = PlakPaths::isolated_test_home();
+        let timing = GateTiming::new(
+            super::super::GatePhase::StoreHealthRuntime,
+            std::time::Duration::from_millis(1234),
+        );
+        let failed = Outcome::Failed(super::super::Failure::Health);
+        let longest = GateTiming::new(
+            super::super::GatePhase::StoreHealthProduct,
+            std::time::Duration::MAX,
+        );
+        let bound = WriteVerdict::new(&paths, id, Some(true), failed, vec![longest; 8]).unwrap();
+        assert!(serde_json::to_vec(&bound).unwrap().len() < usize::try_from(FRAME).unwrap());
+        let failed = Outcome::Failed(super::super::Failure::Health);
+        let written = serde_json::to_value(
+            WriteVerdict::new(&paths, id, Some(true), failed, vec![timing]).unwrap(),
+        )
+        .unwrap();
+        let decoded: ReadVerdict = serde_json::from_value(written).unwrap();
+        let timings: Vec<GateTiming> = serde_json::from_value(decoded.timings).unwrap();
+        assert_eq!(
+            timings[0].detail(),
+            "destination phase=store_health_runtime elapsed_ms=1234"
+        );
+        let future: Vec<GateTiming> =
+            serde_json::from_value(json!([{"phase": "future_step", "elapsed_ms": 1}])).unwrap();
+        assert_eq!(future[0].detail(), "destination phase=unknown elapsed_ms=1");
+        let pending = serde_json::to_value(
+            WriteVerdict::new(&paths, id, None, Outcome::Pending, Vec::new()).unwrap(),
+        )
+        .unwrap();
+        assert!(pending.get("timings").is_none());
     }
 }

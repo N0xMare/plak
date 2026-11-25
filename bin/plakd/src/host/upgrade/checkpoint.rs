@@ -66,6 +66,49 @@ impl Failure {
     }
 }
 
+/// One timed destination step after surrender, in order of completion.
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(in crate::host) enum GatePhase {
+    StoppedRevisions,
+    StoreHealthProduct,
+    StoreHealthTree,
+    StoreHealthRuntime,
+    Preservation,
+    Bindings,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+pub(in crate::host) struct GateTiming {
+    phase: GatePhase,
+    elapsed_ms: u64,
+}
+
+impl GateTiming {
+    pub(in crate::host) fn new(phase: GatePhase, elapsed: std::time::Duration) -> Self {
+        Self {
+            phase,
+            elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+        }
+    }
+
+    /// The destination logs this line and the requester prints it from the verdict.
+    pub(in crate::host) fn detail(&self) -> String {
+        let phase = match self.phase {
+            GatePhase::StoppedRevisions => "stopped_revisions",
+            GatePhase::StoreHealthProduct => "store_health_product",
+            GatePhase::StoreHealthTree => "store_health_tree",
+            GatePhase::StoreHealthRuntime => "store_health_runtime",
+            GatePhase::Preservation => "preservation",
+            GatePhase::Bindings => "bindings",
+            GatePhase::Unknown => "unknown",
+        };
+        format!("destination phase={phase} elapsed_ms={}", self.elapsed_ms)
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 pub(super) enum Outcome {
     Pending,
@@ -153,7 +196,10 @@ impl Ticket {
         Ok(())
     }
 
-    pub(super) fn outcome(&self, paths: &PlakPaths) -> CliResult<Option<Outcome>> {
+    pub(super) fn outcome(
+        &self,
+        paths: &PlakPaths,
+    ) -> CliResult<Option<(Outcome, Vec<GateTiming>)>> {
         verdict::outcome(paths, self.nonce)
     }
 
@@ -168,30 +214,41 @@ impl Ticket {
     }
 
     pub(in crate::host) fn record_pending(&self, paths: &PlakPaths) -> CliResult<()> {
-        self.record(paths, Outcome::Pending)
+        self.record(paths, Outcome::Pending, &[])
     }
 
     pub(in crate::host) fn record_ready(
         &self,
         paths: &PlakPaths,
         evidence: Evidence,
+        timings: &[GateTiming],
     ) -> CliResult<()> {
         let instance = plakous_recursive_subagents::tree::custody_host()
             .instance
             .to_string();
-        self.record(paths, Outcome::Ready(instance, evidence))
+        self.record(paths, Outcome::Ready(instance, evidence), timings)
     }
 
-    pub(in crate::host) fn record_failure(&self, paths: &PlakPaths, failure: Failure) {
-        if let Err(error) = self.record(paths, Outcome::Failed(failure)) {
+    pub(in crate::host) fn record_failure(
+        &self,
+        paths: &PlakPaths,
+        failure: Failure,
+        timings: &[GateTiming],
+    ) {
+        if let Err(error) = self.record(paths, Outcome::Failed(failure), timings) {
             eprintln!("{}", error.message());
         }
     }
 
-    fn record(&self, paths: &PlakPaths, outcome: Outcome) -> CliResult<()> {
+    fn record(&self, paths: &PlakPaths, outcome: Outcome, timings: &[GateTiming]) -> CliResult<()> {
         let path = verdict_path(paths);
-        let verdict =
-            verdict::WriteVerdict::new(paths, self.nonce, self.runtime_expected, outcome)?;
+        let verdict = verdict::WriteVerdict::new(
+            paths,
+            self.nonce,
+            self.runtime_expected,
+            outcome,
+            timings.to_vec(),
+        )?;
         stage(&path, FRAME, |out| {
             serde_json::to_writer(out, &verdict).map_err(error)
         })
