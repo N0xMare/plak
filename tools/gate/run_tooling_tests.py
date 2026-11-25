@@ -26,21 +26,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SUITE = REPO_ROOT / "tests" / "tooling"
 WORKERS = 4
 EARLY_MODULES = (
-    "test_policy_validators",
+    "test_check_workspace",
     "test_shipping_artifacts",
-    "test_check_prod_loc",
     "test_nextest_lanes",
 )
 TREE_READERS = {
     "test_agent_kind_docs",
     "test_artifact_linkage",
-    "test_check_prod_loc",
-    "test_configuration_placement",
+    "test_check_workspace",
     "test_host_client",
     "test_live_jobs",
     "test_nextest_lanes",
     "test_pinned_callback_ports",
-    "test_policy_validators",
     "test_uuid_features",
 }
 FULL_TOOLING_PREFIXES = (

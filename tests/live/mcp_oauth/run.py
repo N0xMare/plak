@@ -1011,7 +1011,7 @@ class Harness:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", default=str(ROOT / "target/release/plakd"))
+    parser.add_argument("--binary", default=str(ROOT / "target/maintainer/plakd"))
     parser.add_argument("--previous-binary")
     parser.add_argument("--only", help="comma-separated scenario names")
     parser.add_argument("--report", default=str(ROOT / "target/live/mcp-oauth/report.json"))

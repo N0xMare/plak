@@ -455,7 +455,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--binary",
         type=Path,
-        default=live.ROOT / "target/release/plakd",
+        default=live.ROOT / "target/maintainer/plakd",
         help="test-support plakd built from this checkout, used only with --paid",
     )
     parser.add_argument("--artifacts", type=Path, help="fresh artifact directory, with --paid")

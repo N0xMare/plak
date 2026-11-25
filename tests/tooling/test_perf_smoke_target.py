@@ -39,10 +39,9 @@ class PerfSmokeTargetTests(unittest.TestCase):
             cargo.write_text(
                 "#!" + sys.executable + "\n"
                 "import os, pathlib, sys\n"
-                "assert os.environ['CARGO_PROFILE_RELEASE_STRIP'] == 'debuginfo'\n"
                 "expected = [\n"
-                " ['build', '--locked', '-p', 'plakd', '--features', 'plakd/test-support', '--profile', 'release'],\n"
-                " ['build', '--locked', '-p', 'plakous-js-runtime', '-p', 'plakous-py-worker', '--profile', 'release'],\n"
+                " ['build', '--locked', '-p', 'plakd', '--features', 'plakd/test-support', '--profile', 'maintainer'],\n"
+                " ['build', '--locked', '-p', 'plakous-js-runtime', '-p', 'plakous-py-worker', '--profile', 'maintainer'],\n"
                 "]\n"
                 "log = pathlib.Path(os.environ['CARGO_LOG'])\n"
                 "seen = log.read_text().splitlines() if log.exists() else []\n"
@@ -50,11 +49,11 @@ class PerfSmokeTargetTests(unittest.TestCase):
                 "log.write_text('\\n'.join(seen + [' '.join(sys.argv[1:])]) + '\\n')\n"
                 "base = pathlib.Path(os.environ['CARGO_TARGET_DIR'])\n"
                 "target = os.environ.get('CARGO_BUILD_TARGET')\n"
-                "output = base / target / 'release' if target else base / 'release'\n"
+                "output = base / target / 'maintainer' if target else base / 'maintainer'\n"
                 "output.mkdir(parents=True, exist_ok=True)\n"
                 "for binary in ('plakd', 'plakous-js-host', 'plakous-py-host'):\n"
                 "    path = output / binary\n"
-                "    path.write_bytes(binary.encode() + b' release executable')\n"
+                "    path.write_bytes(binary.encode() + b' maintainer executable')\n"
                 "    path.chmod(0o755)\n"
             )
             cargo.chmod(0o700)
@@ -84,7 +83,7 @@ class PerfSmokeTargetTests(unittest.TestCase):
                     for binary in ("plakd", "plakous-js-host", "plakous-py-host"):
                         self.assertEqual(
                             (root / "tmp" / "perf-smoke" / binary).read_bytes(),
-                            binary.encode() + b" release executable",
+                            binary.encode() + b" maintainer executable",
                         )
 
 

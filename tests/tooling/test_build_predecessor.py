@@ -113,5 +113,6 @@ class PredecessorCacheTests(unittest.TestCase):
             self.assertTrue(predecessor.cache_ready(cache, current))
             self.assertFalse(predecessor.cache_ready(cache, previous))
             self.assertEqual(
-                {path.name for path in root.iterdir()}, {current, previous, "build.lock"}
+                {path.name for path in root.iterdir()},
+                {current, previous, "build.lock", "cargo-target"},
             )

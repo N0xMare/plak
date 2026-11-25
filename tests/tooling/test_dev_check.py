@@ -26,8 +26,6 @@ GROUPS = (
 )
 BATCH_GROUPS = (
     'static',
-    'standalone',
-    'contracts',
     'tooling',
     'tests-parallel',
     'tests-durability',
@@ -93,6 +91,11 @@ class DevCheckWorkerTests(unittest.TestCase):
                     'check_features.py',
                     'check_public_compile.py',
                 ):
+                    expected = (
+                        'contracts' in groups
+                        if checker == 'check_public_compile.py'
+                        else tier != ('--install',)
+                    )
                     self.assertEqual(
                         any(
                             s[0].endswith(checker)
@@ -100,7 +103,7 @@ class DevCheckWorkerTests(unittest.TestCase):
                             and '--standalone-packages' not in s
                             for s in scripts
                         ),
-                        tier != ('--install',),
+                        expected,
                     )
 
     def setUp(self):
@@ -758,8 +761,7 @@ os.execv(real, [real, *sys.argv[1:]])
         self.assertEqual(result.returncode, 8)
         self.assertEqual(len(self.lanes(calls)), 3)
         self.assertEqual(sum(c['args'][0] == 'test' for c in calls), 1)
-        for name in ('check_public_compile.py', 'run_tooling_tests.py'):
-            self.assertTrue(any(s[0].endswith(name) for s in scripts))
+        self.assertTrue(any(s[0].endswith('run_tooling_tests.py') for s in scripts))
         self.assertIn('failed groups: tests-parallel tests-durability tests-serial', result.stdout)
         self.assertNotIn('gate passed', result.stdout)
 
@@ -770,39 +772,11 @@ os.execv(real, [real, *sys.argv[1:]])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertCountEqual(
             [c['args'][0] for c in calls if c['args'][0] not in {'nextest'}],
-            ['fmt', 'fetch', *CLIPPIES, 'clippy', 'clippy', 'check', 'test'],
-        )
-        self.assertEqual(
-            [c['args'][0:8] for c in calls if c['args'][0] == 'clippy' and '-p' in c['args']],
-            [
-                [
-                    'clippy',
-                    '--locked',
-                    '-p',
-                    'plakous-model',
-                    '--all-targets',
-                    '--target',
-                    'host-triple',
-                    '--',
-                ],
-                [
-                    'clippy',
-                    '--locked',
-                    '-p',
-                    'plakous-hosted',
-                    '--lib',
-                    '--bins',
-                    '--target',
-                    'host-triple',
-                ],
-            ],
-        )
-        self.assertTrue(
-            all('-D warnings' in c['rustflags'] for c in calls if self.is_wasm_check(c))
+            ['fmt', 'fetch', *CLIPPIES, 'test'],
         )
         self.assertEqual(self.profiles(calls), ['offline', 'durability', 'serial'])
         self.assertEqual(self.filtersets(calls), [self.env['GATE_BATCH_FILTER'], None, None])
-        for checker in ('check_public_compile.py', 'check_workspace.py', 'check_features.py'):
+        for checker in ('check_workspace.py', 'check_features.py'):
             self.assertTrue(any(s[0].endswith(checker) for s in scripts))
         self.assertIn(['tools/gate/run_tooling_tests.py', '-v', '--batch'], scripts)
 
@@ -1346,10 +1320,7 @@ os.execv(real, [real, *sys.argv[1:]])
             ['plakd', 'plakous-hosted'],
         )
         self.assertIn(['tools/gate/check_workspace.py'], scripts)
-        self.assertIn(
-            ['tools/gate/check_features.py', '--library-packages', 'plakd', 'plakous-hosted'],
-            scripts,
-        )
+        self.assertFalse(any(s[0].endswith('check_features.py') for s in scripts))
 
     def test_steps_serial_only_runs_the_serial_lane_and_worker_prerequisite(self):
         result, calls, _ = self.run_gate('--steps', 'tests-serial')

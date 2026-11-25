@@ -5,10 +5,8 @@
 [store]
 dir = "target/nextest"
 
-# Native subscription auth tests share process-local fixtures; run them
-# serially across the workspace. No test binds a pinned callback port.
+# CLI contract tests serialize where they assert process-wide contract invariants.
 [test-groups]
-native-auth-serial = { max-threads = 1 }
 cli-contract-serial = { max-threads = 1 }
 
 # The four lane profiles partition the default suite:
@@ -40,16 +38,8 @@ filter = 'all()'
 leak-timeout = { period = "1s", result = "pass" }
 
 [[profile.default.overrides]]
-filter = 'test(native_auth::)'
-test-group = 'native-auth-serial'
-
-[[profile.default.overrides]]
 filter = 'package(=plakd) & binary(=integration) & test(/^cli_contract::/)'
 test-group = 'cli-contract-serial'
-
-[[profile.default.overrides]]
-filter = 'binary(local_transport)'
-test-group = 'native-auth-serial'
 
 # Each store's long-turn fixture executes real nested calls.
 [[profile.default.overrides]]

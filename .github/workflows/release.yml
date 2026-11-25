@@ -1,8 +1,7 @@
-# The repository's only workflow. A pushed v* tag builds the two release
-# tarballs and wire schemas, attests them and creates the GitHub Release. A manual run on a
-# branch is the pre-tag dry run: the same build, packaging and attestation,
-# with the tarballs kept as workflow artifacts and no release. Nothing else
-# runs here: the gates are local (docs/spec/06-build-and-support-surface.md).
+# Release workflow. A pushed v* tag gates on fmt, policy, cargo-deny, clippy,
+# and offline nextest before building the two release tarballs and wire schemas,
+# attesting them, and creating the GitHub Release. A manual workflow_dispatch
+# run exercises the same gate + build/packaging dry run without publishing.
 name: release
 
 on:
@@ -14,7 +13,47 @@ permissions:
   contents: read
 
 jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup component add clippy rustfmt
+      - name: Pinned verification tools
+        run: |
+          set -euo pipefail
+          pins=tools/gate/dev-tools.pins
+          dev_tools=.dev-tools/bin
+          mkdir -p "$dev_tools"
+          for name in cargo-nextest cargo-deny ruff jj; do
+            line="$(awk -v tool="$name" -v target="x86_64-unknown-linux-musl" \
+              '$1 == tool && $3 == target { line = $2 " " $4 " " $5 } END { print line }' "$pins")"
+            read -r version checksum url <<<"$line"
+            tmp="$(mktemp -d)"
+            curl --proto '=https' --tlsv1.2 -fsSL "$url" -o "$tmp/a.tar.gz"
+            printf '%s  %s\n' "$checksum" "$tmp/a.tar.gz" | sha256sum --check --status
+            member="$(tar -tzf "$tmp/a.tar.gz" | awk -v name="$name" '{ n = split($0, part, "/") } !found && part[n] == name { print; found = 1 }')"
+            tar -xzf "$tmp/a.tar.gz" -C "$tmp" "$member"
+            install -m 0755 "$tmp/$member" "$dev_tools/$name"
+            rm -rf "$tmp"
+          done
+          echo "$PWD/.dev-tools/bin" >> "$GITHUB_PATH"
+      - name: Static checks, policy, deny and clippy
+        run: |
+          cargo fmt --all --check
+          ruff check tools tests/tooling tests/live eval
+          python3 tools/gate/check_workspace.py
+          tools/gate/dev-tools.sh deny
+          cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
+      - name: Offline test suite
+        run: tools/gate/dev-check.sh --steps tests-parallel
+
   build:
+    needs: check
     strategy:
       matrix:
         include:
@@ -62,7 +101,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: build
+    needs: [check, build]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
@@ -84,4 +123,3 @@ jobs:
           case "$TAG" in *-rc.*) prerelease=(--prerelease) ;; esac
           gh release create "$TAG" plakd-*.tar.gz plakd-*-wire-schema.json SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --title "$TAG" --verify-tag "${prerelease[@]}"
-

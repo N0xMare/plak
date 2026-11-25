@@ -14,7 +14,7 @@
 # is evidence, not a gate: no gate tier runs this recipe. See spec 05
 # §2.7.
 #
-# Usage: tools/perf/perf-smoke.sh [--check] [--out <file>]
+# Usage: tools/perf/perf-smoke.sh [--check] [--release] [--out <file>]
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -40,9 +40,11 @@ fi
 
 check=0
 out=""
+profile=maintainer
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check) check=1; shift ;;
+    --release) profile=release; shift ;;
     --out) out="$2"; shift 2 ;;
     -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -72,15 +74,15 @@ TOML
 chmod 700 "$root/home" "$root/home/agents"
 chmod 600 "$root/home/config.toml" "$root/home/agents/lead.toml"
 
-echo "== building the release scripted binary and sidecars ==" >&2
+echo "== building the ${profile} scripted binary and sidecars ==" >&2
 # Same entry point as the product build, including the linkage check.
-tools/build/build-plakd.sh --release --features plakd/test-support >&2
+tools/build/build-plakd.sh "--${profile}" --features plakd/test-support >&2
 # Keep the measured executable and its matching workers together, away from
 # later builds that could replace a configured target's artifacts.
 cargo_target_dir="${CARGO_TARGET_DIR:-$PWD/target}"
-release_dir="$cargo_target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}release"
+built_dir="$cargo_target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}${profile}"
 for binary in plakd plakous-js-host plakous-py-host; do
-  cp "$release_dir/$binary" "$root/$binary"
+  cp "$built_dir/$binary" "$root/$binary"
 done
 plak_bin="$root/plakd"
 
@@ -149,9 +151,9 @@ measurements="$root/measurements.jsonl"
 emit() {
   "$PY" -c '
 import json, sys
-print(json.dumps({"metric": sys.argv[1], "value": float(sys.argv[2]), "profile": "release",
+print(json.dumps({"metric": sys.argv[1], "value": float(sys.argv[2]), "profile": sys.argv[5],
                   "unit": sys.argv[3], "machine": sys.argv[4]}, sort_keys=True))
-' "$1" "$2" "$3" "$machine" >>"$measurements"
+' "$1" "$2" "$3" "$machine" "$profile" >>"$measurements"
 }
 
 # ---------------------------------------------------------------------------
@@ -376,11 +378,11 @@ fi
 
 # Worker spawn plus one nested call, and warm per-cell cost on that same worker.
 "$PY" tools/perf/cell_round_trip.py \
-  "$root" "$machine" release >>"$measurements"
+  "$root" "$machine" "$profile" >>"$measurements"
 
 # Informational long histories: sequential prompts retain the entire lineage;
 # the final request reports it back so truncation cannot look like a speedup.
-"$PY" tools/perf/long_lineage.py "$plak_bin" "$root/lineage" "$machine" release >>"$measurements"
+"$PY" tools/perf/long_lineage.py "$plak_bin" "$root/lineage" "$machine" "$profile" >>"$measurements"
 
 if [[ -n "$out" ]]; then
   cp "$measurements" "$out"

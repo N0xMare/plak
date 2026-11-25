@@ -8,8 +8,6 @@ import math
 import os
 from pathlib import Path
 import re
-import subprocess
-import tempfile
 import tomllib
 
 CONFIG = Path(__file__).resolve().parents[2] / ".config/nextest.toml"
@@ -94,28 +92,16 @@ def render(source: str, available: int, profile: str = "durability") -> tuple[st
     return rendered, scaled["test-threads"]
 
 
-def available_parallelism(target: Path) -> int:
-    # Use the same Rust API as the campaigns, including affinity and CPU quota
-    # limits. The tiny host probe has no dependencies or product runtime.
-    target.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="nextest-cpus-", dir=target) as directory:
-        executable = Path(directory) / "parallelism"
-        subprocess.run(
-            [
-                "rustc",
-                "--edition=2024",
-                "--crate-name",
-                "gate_parallelism",
-                "-Dwarnings",
-                "-o",
-                str(executable),
-                "-",
-            ],
-            input='#![forbid(unsafe_code)]\nfn main() { println!("{}", std::thread::available_parallelism().map_or(1, |n| n.get())); }\n',
-            text=True,
-            check=True,
-        )
-        return int(subprocess.check_output([str(executable)], text=True))
+def available_parallelism(_target: Path | None = None) -> int:
+    """Host CPU slots available to this process (respecting Linux CPU affinity)."""
+    if hasattr(os, "sched_getaffinity"):
+        try:
+            count = len(os.sched_getaffinity(0))
+            if count > 0:
+                return count
+        except OSError:
+            pass
+    return max(1, os.cpu_count() or 1)
 
 
 def main() -> None:

@@ -2017,7 +2017,7 @@ def _capture_complete(segments: list[Path], pending: list[Path]) -> bool:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("route", nargs="?", default="grok", choices=sorted(live.ROUTES))
-    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plakd")
+    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/maintainer/plakd")
     parser.add_argument("--fixture-seed", type=int, help="replay randomized scenario inputs")
     parser.add_argument("--artifacts", type=Path, help="fresh attempt artifact directory")
     parser.add_argument("--only", default="", help="comma-separated scenario names")

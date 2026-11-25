@@ -189,7 +189,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("lane", choices=LANES)
     parser.add_argument("route", choices=sorted(live.ROUTES))
-    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plakd")
+    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/maintainer/plakd")
     parser.add_argument("--dry-run", action="store_true")
     args, forwarded = parser.parse_known_args(argv)
     live.isolate_test_environment()

@@ -966,9 +966,9 @@ class LiveOracleTests(unittest.TestCase):
                 self.assertEqual(outcome, live.PROVIDER if pending else live.HARNESS)
                 self.assertIn(live.PROVIDER_PENDING if pending else "did not finish", reason)
 
-    def test_drivers_default_to_release_and_remove_capture_opt_in(self):
+    def test_drivers_default_to_maintainer_and_remove_capture_opt_in(self):
         def inspect(parser, argv):
-            self.assertEqual(parser.get_default("binary"), live.ROOT / "target/release/plakd")
+            self.assertEqual(parser.get_default("binary"), live.ROOT / "target/maintainer/plakd")
             self.assertNotIn("--capture-exchanges", parser._option_string_actions)
             raise RuntimeError("stop before any launch")
 
@@ -979,7 +979,7 @@ class LiveOracleTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(RuntimeError, "stop before any launch"):
                     driver.main([])
-        self.assertIn("--release", soak.REBUILD)
+        self.assertIn("--maintainer", soak.REBUILD)
 
     def test_wrap_up_stays_out_of_the_default_smoke(self):
         default = [name for name, _ in smoke.Smoke.SCENARIOS]

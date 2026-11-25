@@ -1,7 +1,6 @@
 [advisories]
 yanked = "deny"
 ignore = [
-    { id = "RUSTSEC-2025-0141", reason = "Syntect 5.3.0 uses Bincode 1.3.3 only for embedded syntax assets; maintenance advisory, not a known vulnerability. Revisit on version or asset-loading changes." },
     { id = "RUSTSEC-2026-0543", reason = "Chrono 0.4.45 is unmaintained; maintenance advisory, not a known vulnerability. Reached only through jj-lib, rmcp and schemars, which offer no upgrade path. Revisit when any of them moves off chrono." },
 ]
 
@@ -14,6 +13,15 @@ deny = [
     { name = "aws-lc-rs" },
     { name = "aws-lc-sys" },
     { name = "rsa" },
+    { name = "rquickjs", wrappers = ["plakous-js-runtime"] },
+    { name = "rquickjs-core", wrappers = ["rquickjs"] },
+    { name = "rquickjs-sys", wrappers = ["rquickjs-core"] },
+    { name = "micro-monty", wrappers = ["plakous-py-worker"] },
+    { name = "ratatui" },
+    { name = "crossterm" },
+    { name = "pulldown-cmark" },
+    { name = "syntect" },
+    { name = "arboard" },
 ]
 
 [licenses]
@@ -39,15 +47,3 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # No git sources: the pinned Codex 0.153.3 Code Mode grammar is the reviewed
 # vendor snapshot at `vendor/codex-code-mode-protocol`.
 allow-git = []
-
-# arboard's Windows clipboard backend, present only in the all-target audit;
-# no supported platform builds it.
-[[licenses.exceptions]]
-name = "clipboard-win"
-version = "=5.4.3"
-allow = ["BSL-1.0"]
-
-[[licenses.exceptions]]
-name = "error-code"
-version = "=3.4.0"
-allow = ["BSL-1.0"]

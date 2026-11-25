@@ -1985,7 +1985,7 @@ def selected_catalog(only: str, run_all: bool) -> tuple[tuple[str, str], ...]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("route", nargs="?", default="grok", choices=sorted(live.ROUTES))
-    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plakd")
+    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/maintainer/plakd")
     parser.add_argument("--fixture-seed", type=int, help="replay randomized scenario inputs")
     parser.add_argument("--artifacts", type=Path, help="fresh attempt artifact directory")
     select = parser.add_mutually_exclusive_group()

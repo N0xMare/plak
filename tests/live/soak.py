@@ -38,7 +38,7 @@ REPO_URL = "https://github.com/more-itertools/more-itertools.git"
 REPO_COMMIT = "4998a257373f36e91edef7324572ed8df10f39d1"  # v10.5.0
 REBUILD = [
     str(live.ROOT / "tools/build/build-plakd.sh"),
-    "--release",
+    "--maintainer",
     "--features",
     "plakd/test-support",
     "--plakd-only",
@@ -438,7 +438,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("route", nargs="?", default="grok", choices=sorted(live.ROUTES))
     parser.add_argument("--hours", type=float, default=1.0)
-    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plakd")
+    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/maintainer/plakd")
     parser.add_argument("--artifacts", type=Path, help="fresh attempt artifact directory")
     parser.add_argument("--no-rebuild", action="store_true")
     return parser

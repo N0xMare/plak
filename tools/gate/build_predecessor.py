@@ -165,7 +165,9 @@ def build(root, cache, channel, target_args, args, rev, source_archive):
             raise ValueError(f"invalid predecessor cache; remove this entry and retry: {cache}")
         with tempfile.TemporaryDirectory(prefix="build-", dir=root) as temp:
             temp = Path(temp)
-            src, artifacts, publish = (temp / name for name in ("source", "target", "bin"))
+            src, publish = (temp / name for name in ("source", "bin"))
+            artifacts = root / "cargo-target"
+            artifacts.mkdir(exist_ok=True)
             src.mkdir()
             publish.mkdir()
             if source_archive is None:

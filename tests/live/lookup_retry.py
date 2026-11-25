@@ -29,7 +29,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("route", choices=sorted(live.ROUTES))
     parser.add_argument("--fault", choices=("connect", "503"), required=True)
-    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/release/plakd")
+    parser.add_argument("--binary", type=Path, default=live.ROOT / "target/maintainer/plakd")
     args = parser.parse_args()
     route = live.ROUTES[args.route]
     if route.account not in CATALOGS:

@@ -8,12 +8,14 @@ default:
     @just --justfile "{{justfile()}}" --list live
 
 # test-support plakd plus the JavaScript and Monty workers, for PLAK_TEST_FAULTS.
+# Uses the incremental maintainer profile (opt-level 3, no fat LTO) so live runs
+# rebuild in seconds instead of paying a release fat-LTO link.
 _test-support:
-    CARGO_INCREMENTAL=0 tools/build/build-plakd.sh --release --features plakd/test-support
+    tools/build/build-plakd.sh --maintainer --features plakd/test-support
 
 # Parent only. The MCP OAuth driver does not start workers.
 _test-support-plakd:
-    tools/build/build-plakd.sh --release --features plakd/test-support --plakd-only
+    tools/build/build-plakd.sh --maintainer --features plakd/test-support --plakd-only
 
 # Live smoke: a few minutes of short scenarios (coding task, resume, compaction,
 # cancel, injected faults, a 2-child wave) on Grok, OpenRouter,

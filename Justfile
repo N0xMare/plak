@@ -66,16 +66,22 @@ clippy:
     tools/gate/clippy.sh
 
 # cargo nextest with the isolated test environment (spec 05 §1).
-# Manual runs must set PLAK_PY_HOST, PLAK_JS_HOST, PLAK_MCP_SERVER and
-# PLAK_TEST_BINARY to matching built executables; this recipe does not prepare them.
+# Auto-exports built debug workers from CARGO_TARGET_DIR/target when unset so
+# ad-hoc targeted runs work in one command without hunting for env vars.
 # Positional arguments: an unquoted {{ARGS}} splice breaks on `-E 'package(x)'`.
 [positional-arguments]
-[doc("isolated cargo nextest; manually set PLAK_PY_HOST, PLAK_JS_HOST, PLAK_MCP_SERVER, PLAK_TEST_BINARY")]
+[doc("isolated cargo nextest; auto-exports built debug workers when present")]
 nextest *ARGS:
     root="$(pwd -P)"; \
     source tools/gate/dev-tools-prefix.sh; \
     export PATH="$(plak_dev_tools_prefix "$root")/bin:$PATH"; \
     tools/gate/dev-tools.sh check-nextest; \
+    td="${CARGO_TARGET_DIR:-$root/target}"; \
+    bin_dir="$td/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug"; \
+    [[ -n "${PLAK_PY_HOST:-}" || ! -x "$bin_dir/plakous-py-host" ]] || export PLAK_PY_HOST="$bin_dir/plakous-py-host"; \
+    [[ -n "${PLAK_JS_HOST:-}" || ! -x "$bin_dir/plakous-js-host" ]] || export PLAK_JS_HOST="$bin_dir/plakous-js-host"; \
+    [[ -n "${PLAK_MCP_SERVER:-}" || ! -x "$bin_dir/mcp-fake-server" ]] || export PLAK_MCP_SERVER="$bin_dir/mcp-fake-server"; \
+    [[ -n "${PLAK_TEST_BINARY:-}" || ! -x "$bin_dir/plakd" ]] || export PLAK_TEST_BINARY="$bin_dir/plakd"; \
     tools/gate/test-env.sh -- python3 tools/gate/test-processes.py -- cargo nextest "$@"
 
 # Build plakd and its workers without installing a snapshot or touching PATH.
