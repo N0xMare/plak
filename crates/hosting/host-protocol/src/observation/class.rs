@@ -67,6 +67,21 @@ pub enum ObservationClass {
 }
 
 impl<P: ProtocolExtension> SessionObservation<P> {
+    /// Text preview which has no row key or byte offsets.
+    #[must_use]
+    pub const fn is_unkeyed_text_preview(&self) -> bool {
+        use crate::views::transcript::TranscriptStreamDelta as D;
+        matches!(
+            self,
+            Self::AssistantDelta(_)
+                | Self::ReasoningDelta { .. }
+                | Self::TranscriptStream {
+                    delta: D::Assistant(_) | D::Reasoning { .. } | D::AssistantDone,
+                    ..
+                }
+        )
+    }
+
     /// This observation's class (module docs).
     #[must_use]
     pub fn class(&self) -> ObservationClass {

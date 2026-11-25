@@ -598,6 +598,7 @@ where
                 }
                 opener.open(id)
             })
+            .with_observation_filter(self.sessions.observation_filter())
             .watch_directory(self.changes.clone()),
         )
     }

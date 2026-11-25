@@ -23,7 +23,7 @@ use plakous_host_protocol::wire::NodeAddress;
 use plakous_host_protocol::{IntentSender, ObservationReceiver, ProtocolExtension};
 
 use super::super::{AttachmentCount, ResidencyHold};
-use super::WireSession;
+use super::{ObservationFilter, WireSession};
 use crate::error::{CliFailure, CliResult};
 use crate::runtime::HostWorkerHandle;
 use crate::test_support_runner::{HostCut, cut};
@@ -92,6 +92,7 @@ pub struct SessionSlot<P: ProtocolExtension> {
     /// Last open failure, visible without waiting for a retry's slot lock.
     failure: Mutex<Option<CliFailure>>,
     startup_retrying: AtomicBool,
+    observation_filter: Option<ObservationFilter<P>>,
     directory: Option<tokio::sync::watch::Sender<u64>>,
 }
 
@@ -130,13 +131,14 @@ where
     ) -> Self {
         let known = Mutex::new(opened.session_id.clone());
         Self {
-            slot: Mutex::new(resident(opened, None)),
+            slot: Mutex::new(resident(opened, None, None)),
             open: Box::new(open),
             release_join: RELEASE_JOIN,
             busy: AtomicU8::new(BUSY_NONE),
             known,
             failure: Mutex::new(None),
             startup_retrying: AtomicBool::new(false),
+            observation_filter: None,
             directory: None,
         }
     }
@@ -157,12 +159,18 @@ where
             busy: AtomicU8::new(BUSY_NONE),
             failure: Mutex::new(None),
             startup_retrying: AtomicBool::new(false),
+            observation_filter: None,
             directory: None,
         }
     }
 
     pub(super) fn watch_directory(mut self, notify: tokio::sync::watch::Sender<u64>) -> Self {
         self.directory = Some(notify);
+        self
+    }
+
+    pub(super) fn with_observation_filter(mut self, filter: Option<ObservationFilter<P>>) -> Self {
+        self.observation_filter = filter;
         self
     }
 
@@ -337,7 +345,7 @@ where
                     opened.as_ref().err().cloned();
                 let opened = opened?;
                 self.set_known(&opened.session_id);
-                *slot = resident(opened, self.directory.as_ref());
+                *slot = resident(opened, self.directory.as_ref(), self.observation_filter);
                 from_open = true;
             }
             if let Slot::Resident {
@@ -532,7 +540,7 @@ where
         let opening = opened.map(|opened| {
             root = opened.root.clone();
             self.set_known(&opened.session_id);
-            *slot = resident(opened, self.directory.as_ref());
+            *slot = resident(opened, self.directory.as_ref(), self.observation_filter);
         });
         cut(HostCut::ReopenOpened);
         old.end_reopen(Some((&root, attachment, request)));
@@ -574,6 +582,7 @@ where
 fn resident<P>(
     opened: OpenedSession<P>,
     directory: Option<&tokio::sync::watch::Sender<u64>>,
+    observation_filter: Option<ObservationFilter<P>>,
 ) -> Slot<P>
 where
     P: ProtocolExtension + 'static,
@@ -585,13 +594,14 @@ where
         opened.worker.watch_directory(notify.clone());
     }
     let roots = opened.roots;
-    let mut session = WireSession::start_counted(
+    let mut session = WireSession::start_counted_filtered(
         opened.root,
         opened.session_id,
         opened.actions,
         opened.events,
         move |id| roots(id),
         &opened.attachments,
+        observation_filter,
     )
     .with_runner_pending(opened.runner_pending);
     session

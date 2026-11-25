@@ -126,6 +126,23 @@ impl<P: ProtocolExtension> WireSession<P> {
         P::Intent: Send,
         P::Observation: Send,
     {
+        Self::start_counted_filtered(root, session_id, actions, events, roots, attachments, None)
+    }
+
+    pub(super) fn start_counted_filtered(
+        root: NodeAddress,
+        session_id: String,
+        actions: IntentSender<P>,
+        events: ObservationReceiver<P>,
+        roots: impl Fn(&str) -> Option<NodeAddress> + Send + Sync + 'static,
+        attachments: &AttachmentCount,
+        filter: Option<super::ObservationFilter<P>>,
+    ) -> Self
+    where
+        P: 'static,
+        P::Intent: Send,
+        P::Observation: Send,
+    {
         let service = HostService::new(actions.clone(), root.clone(), ATTACHMENT_CAPACITY)
             .with_nodes(Arc::new(TreeNodes::new(root.tree_id)))
             .with_attachment_count(attachments);
@@ -151,8 +168,12 @@ impl<P: ProtocolExtension> WireSession<P> {
                 match events.recv_timeout(POLL) {
                     Ok(event) => {
                         use super::super::fanout::Publication;
-                        batch.push(Publication::prepare(event));
-                        batch.extend(events.try_iter().take(15).map(Publication::prepare));
+                        batch.extend(
+                            std::iter::once(event)
+                                .chain(events.try_iter().take(15))
+                                .filter(|event| filter.is_none_or(|allows| allows(event)))
+                                .map(Publication::prepare),
+                        );
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {

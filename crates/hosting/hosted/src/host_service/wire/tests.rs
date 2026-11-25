@@ -3,6 +3,7 @@ use plakous_host_protocol::intent::Draft;
 use super::*;
 
 mod blobs;
+mod observation_filter;
 #[cfg(target_os = "linux")]
 mod replay_profile;
 mod verdicts;

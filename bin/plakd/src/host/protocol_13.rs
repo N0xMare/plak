@@ -28,7 +28,7 @@ use crate::surface_protocol::PlakExtension;
 mod frames;
 mod options;
 mod viewport;
-pub(super) use frames::{decode, encode};
+pub(super) use frames::{decode, encode, observes};
 pub(super) use viewport::prepare;
 
 /// Replay preparation does no paging and holds no reader slot or connection.

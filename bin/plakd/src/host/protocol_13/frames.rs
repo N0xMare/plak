@@ -146,9 +146,7 @@ pub(in crate::host) fn encode(
             client_id,
             blobs,
         } => {
-            let Some(observation) = event(observation) else {
-                return Ok(None);
-            };
+            let observation = event(observation).ok_or_else(invalid)?;
             F::Event {
                 attachment,
                 seq,
@@ -284,6 +282,10 @@ fn response_frame(id: wire::RequestId, response: v13::HostResponse) -> v13::Host
             response: Box::new(response),
         }))),
     }))
+}
+
+pub(in crate::host) fn observes(observation: &SessionObservation<PlakExtension>) -> bool {
+    !observation.is_unkeyed_text_preview()
 }
 
 fn event(observation: SessionObservation<PlakExtension>) -> Option<v13::Observation> {

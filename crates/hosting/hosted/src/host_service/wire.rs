@@ -68,6 +68,9 @@ type SnapshotOutput = std::sync::Arc<
 type FrameOutput<P> =
     std::sync::Arc<dyn Fn(&HostFrame<P>) -> Result<Option<String>, WireError> + Send + Sync>;
 
+/// Product eligibility checked before the service queues or numbers a publication.
+pub type ObservationFilter<P> = fn(&SessionObservation<P>) -> bool;
+
 /// Projection of an identified, definitely not-admitted blob through the sole writer.
 pub type BlobRefusalOutput = fn(&mut dyn Write, BlobRejection) -> CliResult<()>;
 

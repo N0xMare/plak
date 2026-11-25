@@ -10,6 +10,11 @@ use plakous_host_protocol::wire::{ClientFrame, WireError, decode_line, encode_li
 
 /// What a host of many sessions needs of its product's stores.
 pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
+    /// Exclude observations the product contract cannot deliver, before fanout.
+    fn observation_filter(&self) -> Option<super::super::ObservationFilter<P>> {
+        None
+    }
+
     /// Decode the product's exact client contract before dispatch.
     ///
     /// # Errors

@@ -379,6 +379,12 @@ const fn environment_of(held_elsewhere: bool) -> SessionEnvironment {
 }
 
 impl HostSessions<PlakExtension> for ProductSessions {
+    fn observation_filter(
+        &self,
+    ) -> Option<plakous_hosted::host_service::wire::ObservationFilter<PlakExtension>> {
+        Some(super::protocol_13::observes)
+    }
+
     fn directory_projection(
         self: Arc<Self>,
     ) -> Option<Box<dyn plakous_hosted::host_service::wire::DirectoryProjection<PlakExtension>>>
