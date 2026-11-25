@@ -90,11 +90,7 @@ fn source_image(pid: u32) -> CliResult<PathBuf> {
 
 #[cfg(target_os = "macos")]
 fn source_image(pid: u32) -> CliResult<PathBuf> {
-    let mut command = std::process::Command::new("/bin/ps");
-    command.args(["-ww", "-p", &pid.to_string(), "-o", "comm="]);
-    let output = super::process::run(command, super::PROBE_BOUND)?;
-    let image = String::from_utf8(output.stdout)
-        .map_err(|_| CliFailure::new("invalid source image path"))?;
+    let image = super::process::ps_field(pid, "comm=", super::PROBE_BOUND)?;
     let path = PathBuf::from(image.trim_end_matches('\n'));
     if !path.is_absolute() {
         return Err(CliFailure::new(

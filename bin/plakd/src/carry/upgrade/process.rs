@@ -97,6 +97,16 @@ pub(crate) fn command(executable: &Path, home: &Path, key: &str) -> Command {
     command
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) fn ps_field(pid: u32, field: &str, timeout: Duration) -> CliResult<String> {
+    let mut command = Command::new("/bin/ps");
+    command
+        .args(["-ww", "-p", &pid.to_string(), "-o", field])
+        .envs([("LC_ALL", "C"), ("TZ", "UTC")]);
+    String::from_utf8(run(command, timeout)?.stdout)
+        .map_err(|_| CliFailure::new("host upgrade could not read the running process"))
+}
+
 pub(crate) fn run(command: Command, timeout: Duration) -> CliResult<Output> {
     let output = run_output(command, timeout, 1024 * 1024)?;
     if !output.status.success() {

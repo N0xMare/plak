@@ -297,11 +297,7 @@ fn process_birth(pid: u32) -> CliResult<String> {
 
 #[cfg(target_os = "macos")]
 fn process_birth(pid: u32) -> CliResult<String> {
-    let mut ps = std::process::Command::new("/bin/ps");
-    ps.args(["-p", &pid.to_string(), "-o", "lstart="])
-        .envs([("LC_ALL", "C"), ("TZ", "UTC")]);
-    let output = super::process::run(ps, super::PROBE_BOUND)?;
-    let birth = String::from_utf8(output.stdout).map_err(error)?;
+    let birth = super::process::ps_field(pid, "lstart=", super::PROBE_BOUND)?;
     if birth.trim().is_empty() {
         return Err(error("cannot read the source process birth"));
     }
