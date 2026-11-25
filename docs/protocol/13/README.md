@@ -221,4 +221,6 @@ presence of a reported price.
 
 Both list and watch rows include `superseded_by`. A predecessor with a
 published same-node switch or rebind names the session its node now opens.
-Other rows carry null.
+Other rows carry null. If the successor lookup fails, the row also carries
+null: the host logs the failure once per directory worker and does not guess
+a redirect.

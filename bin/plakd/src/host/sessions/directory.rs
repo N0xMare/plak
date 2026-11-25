@@ -776,11 +776,10 @@ fn summarize(
             },
             draft::differences(&differences, tier, tier_differs),
         );
-        if let Some(target) = projection.open_target.filter(|target| *target != id)
-            && store.has_binding_successor(id).unwrap_or(false)
-        {
-            facts.superseded_by = Some(target.to_owned());
-        }
+        facts.superseded_by = projection
+            .open_target
+            .filter(|target| *target != id)
+            .and_then(|target| draft.binding_successor(store, id, target));
         facts
     });
     Ok((

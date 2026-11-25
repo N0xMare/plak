@@ -24,6 +24,7 @@ use super::{Directory, Summary, runner_views};
 pub(super) struct Source {
     pub(super) costs: Costs,
     pub(super) previews: BTreeMap<String, Option<v13::SessionPreview>>,
+    successor_lookup_reported: bool,
 }
 
 pub(super) struct Context<'a> {
@@ -67,6 +68,26 @@ impl Source {
         Self {
             costs,
             previews: BTreeMap::new(),
+            successor_lookup_reported: false,
+        }
+    }
+
+    pub(super) fn binding_successor(
+        &mut self,
+        store: &crate::store::ProductStore,
+        id: &str,
+        target: &str,
+    ) -> Option<String> {
+        match store.has_binding_successor(id) {
+            Ok(true) => Some(target.to_owned()),
+            Ok(false) => None,
+            Err(_) => {
+                if !self.successor_lookup_reported {
+                    self.successor_lookup_reported = true;
+                    eprintln!("plakd host: session directory successor lookup unavailable");
+                }
+                None
+            }
         }
     }
 
