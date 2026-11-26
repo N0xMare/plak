@@ -1,7 +1,7 @@
 //! Stop fixture processes when the test that owns their lifetime lock exits.
 
 use std::fs::{File, TryLockError};
-use std::io;
+use std::io::{self, Write as _};
 
 pub(crate) const OWNER_LOCK: &str = "PLAK_TEST_OWNER_LOCK";
 
@@ -20,8 +20,19 @@ pub(crate) fn enforce() -> io::Result<()> {
         .spawn(move || {
             // The kernel releases the owner's lock even on SIGKILL. A
             // blocking shared lock needs no polling or PID-reuse checks.
-            let _ = owner.lock_shared();
-            std::process::exit(1);
+            loop {
+                match owner.lock_shared() {
+                    Ok(()) => {
+                        let _ = writeln!(io::stderr(), "test owner exited");
+                        std::process::exit(1);
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                    Err(error) => {
+                        let _ = writeln!(io::stderr(), "test owner lock watch failed: {error}");
+                        break;
+                    }
+                }
+            }
         })?;
     Ok(())
 }

@@ -235,6 +235,7 @@ fn host_lifecycle(managed: bool) -> TestResult {
             .env_clear()
             .env("HOME", &fixture.home)
             .env("PLAK_HOME", &fixture.product)
+            .envs([Lifetime::environment(fixture.root.path())])
             .env("XDG_RUNTIME_DIR", fixture.root.path()),
         &fixture.root.path().join("plak/gateway.sock"),
         &fixture.root.path().join("gateway.log"),

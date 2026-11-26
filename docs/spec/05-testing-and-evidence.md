@@ -1904,7 +1904,8 @@ Test-support binaries launched by daemon fixtures also watch an exclusive lock
 held by the fixture. Detached launches carry the same lock path, so killing a
 host still exercises recovery, but killing the test releases the lock even
 when its teardown cannot run. Binaries shipped without test support do not
-watch the lock.
+watch the lock. Pinned predecessor images predate the watcher; until the pin
+moves, their fixtures rely on child guards and teardown to reap them.
 Signal tests wait for the fsynced provider-dispatch record, after installation
 of the signal watcher, not for an arbitrary elapsed interval.
 The tooling reference client starts the home-local runner as its own child

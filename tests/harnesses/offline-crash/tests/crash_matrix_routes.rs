@@ -2217,6 +2217,11 @@ fn pi_edit_and_write_in_one_turn_commit_canonical_apply_patch_and_lower_by_expos
 const FACE_RECOVERY_NOTE: &str = "recovered an interrupted turn";
 const FACE_WAIT: Duration = Duration::from_secs(45);
 
+// Keep these in step with the product's test_hooks/lifetime.rs and its
+// integration fixture's support/lifetime.rs.
+const OWNER_LOCK_ENV: &str = "PLAK_TEST_OWNER_LOCK";
+const OWNER_LOCK_FILE: &str = "test-owner.lock";
+
 struct FaceGateway(Child);
 
 impl Drop for FaceGateway {
@@ -2251,7 +2256,7 @@ impl FaceFixture {
         )?;
         let root = tempfile::tempdir()?;
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700))?;
-        let owner = File::create_new(root.path().join("test-owner.lock"))?;
+        let owner = File::create_new(root.path().join(OWNER_LOCK_FILE))?;
         owner.lock()?;
         let home = root.path().join("home");
         let workspace = root.path().join("workspace");
@@ -2318,10 +2323,7 @@ impl FaceFixture {
             .env("XDG_STATE_HOME", self.root.path().join("state"))
             .env("TMPDIR", self.root.path().join("tmp"))
             .env("PLAK_HOME", &self.home)
-            .env(
-                "PLAK_TEST_OWNER_LOCK",
-                self.root.path().join("test-owner.lock"),
-            )
+            .env(OWNER_LOCK_ENV, self.root.path().join(OWNER_LOCK_FILE))
             .env("PLAK_TEST_MODEL", "offline-loopback-v1")
             .env("PLAK_TEST_SCRIPT", &self.script)
             .env("PLAK_TEST_EVIDENCE", &self.evidence);

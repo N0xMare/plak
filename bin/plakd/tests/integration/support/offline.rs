@@ -1141,8 +1141,7 @@ pub(super) struct ChildRunner {
     /// The daemon's product home. Socket paths are short, so it lives
     /// directly under the temporary directory rather than in the fixture.
     pub(super) home: PathBuf,
-    /// Where the daemon's pid is recorded, beside the fixture.
-    pid_file: PathBuf,
+    fixture_root: PathBuf,
 }
 
 /// The host identity every child-runner fixture binds as.
@@ -1164,8 +1163,12 @@ impl ChildRunner {
             .to_owned();
         Self {
             home: std::env::temp_dir().join(format!("rh-{name}")),
-            pid_file: fixture.root.join(CHILD_RUNNER_DAEMON),
+            fixture_root: fixture.root.clone(),
         }
+    }
+
+    fn pid_file(&self) -> PathBuf {
+        self.fixture_root.join(CHILD_RUNNER_DAEMON)
     }
 
     /// The child runner of `fixture`, configured to serve its workspace and
@@ -1238,14 +1241,14 @@ impl ChildRunner {
             .env("HOME", &self.home)
             .env("XDG_STATE_HOME", self.home.join("os-state"))
             .env("PLAK_HOME", &self.home)
-            .envs(self.pid_file.parent().map(Lifetime::environment))
+            .envs([Lifetime::environment(&self.fixture_root)])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(log);
         forward_coverage_environment(&mut command);
         let mut child = TestChild::spawn(&mut command);
         let pid = i32::try_from(child.id()).unwrap();
-        std::fs::write(&self.pid_file, pid.to_string()).unwrap();
+        std::fs::write(self.pid_file(), pid.to_string()).unwrap();
         let deadline = Instant::now() + WAIT;
         let log =
             || std::fs::read_to_string(self.home.join("serve-harness.log")).unwrap_or_default();
@@ -1278,7 +1281,7 @@ impl ChildRunner {
     /// harness's child, so an exit is reaped here rather than mistaken for
     /// a live zombie.
     pub(super) fn pid(&self) -> Option<i32> {
-        let pid = std::fs::read_to_string(&self.pid_file)
+        let pid = std::fs::read_to_string(self.pid_file())
             .ok()?
             .trim()
             .parse::<i32>()
@@ -1292,7 +1295,7 @@ impl ChildRunner {
         {
             return Some(pid);
         }
-        let _ = std::fs::remove_file(&self.pid_file);
+        let _ = std::fs::remove_file(self.pid_file());
         None
     }
 
@@ -1338,7 +1341,7 @@ impl ChildRunner {
                 // Reaps a daemon this harness started; any other is not its child.
                 let _ = rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty());
             }
-            let _ = std::fs::remove_file(&self.pid_file);
+            let _ = std::fs::remove_file(self.pid_file());
             if Instant::now() >= deadline {
                 // A fixture dropped by a failing test reports that failure.
                 assert!(

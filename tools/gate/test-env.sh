@@ -23,7 +23,7 @@ source "$here/dev-tools-prefix.sh"
 # the live drivers need real keys, and the offline Python drivers that take
 # --json drop the names --unset-names prints.
 leaked=(PLAK_TEST_SESSION_LEASE_SECONDS PLAK_TEST_CELL_HELLO_MS PLAK_TEST_HOST_IDLE_EXIT_SECONDS
-        PLAK_TEST_OWNER_LOCK
+  PLAK_TEST_OWNER_LOCK
   PLAK_PRINT_PROMPT_PINS PLAK_UPDATE_GOLDENS PLAK_UPDATE_BINDING_CONTRACTS
   OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY)
 fresh=()

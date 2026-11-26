@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 pub(super) struct GatewayProcess {
     child: Child,
     #[cfg(feature = "test-support")]
-    _owner: tempfile::NamedTempFile,
+    _owner: Option<tempfile::NamedTempFile>,
 }
 
 impl GatewayProcess {
@@ -52,12 +52,20 @@ impl GatewayProcess {
         let output = std::fs::File::create(log).expect("gateway log");
         #[cfg(feature = "test-support")]
         let owner = {
-            let owner =
-                tempfile::NamedTempFile::new_in(log.parent().expect("gateway log directory"))
-                    .expect("gateway owner file");
-            owner.as_file().lock().expect("gateway owner lock");
-            command.env(super::daemon_lifetime::OWNER_LOCK, owner.path());
-            owner
+            use super::daemon_lifetime::OWNER_LOCK;
+            if command
+                .get_envs()
+                .any(|(name, value)| name == OWNER_LOCK && value.is_some())
+            {
+                None
+            } else {
+                let owner =
+                    tempfile::NamedTempFile::new_in(log.parent().expect("gateway log directory"))
+                        .expect("gateway owner file");
+                owner.as_file().lock().expect("gateway owner lock");
+                command.env(OWNER_LOCK, owner.path());
+                Some(owner)
+            }
         };
         let mut process = Self {
             child: command
