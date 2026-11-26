@@ -2228,6 +2228,7 @@ impl Drop for FaceGateway {
 
 struct FaceFixture {
     _gateway: Option<FaceGateway>,
+    _owner: File,
     root: TempDir,
     home: PathBuf,
     workspace: PathBuf,
@@ -2250,6 +2251,8 @@ impl FaceFixture {
         )?;
         let root = tempfile::tempdir()?;
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700))?;
+        let owner = File::create_new(root.path().join("test-owner.lock"))?;
+        owner.lock()?;
         let home = root.path().join("home");
         let workspace = root.path().join("workspace");
         std::fs::create_dir_all(home.join("agents"))?;
@@ -2285,6 +2288,7 @@ impl FaceFixture {
         std::fs::set_permissions(home.join("agents"), std::fs::Permissions::from_mode(0o700))?;
         let fixture = Self {
             _gateway: None,
+            _owner: owner,
             script: root.path().join("script.json"),
             evidence: root.path().join("evidence.jsonl"),
             home,
@@ -2314,6 +2318,10 @@ impl FaceFixture {
             .env("XDG_STATE_HOME", self.root.path().join("state"))
             .env("TMPDIR", self.root.path().join("tmp"))
             .env("PLAK_HOME", &self.home)
+            .env(
+                "PLAK_TEST_OWNER_LOCK",
+                self.root.path().join("test-owner.lock"),
+            )
             .env("PLAK_TEST_MODEL", "offline-loopback-v1")
             .env("PLAK_TEST_SCRIPT", &self.script)
             .env("PLAK_TEST_EVIDENCE", &self.evidence);
