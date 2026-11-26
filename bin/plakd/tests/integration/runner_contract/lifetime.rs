@@ -1,4 +1,4 @@
-//! A real detached stdio runner must not survive a SIGKILLed test.
+//! A real detached stdio runner must not survive a test killed by `SIGKILL`.
 
 use std::fs;
 use std::os::unix::process::ExitStatusExt as _;
@@ -75,7 +75,10 @@ fn own_runner(root: &Path) {
     fs::create_dir(&work).unwrap();
     fs::write(
         home.join("runner/runner.toml"),
-        format!("roots = [{work:?}]\npath = \"/usr/bin:/bin\"\nidle_exit_seconds = 300\n"),
+        format!(
+            "roots = [{:?}]\npath = \"/usr/bin:/bin\"\nidle_exit_seconds = 300\n",
+            work.to_str().unwrap()
+        ),
     )
     .unwrap();
     let mut bridge = TestChild::spawn(
@@ -95,7 +98,9 @@ fn own_runner(root: &Path) {
             if std::os::unix::net::UnixStream::connect(run.join("s.sock")).is_ok()
                 && let [pid] = opened_by(&run.join("s.lock")).as_slice()
             {
-                fs::write(root.join("ready"), pid.to_string()).unwrap();
+                let ready = root.join("ready.pending");
+                fs::write(&ready, pid.to_string()).unwrap();
+                fs::rename(ready, root.join("ready")).unwrap();
                 loop {
                     std::thread::park();
                 }
