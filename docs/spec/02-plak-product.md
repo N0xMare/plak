@@ -1175,8 +1175,9 @@ read-only binding inspections concurrently (§4.5). Neither inspection borrows
 the other build's verdict or substitutes for the destination's exact-reopen
 checks (§4.6). The source's own inspection is its only binding verdict: a
 source that qualifies child reopen restages it with the held checkpoint, and
-the requester inspects the source image itself only for an older source,
-whose report the legacy child audit also needs.
+the requester inspects the source image itself only for a source that does
+not advertise child reopen qualification, whose report the legacy child
+audit also needs.
 
 Session commands, including `run --session`, recovery, inspection and
 export, use the same incompatible-build refusal for an id (or uniquely
