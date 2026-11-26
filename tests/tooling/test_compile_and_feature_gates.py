@@ -502,6 +502,18 @@ class PublicCompileGateTests(unittest.TestCase):
                         binary,
                     )
                 )
+        shortened = json.loads(self.diagnostic("hosted_runtime_factory"))
+        short_msg, exact_child = compile_gate.AUTHORITY_NEGATIVE_SHORT_MESSAGES[
+            "hosted_runtime_factory"
+        ]
+        shortened["message"]["message"] = short_msg
+        self.assertFalse(
+            compile_gate.has_authority_diagnostic(json.dumps(shortened), "hosted_runtime_factory")
+        )
+        shortened["message"]["children"] = [{"level": "help", "message": exact_child}]
+        self.assertTrue(
+            compile_gate.has_authority_diagnostic(json.dumps(shortened), "hosted_runtime_factory")
+        )
 
     def test_xai_public_credentials_cannot_invoke_private_execution_methods(self) -> None:
         for binary in ("xai_platform_authority",):

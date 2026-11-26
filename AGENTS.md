@@ -24,7 +24,6 @@ just batch-mac             # macOS integration gate
 just nextest ARGS          # manual tests in the isolated test environment
 just steps GROUPS          # named groups; tests-install for install-family changes
 just regenerate PART       # rebuild the affected derived pins or fixtures
-just tighten-ceilings      # integrator: lower debt ceilings to actual counts
 just --list                # other recipes
 ```
 
@@ -32,8 +31,6 @@ Production install requires exact-tree batch and install evidence and
 [qualifying strict sweep evidence](docs/spec/06-build-and-support-surface.md#8-repository-settings).
 
 `CHANGELOG.md` is written only at the cut, from landed commits.
-Workers leave debt ceilings alone. The integrator tightens them with
-`just tighten-ceilings` before gating every landing and cut, and commits any changes.
 
 For a conflict in a [derived pin or fixture](docs/spec/05-testing-and-evidence.md#derived-pins-and-fixtures),
 take either side of the generated file or block, keep both sides' source

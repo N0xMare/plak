@@ -33,7 +33,7 @@ install-checks:
 steps GROUPS:
     tools/gate/dev-check.sh --steps {{quote(GROUPS)}}
 
-[doc("lower debt ceilings to their measured counts before gating")]
+[doc("compatibility no-op (placement ceilings retired)")]
 tighten-ceilings:
     python3 tools/gate/check_workspace.py --tighten-ceilings
 

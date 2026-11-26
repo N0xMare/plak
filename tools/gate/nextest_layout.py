@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import re
+import sys
 import tomllib
 
 CONFIG = Path(__file__).resolve().parents[2] / ".config/nextest.toml"
@@ -92,16 +93,88 @@ def render(source: str, available: int, profile: str = "durability") -> tuple[st
     return rendered, scaled["test-threads"]
 
 
+def _parse_cgroup_v2_cpu_max(text: str) -> int | None:
+    parts = text.split()
+    if len(parts) != 2 or parts[0] == "max":
+        return None
+    try:
+        quota = int(parts[0])
+        period = int(parts[1])
+    except ValueError:
+        return None
+    if quota <= 0 or period <= 0:
+        return None
+    return max(1, quota // period)
+
+
+def _cgroup_cpu_quota(
+    proc_cgroup: Path = Path("/proc/self/cgroup"),
+    cgroup_root: Path = Path("/sys/fs/cgroup"),
+) -> int | None:
+    """Return the tightest Linux cgroup v2/v1 CPU quota in whole slots, or None."""
+    try:
+        lines = proc_cgroup.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+
+    limit: int | None = None
+
+    def apply(candidate: int | None) -> None:
+        nonlocal limit
+        if candidate is not None:
+            limit = candidate if limit is None else min(limit, candidate)
+
+    for line in lines:
+        parts = line.split(":", 2)
+        if len(parts) != 3:
+            continue
+        hierarchy, controllers, relpath = parts
+        rel = relpath.lstrip("/")
+        if hierarchy == "0" and controllers == "":
+            current = cgroup_root / rel if rel else cgroup_root
+            while True:
+                try:
+                    apply(_parse_cgroup_v2_cpu_max((current / "cpu.max").read_text("utf-8")))
+                except OSError:
+                    pass
+                if current == cgroup_root or current.parent == current:
+                    break
+                current = current.parent
+        elif "cpu" in controllers.split(","):
+            base = cgroup_root / "cpu"
+            current = base / rel if rel else base
+            while True:
+                try:
+                    quota = int((current / "cpu.cfs_quota_us").read_text("utf-8").strip())
+                    period = int((current / "cpu.cfs_period_us").read_text("utf-8").strip())
+                    if quota > 0 and period > 0:
+                        apply(max(1, quota // period))
+                except (OSError, ValueError):
+                    pass
+                if current == base or current.parent == current:
+                    break
+                current = current.parent
+
+    return limit
+
+
 def available_parallelism(_target: Path | None = None) -> int:
-    """Host CPU slots available to this process (respecting Linux CPU affinity)."""
+    """Host CPU slots available to this process (respecting Linux affinity and cgroup quotas)."""
+    slots: int | None = None
     if hasattr(os, "sched_getaffinity"):
         try:
             count = len(os.sched_getaffinity(0))
             if count > 0:
-                return count
+                slots = count
         except OSError:
             pass
-    return max(1, os.cpu_count() or 1)
+    if slots is None:
+        slots = max(1, os.cpu_count() or 1)
+    if sys.platform.startswith("linux"):
+        quota = _cgroup_cpu_quota()
+        if quota is not None:
+            slots = min(slots, quota)
+    return max(1, slots)
 
 
 def main() -> None:

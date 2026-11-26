@@ -26,6 +26,8 @@ GROUPS = (
 )
 BATCH_GROUPS = (
     'static',
+    'standalone',
+    'contracts',
     'tooling',
     'tests-parallel',
     'tests-durability',
@@ -239,20 +241,21 @@ if args[0] == 'test':
     worker.chmod(0o700)
     print(json.dumps(dict(reason='compiler-artifact', executable=str(worker) + '-harness',
                          target=dict(name='plakous-py-host', kind=['bin']), profile=dict(test=True))))
-    print(json.dumps(dict(reason='compiler-artifact', executable=str(worker),
-                         target=dict(name='plakous-py-host', kind=['bin']), profile=dict(test=False))))
-    js_worker = worker.with_name('plakous-js-host')
-    js_worker.write_text('#!/bin/sh\nexit 0\n')
-    js_worker.chmod(0o700)
-    print(json.dumps(dict(reason='compiler-artifact', executable=str(js_worker),
-                         target=dict(name='plakous-js-host', kind=['bin']), profile=dict(test=False))))
-    mcp_server = worker.with_name('mcp-fake-server')
-    mcp_server.write_text('#!/bin/sh\nexit 0\n')
-    mcp_server.chmod(0o700)
-    print(json.dumps(dict(reason='compiler-artifact', executable=str(mcp_server),
-                         target=dict(name='mcp-fake-server', kind=['bin']), profile=dict(test=False))))
-    print(json.dumps(dict(reason='compiler-artifact', executable=str(worker),
-                         target=dict(name='plakd', kind=['bin']), profile=dict(test=False))))
+    if '--bin' not in args:
+        print(json.dumps(dict(reason='compiler-artifact', executable=str(worker),
+                             target=dict(name='plakous-py-host', kind=['bin']), profile=dict(test=False))))
+        js_worker = worker.with_name('plakous-js-host')
+        js_worker.write_text('#!/bin/sh\nexit 0\n')
+        js_worker.chmod(0o700)
+        print(json.dumps(dict(reason='compiler-artifact', executable=str(js_worker),
+                             target=dict(name='plakous-js-host', kind=['bin']), profile=dict(test=False))))
+        mcp_server = worker.with_name('mcp-fake-server')
+        mcp_server.write_text('#!/bin/sh\nexit 0\n')
+        mcp_server.chmod(0o700)
+        print(json.dumps(dict(reason='compiler-artifact', executable=str(mcp_server),
+                             target=dict(name='mcp-fake-server', kind=['bin']), profile=dict(test=False))))
+        print(json.dumps(dict(reason='compiler-artifact', executable=str(worker),
+                             target=dict(name='plakd', kind=['bin']), profile=dict(test=False))))
 ''',
         )
         self.executable(
@@ -761,7 +764,8 @@ os.execv(real, [real, *sys.argv[1:]])
         self.assertEqual(result.returncode, 8)
         self.assertEqual(len(self.lanes(calls)), 3)
         self.assertEqual(sum(c['args'][0] == 'test' for c in calls), 1)
-        self.assertTrue(any(s[0].endswith('run_tooling_tests.py') for s in scripts))
+        for name in ('check_public_compile.py', 'run_tooling_tests.py'):
+            self.assertTrue(any(s[0].endswith(name) for s in scripts))
         self.assertIn('failed groups: tests-parallel tests-durability tests-serial', result.stdout)
         self.assertNotIn('gate passed', result.stdout)
 
@@ -772,11 +776,39 @@ os.execv(real, [real, *sys.argv[1:]])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertCountEqual(
             [c['args'][0] for c in calls if c['args'][0] not in {'nextest'}],
-            ['fmt', 'fetch', *CLIPPIES, 'test'],
+            ['fmt', 'fetch', *CLIPPIES, 'clippy', 'clippy', 'check', 'test'],
+        )
+        self.assertEqual(
+            [c['args'][0:8] for c in calls if c['args'][0] == 'clippy' and '-p' in c['args']],
+            [
+                [
+                    'clippy',
+                    '--locked',
+                    '-p',
+                    'plakous-model',
+                    '--all-targets',
+                    '--target',
+                    'host-triple',
+                    '--',
+                ],
+                [
+                    'clippy',
+                    '--locked',
+                    '-p',
+                    'plakous-hosted',
+                    '--lib',
+                    '--bins',
+                    '--target',
+                    'host-triple',
+                ],
+            ],
+        )
+        self.assertTrue(
+            all('-D warnings' in c['rustflags'] for c in calls if self.is_wasm_check(c))
         )
         self.assertEqual(self.profiles(calls), ['offline', 'durability', 'serial'])
         self.assertEqual(self.filtersets(calls), [self.env['GATE_BATCH_FILTER'], None, None])
-        for checker in ('check_workspace.py', 'check_features.py'):
+        for checker in ('check_public_compile.py', 'check_workspace.py', 'check_features.py'):
             self.assertTrue(any(s[0].endswith(checker) for s in scripts))
         self.assertIn(['tools/gate/run_tooling_tests.py', '-v', '--batch'], scripts)
 

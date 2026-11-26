@@ -30,10 +30,6 @@ use super::{
     write_joined_session_input,
 };
 
-#[cfg_attr(
-    not(unix),
-    expect(dead_code, reason = "read only by the unix host backend")
-)]
 #[derive(Default)]
 pub(super) struct JoinedSessionOutput {
     pub(super) records: VecDeque<JoinedProcessOutputRecord>,

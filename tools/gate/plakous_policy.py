@@ -336,31 +336,44 @@ def layout_matches(policy: Policy, package: Package) -> bool:
     return False
 
 
-RAW_STRING_START = re.compile(r'(?:br|r)(?P<hashes>#{0,255})"')
+RAW_STRING_START = re.compile(r'(?:br|cr|r)(?P<hashes>#{0,255})"')
 RUST_CHARACTER = re.compile(r"(?:b)?'(?:\\(?:.|u\{[0-9A-Fa-f_]+\}|x[0-9A-Fa-f]{2})|[^'\\\n])'")
+_NON_CODE_SCAN = re.compile(
+    r"//[^\n]*"
+    r"|(?P<block>/\*)"
+    r'|(?<![A-Za-z0-9_])(?P<raw>(?:br|cr|r)(?P<hashes>#{0,255})")'
+    r'|(?<![A-Za-z0-9_])(?:[bc])?"(?:\\.|[^"\\])*"'
+    r"|(?<![A-Za-z0-9_])(?:b)?'(?:\\(?:.|u\{[0-9A-Fa-f_]+\}|x[0-9A-Fa-f]{2})|[^'\\\n])'",
+    re.DOTALL,
+)
+_NON_NEWLINE = re.compile(r"[^\r\n]")
+
+
+def _blank_slice(text: str) -> str:
+    if "\n" not in text and "\r" not in text:
+        return " " * len(text)
+    return _NON_NEWLINE.sub(" ", text)
 
 
 def blank_rust_non_code(source: str) -> str:
     """Blank comments and literals while preserving offsets and newlines."""
-    masked = list(source)
-
-    def blank(start: int, end: int) -> None:
-        for index in range(start, end):
-            if masked[index] not in "\r\n":
-                masked[index] = " "
-
-    index = 0
-    while index < len(source):
-        if source.startswith("//", index):
-            end = source.find("\n", index + 2)
-            end = len(source) if end == -1 else end
-            blank(index, end)
-            index = end
-            continue
-        if source.startswith("/*", index):
+    if "/" not in source and '"' not in source and "'" not in source:
+        return source
+    out: list[str] = []
+    pos = 0
+    length = len(source)
+    while pos < length:
+        match = _NON_CODE_SCAN.search(source, pos)
+        if match is None:
+            out.append(source[pos:])
+            break
+        start = match.start()
+        if start > pos:
+            out.append(source[pos:start])
+        if match.group("block") is not None:
             depth = 1
-            end = index + 2
-            while end < len(source) and depth:
+            end = match.end()
+            while end < length and depth:
                 if source.startswith("/*", end):
                     depth += 1
                     end += 2
@@ -369,44 +382,19 @@ def blank_rust_non_code(source: str) -> str:
                     end += 2
                 else:
                     end += 1
-            blank(index, end)
-            index = end
-            continue
-
-        raw = RAW_STRING_START.match(source, index) if source[index] in "br" else None
-        if raw is not None:
-            terminator = '"' + raw.group("hashes")
-            end = source.find(terminator, raw.end())
-            end = len(source) if end == -1 else end + len(terminator)
-            blank(index, end)
-            index = end
-            continue
-
-        prefix = 2 if source.startswith(('b"', 'c"'), index) else 1
-        if source[index : index + prefix].endswith('"'):
-            end = index + prefix
-            escaped = False
-            while end < len(source):
-                character = source[end]
-                end += 1
-                if character == '"' and not escaped:
-                    break
-                if character == "\\" and not escaped:
-                    escaped = True
-                else:
-                    escaped = False
-            blank(index, end)
-            index = end
-            continue
-
-        character = RUST_CHARACTER.match(source, index) if source[index] in "b'" else None
-        if character is not None:
-            end = character.end()
-            blank(index, end)
-            index = end
-            continue
-        index += 1
-    return "".join(masked)
+            out.append(_blank_slice(source[start:end]))
+            pos = end
+        elif match.group("raw") is not None:
+            terminator = '"' + match.group("hashes")
+            closing = source.find(terminator, match.end())
+            end = length if closing == -1 else closing + len(terminator)
+            out.append(_blank_slice(source[start:end]))
+            pos = end
+        else:
+            end = match.end()
+            out.append(_blank_slice(source[start:end]))
+            pos = end
+    return "".join(out)
 
 
 def edge_permitted(policy: Policy, source: Package, target: Package) -> bool:

@@ -350,10 +350,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
     }
 
     if matches!(command, Command::Help) {
-        let home = shell::home::Home::from_env(launch.as_deref());
-        if let Some(paths) = home.paths_if_resolved() {
-            build_identity::install_identity_cache_home(paths.home().to_path_buf());
-        }
+        Services::install_identity_cache_from_env(launch.as_deref());
         cli::render::global_help(&mut io::stdout().lock())
             .map_err(|_| CliFailure::new("stdout failed"))?;
         return Ok(ProcessOutcome::Success);

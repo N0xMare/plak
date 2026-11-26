@@ -414,6 +414,14 @@ impl RuntimeFactory<plakous_host_protocol::Core> for ExternalFactory {
     ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> {
         unreachable!()
     }
+    fn verify_head<'a>(
+        &'a self,
+        config: &'a mut HostConfig<plakous_host_protocol::Core>,
+        head: SessionLocator,
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, Result<(), CodingSessionOpenFailure>> {
+        unreachable!()
+    }
     fn create<'a>(
         &'a self,
         config: &'a mut HostConfig<plakous_host_protocol::Core>,
@@ -445,6 +453,7 @@ impl RuntimeFactory<plakous_host_protocol::Core> for ExternalFactory {
     fn fork_runtime<'a>(
         &'a self,
         config: &'a HostConfig<plakous_host_protocol::Core>,
+        tree_id: &'a str,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
         unreachable!()
@@ -667,6 +676,15 @@ def validate_supported_inventory_policy() -> bool:
     return True
 
 
+AUTHORITY_NEGATIVE_SHORT_MESSAGES = {
+    "hosted_runtime_factory": (
+        "the trait bound `ExternalFactory: Sealed` is not satisfied",
+        "the trait `plakous_hosted::runtime::factory::sealed::Sealed` "
+        "is not implemented for `ExternalFactory`",
+    ),
+}
+
+
 def has_authority_diagnostic(output: str, binary: str) -> bool:
     """Require the exact rustc error at the fixture's pinned authority span."""
     expected_file = f"src/bin/{binary}.rs"
@@ -685,7 +703,18 @@ def has_authority_diagnostic(output: str, binary: str) -> bool:
             continue
         expected_message = AUTHORITY_NEGATIVE_ERROR_MESSAGES.get(binary)
         if expected_message is not None and diagnostic.get("message") != expected_message:
-            continue
+            short = AUTHORITY_NEGATIVE_SHORT_MESSAGES.get(binary)
+            child_messages = {
+                child.get("message")
+                for child in diagnostic.get("children", [])
+                if isinstance(child, dict)
+            }
+            if (
+                short is None
+                or diagnostic.get("message") != short[0]
+                or short[1] not in child_messages
+            ):
+                continue
         for span in diagnostic.get("spans", []):
             if not span.get("is_primary") or span.get("line_start") != expected_line_number:
                 continue

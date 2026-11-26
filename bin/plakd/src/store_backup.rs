@@ -87,7 +87,10 @@ struct CopiedFile {
 }
 
 pub(crate) fn resolve_budget(cli_secs: Option<u64>) -> CliResult<Duration> {
-    resolve_budget_with_env(cli_secs, std::env::var(COPY_BUDGET_ENV).ok().as_deref())
+    resolve_budget_with_env(
+        cli_secs,
+        crate::environment::store_backup_budget_secs().as_deref(),
+    )
 }
 
 fn resolve_budget_with_env(cli_secs: Option<u64>, env_value: Option<&str>) -> CliResult<Duration> {

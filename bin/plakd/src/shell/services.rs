@@ -148,6 +148,15 @@ impl Services {
             .map_or(0, |store| store.opened_connections())
     }
 
+    /// Installs the build-identity cache directory from the resolved product home
+    /// without initializing the full host service graph.
+    pub(crate) fn install_identity_cache_from_env(launch: Option<&std::path::Path>) {
+        let home = Home::from_env(launch);
+        if let Some(paths) = home.paths_if_resolved() {
+            crate::build_identity::install_identity_cache_home(paths.home().to_path_buf());
+        }
+    }
+
     /// Resolves the product home once.
     pub(crate) fn from_env(launch: Option<&std::path::Path>) -> Self {
         let home = Home::from_env(launch);

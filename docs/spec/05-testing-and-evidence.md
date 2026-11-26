@@ -155,7 +155,7 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...
 
 | Group (canonical order) | Coverage |
 | --- | --- |
-| `static` | Workspace all-features, all-targets clippy with warnings denied. Except in Mac batch, also Rust formatting, `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/`, locked dependency fetch (offline first), and `check_workspace.py` and `check_features.py`. The feature checker's library builds use a separate target directory. |
+| `static` | Workspace all-features, all-targets clippy with warnings denied (or affected packages + reverse dependents under `--fast`). Except in Mac batch, also Rust formatting, `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/`, locked dependency fetch (offline first), `check_workspace.py`, and (outside `--fast`) `check_features.py`. The feature checker's library builds use a separate target directory. |
 | `builds` | Link plakd in its release resolution and with maintainer features, build the two sidecars, and verify their linkage against the maintainer binary; rustc warnings denied |
 | `rustdoc` | Workspace all-features documentation with warnings denied |
 | `rustdoc-alone` | Documentation of each supported package alone in its default resolution, warnings denied, in a dedicated target directory |
@@ -762,7 +762,7 @@ correctness.
 | `cargo check --workspace --all-features --all-targets --locked` as an MSRV probe | The MSRV is the toolchain pin, so the ordinary build already is the MSRV build |
 | `python3 tools/perf/check_prod_loc.py` (`just perf density`) | A density question is live. It always exits 0 |
 | `bash tools/perf/perf-smoke.sh --check` (`just perf smoke`) | A performance question is live. Six offline product measurements and four worker timings against this machine's seed row (§2.7); informational |
-| `cargo bench` for `perf_core`, `perf_project`, `perf_store`, and `tools/perf/perf_build.py` | A performance claim needs numbers. There is no portable numeric baseline; every claim carries its emitted host, feature, and toolchain metadata |
+| `cargo bench` for `perf_core`, `perf_project`, `perf_store` | A performance claim needs numbers. There is no portable numeric baseline; every claim carries its emitted host, feature, and toolchain metadata |
 | `cargo nextest run -p plakous-offline-crash-harness` | Process-crash matrices are wanted on demand. Unix only |
 | `just prompts native-compare` | Comparing plakd's prompts against installed vendor CLIs using isolated synthetic credentials and local mock responses |
 | `eval/` Harbor two-rung bakeoff (Rung A weekly plumbing + TB 2.1 A/B; Rung B one-task TB 4.0 wire; `just harbor smoke` hard TB 4.0 slice) | Harness-comparison against vendor CLIs. Opt-in, paid, never a qualification row. `just harbor test` runs its adapter tests. See `eval/README.md` |
@@ -1326,17 +1326,17 @@ them relaxes an assertion to buy parallelism.
 
 **Test groups** cap concurrency across the whole workspace:
 
-- `native-auth-serial` (`max-threads = 1`) covers every `native_auth::` test and
-  the `local_transport` binary. Native subscription auth tests share
-  process-local fixtures. No test binds a pinned OAuth callback port (Codex
-  1455/1457, xAI 56121): browser logins in tests bind an ephemeral port through
-  the managers' loopback seam, a `cfg(test)` assertion refuses the pinned ports
-  in both managers, the facade's unit tests switch Codex to the seam through
-  `plakous-openai/test-support`, and `tests/tooling/test_pinned_callback_ports.py`
-  refuses a pinned-port bind or an unguarded browser login anywhere in the tree.
 - `cli-contract-serial` (`max-threads = 1`) covers `cli_contract::` in plakd's
   `integration` binary, selected by package, binary and anchored module name,
   not the other modules sharing that binary.
+
+Native subscription auth tests bind an ephemeral port through the managers'
+loopback seam and use isolated temporary stores, so they run in parallel
+without a dedicated serial group; a `cfg(test)` assertion refuses the pinned
+OAuth callback ports (Codex 1455/1457, xAI 56121) in both managers, the
+facade's unit tests switch Codex to the seam through
+`plakous-openai/test-support`, and `tests/tooling/test_pinned_callback_ports.py`
+refuses a pinned-port bind or an unguarded browser login anywhere in the tree.
 
 **The serial lane** is the `serial` profile: four test threads on Linux, one
 on macOS, and a 240-second
@@ -1529,8 +1529,8 @@ unit rather than an arbitrary subset of its tests.
 the lane despite running in 0.01 seconds. Its budget is internal: it races the
 loopback callback against a `tokio::time::timeout(Duration::from_secs(2), …)`
 on the login completion, and `??` turns an elapsed timeout into a failure. The
-fixed callback port is already serialized by the test's own gate and by
-`native-auth-serial`, so the port is not the race — the two seconds are.
+callback port is ephemeral and serialized by the test's own gate, so the port
+is not the race — the two seconds are.
 
 Reserving the whole test pool inside one parallel run is not enough on a loaded
 machine: it stops other tests from running alongside, but each reservation is
@@ -1544,9 +1544,9 @@ fsync through a crash cut, and they depend on OS signal and fsync behavior, so
 the core rows run in Linux batch and the platform-sensitive selection runs
 in macOS batch. Mac installation checks (`just install-checks`) and
 `just full` on both platforms run the complete lane.
-The gate derives `N = max(1, min(16, available_parallelism))` with the same Rust
-API the campaigns use, including affinity and CPU quota constraints. A tiny
-native tooling probe runs before the lane; it opens no product runtime. The
+The gate derives `N = max(1, min(16, available_parallelism))` in Python from
+process CPU affinity (`os.sched_getaffinity` / `os.cpu_count`) and Linux cgroup
+v2/v1 CPU quotas, without compiling a helper binary. The
 reviewed source profile describes sixteen slots; `nextest_layout.py` renders
 a gate-local copy with N slots and proportionally scaled integer reservations.
 It verifies that every non-resource setting, including membership, watchdogs
@@ -4124,7 +4124,7 @@ the assertion. Open investigations name their current containment explicitly.
 | --- | --- | --- |
 | Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plak-test-*` on macOS) from `tools/gate/test-env.sh`, and required for `just nextest` |
 | Inherited git config | Fixture git read the host's global config; a global `commit.gpgsign` spawned `gpg` per fixture commit, which failed with ENOMEM under gate load | Test entry points export an empty `GIT_CONFIG_GLOBAL` under `TMPDIR` and `GIT_CONFIG_NOSYSTEM=1` (§1); fixtures set their own identity |
-| Fixed-port OAuth loopback | Login tests bound the pinned callback ports, which collide across parallel runs and with a live login | Tests bind an ephemeral port through the managers' loopback seam; the pinned ports are refused in tests (§2.3). The `native-auth-serial` group still serializes the shared process-local fixtures |
+| Fixed-port OAuth loopback | Login tests bound the pinned callback ports, which collide across parallel runs and with a live login | Tests bind an ephemeral port through the managers' loopback seam and use isolated stores; the pinned ports are refused in tests (§2.3) |
 | CLI contract interference | Process-level binary contracts collide when run in parallel | The `cli-contract-serial` group |
 | Child-start deadline under load | Crash matrices relaunch the current test binary and wait for durable cut markers; CPU and SQLite contention can exceed a bounded start deadline | Durability and install (§2.3) use host-scaled pools of at most sixteen slots, separate from each other and the serial budget lane. Install runs the internal-worker campaigns exclusively at late priority and isolates the signature-sensitive closed-cell campaign. The 240-second slow timeout and explicit matrix watchdogs are unchanged. Child reply and exit watchdogs are hang bounds, not timing assertions |
 | Open: closed-cell retirement twin signatures under load | `crash_sweep::durability_ledger_retirement_closed_cells` has produced different per-store commit signatures under competing load; twin-pilot determinism is itself the invariant, so isolation does not establish a root cause | Whole-pool reservation at priority 100 remains containment, not a correctness fix. A bounded probe with four CPU busy loops passed three campaign invocations, each with matching 109-publication twin pilots and 32 representative cuts; it captured no divergence and cannot classify harness timing versus product ordering. The harness deliberately varies answer-before-idle versus drained-idle delivery and gates quit on the subsequent idle observation. Investigate both retained `commit-trace.jsonl` pilots on reproduction; stop and report product-ordering evidence rather than change isolation or the oracle |

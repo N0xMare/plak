@@ -139,3 +139,8 @@ pub(crate) fn login_shell() -> Option<String> {
 pub(crate) fn xdg_runtime_dir() -> Option<std::path::PathBuf> {
     std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)
 }
+
+/// Optional wall-clock budget override for `plakd store-backup`.
+pub(crate) fn store_backup_budget_secs() -> Option<String> {
+    std::env::var("PLAK_STORE_BACKUP_BUDGET_SECS").ok()
+}

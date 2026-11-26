@@ -11,7 +11,7 @@ cd "$root"
 
 # Canonical group order, including replay of overlapped groups.
 all_groups=(static builds rustdoc rustdoc-alone standalone contracts tooling tests-parallel tests-durability tests-serial tests-install)
-batch_groups=static,tooling,tests-parallel,tests-durability,tests-serial
+batch_groups=static,standalone,contracts,tooling,tests-parallel,tests-durability,tests-serial
 
 tier=batch
 selection=$batch_groups
@@ -185,21 +185,7 @@ prepare_tests() {
     # The worker comes out of the test build itself. A `cargo build` would leave
     # dev-dependency features off and compile a second variant of the graph;
     # this way nextest finds everything built and the tests run this worker.
-    # In `--fast <pkg>` mode, compile only the touched packages' tests plus the
-    # four test-worker executables instead of every test binary in the workspace.
-    if [[ "$tier" == fast && ${#packages[@]} -gt 0 && "${packages[*]}" != --workspace ]]; then
-      fast_build_args=()
-      for name in "${packages[@]}"; do fast_build_args+=(-p "$name"); done
-      cargo test --no-run --locked --all-features --message-format=json \
-        "${fast_build_args[@]}" \
-        -p plakous-py-worker --bin plakous-py-host \
-        -p plakous-js-runtime --bin plakous-js-host \
-        -p plakous-mcp-fake-server --bin mcp-fake-server \
-        -p plakd --bin plakd \
-        ${target_args[@]+"${target_args[@]}"} >"$worker_manifest"
-    else
-      cargo test --no-run --locked --workspace --all-features --message-format=json ${target_args[@]+"${target_args[@]}"} >"$worker_manifest"
-    fi
+    cargo test --no-run --locked --workspace --all-features --message-format=json ${target_args[@]+"${target_args[@]}"} >"$worker_manifest"
     worker_input="$worker_manifest"
   fi
   worker_paths="$(python3 - "$worker_mode" "$worker_input" <<'PY_WORKER'

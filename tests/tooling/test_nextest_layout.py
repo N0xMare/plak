@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sys
+import tempfile
 import tomllib
 import unittest
 
@@ -52,6 +53,41 @@ class NextestLayoutTests(unittest.TestCase):
         source = source.replace("test-threads = 16", "test-threads\t=16")
         with self.assertRaises(ValueError):
             layout.render(source, 10)
+
+    def test_cgroup_v2_quota_walks_ancestors_and_ignores_max(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            proc_cgroup = root / "cgroup"
+            proc_cgroup.write_text("0::/user.slice/child\n", encoding="utf-8")
+            cg = root / "sys"
+            (cg / "user.slice/child").mkdir(parents=True)
+            (cg / "cpu.max").write_text("max 100000\n", encoding="utf-8")
+            (cg / "user.slice/cpu.max").write_text("400000 100000\n", encoding="utf-8")
+            (cg / "user.slice/child/cpu.max").write_text("600000 100000\n", encoding="utf-8")
+            self.assertEqual(layout._cgroup_cpu_quota(proc_cgroup, cg), 4)
+
+            (cg / "user.slice/cpu.max").write_text("max 100000\n", encoding="utf-8")
+            (cg / "user.slice/child/cpu.max").write_text("50000 100000\n", encoding="utf-8")
+            self.assertEqual(layout._cgroup_cpu_quota(proc_cgroup, cg), 1)
+
+            (cg / "user.slice/child/cpu.max").write_text("max 100000\n", encoding="utf-8")
+            self.assertIsNone(layout._cgroup_cpu_quota(proc_cgroup, cg))
+
+    def test_cgroup_v1_quota_respects_positive_quota_and_skips_unlimited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            proc_cgroup = root / "cgroup"
+            proc_cgroup.write_text("4:cpu,cpuacct:/box\n", encoding="utf-8")
+            cg = root / "sys"
+            (cg / "cpu/box").mkdir(parents=True)
+            (cg / "cpu/cpu.cfs_quota_us").write_text("-1\n", encoding="utf-8")
+            (cg / "cpu/cpu.cfs_period_us").write_text("100000\n", encoding="utf-8")
+            (cg / "cpu/box/cpu.cfs_quota_us").write_text("300000\n", encoding="utf-8")
+            (cg / "cpu/box/cpu.cfs_period_us").write_text("100000\n", encoding="utf-8")
+            self.assertEqual(layout._cgroup_cpu_quota(proc_cgroup, cg), 3)
+
+            (cg / "cpu/box/cpu.cfs_quota_us").write_text("-1\n", encoding="utf-8")
+            self.assertIsNone(layout._cgroup_cpu_quota(proc_cgroup, cg))
 
 
 if __name__ == "__main__":

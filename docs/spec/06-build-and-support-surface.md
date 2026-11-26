@@ -298,58 +298,31 @@ Only production construction is available without `test-support`; the cfg'd
 test kit supplies the scripted implementation and the private registered-route
 authority token. Native and API rebind target opens use that same sealed port.
 
-The workspace checker enforces configuration placement through
-`[workspace.metadata.plakous.cfg.<package>]`. `feature-sites` defaults to
-`src/lib.rs` and `src/registry.rs`; these allow gated static-entry references
-(`&module::ENTRY` or `&ENTRY`), not arbitrary gated items or statements. Other feature
-predicates must gate a module declaration (including disabled-module swaps).
-`env-sites` defaults to
-empty and lists reviewed environment-reading boundary files. plakd's boundary
-files are `environment.rs`, `home/paths.rs` and `home/secrets.rs`; the tools
-child-environment builder and workspace VCS environment files are reviewed
-library exceptions. Test-only deadline overrides are the same kind of
-exception: `plakous/test-support` reads `PLAK_TEST_SESSION_LEASE_SECONDS` only in
-`test_session_lease.rs`, and `plakous-cell/test-hooks` reads `PLAK_TEST_CELL_HELLO_MS`
-only in `test_hooks.rs`. Other builds do not compile those readers.
+Test-only deadline overrides are reviewed exceptions: `plakous/test-support`
+reads `PLAK_TEST_SESSION_LEASE_SECONDS` only in `test_session_lease.rs`, and
+`plakous-cell/test-hooks` reads `PLAK_TEST_CELL_HELLO_MS` only in
+`test_hooks.rs`. Other builds do not compile those readers.
 `plakd/test-support` enables `plakous/test-support`, which enables
 `plakous-cell/test-hooks` when the cell client is already linked, and
 `plakous-agent/test-hooks`, whose `test_hooks.rs` names on stderr a
 credential-wait clear the event hub refused (a production build drops it
-silently, as before). The hello
-override accepts 1 through 30 000 milliseconds and no more.
-Those three seams on the facade, cell and agent are hidden from the 2n+3
-closure witnesses, the same way `test-clock` is. `plakd/test-support` and
-`plakous-py-worker/test-hooks` stay in their package witnesses.
-The host/bin authority check uses package-relative file lists for runtime and
-compile-time environment reads, process imports and construction, working-directory
-reads and launch-directory constructors. It does not match call counts, order
-or arguments. Ambient environment iteration and changing the process working
-directory remain forbidden. The CLI edge reads the launch directory; the
-build-identity check and workspace fence may read the working directory for
-path resolution. Only the composition root calls `Services::from_env`, and
-only `Services` calls `Home::from_env`.
+silently, as before). The hello override accepts 1 through 30 000 milliseconds
+and no more. Those three seams on the facade, cell and agent are hidden from
+the 2n+3 closure witnesses, the same way `test-clock` is. `plakd/test-support`
+and `plakous-py-worker/test-hooks` stay in their package witnesses.
 
-Test-seam features (`test-support`, `test-hooks`,
-`fault-injection`, `scripted-code-mode-enrolment`)
-belong only on test-support module declarations in libraries and in plakd's
-`lib.rs`/`test_hooks.rs` composition root. Production control-flow seams are
-existing debt, not a precedent for new sites. The checker counts feature,
-test-seam and environment placement debt separately against
-`feature-ceiling`, `test-seam-ceiling` and `env-ceiling` upper bounds.
-Missing ceilings mean zero. Test-only items and test source
-trees are excluded. A cfg predicate is test-only when it implies `test`:
-`test` itself, an `all(...)` with any test-only child, or a non-empty
-`any(...)` whose every child is test-only. Negation is not treated as proof.
-`cfg(any(test, feature = ...))` still ships under the feature and is counted.
-Comments and literals are not configuration sites.
-
-A module rule can cap its `may-use` list with `may-use-ceiling`.
-Every enrolled ceiling is an upper bound: a count above it fails, and a
-reduction passes without a manifest edit. Nonzero configuration ceilings
-require a reviewed reason, and raising any ceiling requires review. Workers
-leave ceilings unchanged. At each landing and cut, the integrator runs
-`just tighten-ceilings` on the tip and commits any changes before the gate.
-The command uses the static checker's inventories and never raises a ceiling.
+The workspace checker enforces host/bin authority boundaries using reviewed
+package-relative file lists for runtime and compile-time environment reads,
+process imports and construction, working-directory reads and launch-directory
+constructors. It does not match call counts, order or arguments. Ambient
+environment iteration, `set_current_dir`, `/proc/self/environ`, foreign
+environment/process FFI declarations, delegated-login symbols and options, and
+competing product session-authority identifiers remain forbidden. The CLI edge
+reads the launch directory; the build-identity check and workspace fence may
+read the working directory for path resolution. Only the composition root calls
+`Services::from_env`, and only `Services` calls `Home::from_env`. Only `plakd`
+may call `PlakPaths::from_env`, and host/bin production sources reach L0 only
+through `plakous` (outside explicit layer edge exceptions).
 
 `plakous-hosted::capabilities` owns the complete current route metadata in
 per-route modules and one ordered registry. plakd's private product registry
@@ -364,7 +337,7 @@ records, not runtime readiness.
 
 Installed-build probes remain product-owned and independent of terminal
 re-exec. Feature-dependent lookup and publication helpers belong in their
-own capability modules; existing configuration-placement ratchets still apply.
+own capability modules.
 
 `plakous` facade features are listed in chapter 00. The host and product
 features and the evaluator selection are summarized here; backend defaults are
@@ -535,68 +508,20 @@ not only in the manifests. It lists the symbols of the `plakd`,
 `plakous-js-host`, and `plakous-py-host` executables and requires that only the
 JavaScript worker contains QuickJS engine symbols, only the Python worker
 contains micro-monty interpreter symbols, and that the three are
-separate files by digest.
-A successful run records that success line in
-`${CARGO_TARGET_DIR:-$ROOT/target}/workspace-check-cache.json`. The receipt
-holds a global digest, the success line, an observation and a checksum, and a
-later run prints the recorded line only when the digest and the observation
-still match. A failure is not recorded. A missing, truncated, non-object or
-checksum-mismatched receipt recomputes, as does any input that cannot be
-stated. No run is recorded when the global digest or any observed path changed
-before the run finished, when one path was observed with two identities during
-the run, or when a walk could not read a directory.
-
-On an exact-run miss, the checker can still skip pure rules whose inputs
-are unchanged. A separate receipt,
-`${CARGO_TARGET_DIR:-$ROOT/target}/workspace-policy-receipts.json`, holds the
-same global digest, a checksum and a set of successful rule-input hashes.
-Each key includes the rule name, the applicable file or package identities,
-the paths and SHA-256 digests of the source bytes or text supplied to the rule,
-and any explicit policy inputs, such as allowances or ceilings. A
-package-wide rule includes all sources it receives. Only a rule with no
-findings adds a key; the receipt stores neither source text nor diagnostics.
-Discovery, filesystem checks and external commands still run on an exact-run
-miss. Missing, malformed or mismatched rule receipts authorize no skips.
-
-The checker writes either receipt only after a successful run with a stable
-global digest and observation. If a run reuses any rule receipt and cannot
-confirm stability, it discards that attempt's checker output and reruns the
-entire check without reading or writing receipts. Use
-`tools/gate/check_workspace.py --full-scan` to request that uncached check
-explicitly.
-
-The global digest is a SHA-256 over: `cargo --version`; `rustc -vV`; the
-absolute workspace root; every `CARGO_*` environment variable except
-`CARGO_TERM_COLOR`, `CARGO_TERM_PROGRESS_WHEN`, `CARGO_TERM_PROGRESS_WIDTH`,
-`CARGO_TERM_VERBOSE` and any credential variable (a name containing `TOKEN`,
-`CREDENTIAL`, `SECRET` or `PASSWORD`, such as `CARGO_REGISTRY_TOKEN`), plus
-`RUSTC`, `RUSTFLAGS` and `RUSTUP_TOOLCHAIN` (an unset variable is the empty
-string); the bytes of `tools/gate/check_workspace.py`, `plakous_policy.py`,
-`vcs_listing.py`, `cargo_key.py` and `workspace_receipts.py`; the identity of `llvm-nm`
-and of `nm` on
-`PATH`, or absence; the identity of `$CARGO_HOME/config.toml` and
-`$CARGO_HOME/config` (`~/.cargo` when `CARGO_HOME` is unset) together with
-every ancestor `.cargo/config.toml` and `.cargo/config` from the workspace root
-through `/`, present or absent; and the identity of
-`docs/local/hygiene-private-names.txt`, present or absent. The receipt stores
-only the digest, never an environment value.
-
-The observation is what that successful run actually touched. A file the run
-tried to read (bytes, text or an open in any mode) is recorded before the read,
-so a read that fails records the path as absent. It is keyed by its absolute
-path and an lstat identity: type, size, mtime and sha256. A symlink's identity
-is its own lstat type, size and mtime, its `readlink` text, and the identity of
-what it points to, following the chain to its end (more than 40 links is a
-doubt), so replacing a file with a symlink of the same bytes and mtime, or
-retargeting a link between identical files, is a miss. A directory `os.walk`
-entered is keyed by its sorted entry names, lstat types and, for a symlink, its
-target. An `exists`, `is_file`, `is_dir` or `is_symlink` probe is keyed by the
-kind, the path, the boolean result and the same identity. Each `listed_files`
-result is stored and compared by running the listing again. Lookup
-re-fingerprints exactly those paths with lstat, `readlink`, reads, directory
-listings and those four probes; a receipt naming any other operation is a doubt.
-The checksum is SHA-256 of the canonical JSON of the digest, the success line
-and the observation.
+separate files by digest. The checker runs uncached on every invocation against
+the live tree (`--full-scan` is accepted as an alias for the default scan, and
+`--tighten-ceilings` is retained as a compatibility no-op). It enforces
+workspace layering and layout, package shape and `plakous` facade feature pins,
+external consumer-fixture contracts, `plakous-image` leaf purity, neutral-crate
+isolation, SQLite commit-trace boundaries, Claude OAuth constant-time state
+comparison, host/bin security and facade-only boundaries, package-local
+includes, workspace excludes, fixture loop/sleep bounds, tracked-file hygiene,
+portable `wasm32` closures, and `atomic-polyfill` exclusion on supported
+targets. Receipt-file caching (`workspace-check-cache.json`,
+`workspace-policy-receipts.json`), `Cargo.toml` placement debt ceilings
+(`cfg.*` / `modules.*.may-use-ceiling`), double-entry `production-dependencies`
+/ `facade-features` manifest pins, and per-file facade-symbol / macro-call
+allowlist tables are retired.
 
 Two details make that check sound. Host-side adapters are not interpreters,
 so the check matches the engine's v0-mangled crate names and C entry points
@@ -1265,7 +1190,7 @@ complete example, including utility dependencies. No registry publication or
 independent binary distribution is established by these examples.
 
 Three profiles beyond the Cargo defaults exist. `release` uses
-`codegen-units = 1`, speed-focused `opt-level = 3`, fat LTO, and
+`codegen-units = 16`, speed-focused `opt-level = 3`, thin LTO (`lto = "thin"`), and
 `strip = "symbols"`. Panic unwinding remains enabled: stripping retains unwind
 tables and panic messages (including source locations), but release backtraces
 lose symbol names and source-line resolution. Use the maintainer or profiling
@@ -1302,10 +1227,11 @@ all symbols stripped. The tarball includes all three executables and licenses.
 | Tarball packing | 12s | 10s |
 | Complete build and packing | 824s | 938s |
 
-Fat LTO removes 5,955,200 bytes from stripped plakd for 13.8% more total
-release-workflow wall time. These are sequential shared-host measurements with
-warm dependency caches, not a clean-build benchmark. The maintainer profile
-continues to override LTO off, so this tradeoff does not change its codegen.
+Thin LTO with `codegen-units = 16` is the active release profile: it keeps
+release link times low while staying within 2.5 ms of fat LTO on warm launch
+latency. These are sequential shared-host measurements with warm dependency
+caches, not a clean-build benchmark. The maintainer profile continues to
+override LTO off, so this tradeoff does not change its codegen.
 
 Warm process-launch medians (11 samples) are 52.47ms for the original
 symbol-bearing default build, 42.31ms after stripping that same executable,
@@ -1505,13 +1431,16 @@ matching `PLAK_VERSION` in the README and getting-started guide. A
 prerelease does not point users at a different installer tag.
 
 `.github/workflows/release.yml` is the repository's only workflow. A pushed
-`v*` tag runs `package-release.sh --tag <tag>` on a GitHub macOS arm64 runner
+`v*` tag first runs a `check` job (`cargo fmt --all --check`, `ruff check`,
+`check_workspace.py`, `cargo deny`, workspace `clippy -D warnings`, and the
+offline `tests-parallel` lane) on Ubuntu x86_64, then runs
+`package-release.sh --tag <tag>` on a GitHub macOS arm64 runner
 and an Ubuntu x86_64 runner with `musl-tools`, attests each tarball and schema with
 `actions/attest-build-provenance`, and creates the GitHub Release with both
 tarballs, their target-specific JSON Schemas and combined `SHA256SUMS`, marked as a prerelease for a
 `-rc.<n>` tag so `releases/latest` never resolves to a candidate. A manual run
 of the workflow on a branch (`gh workflow run release.yml --ref main`) is the
-pre-tag dry run: the same two builds, `package-release.sh --untagged` and the
+pre-tag dry run: the same `check` job, two builds, `package-release.sh --untagged` and the
 attestations, with the tarballs and schemas kept as workflow artifacts and no release
 created. Cut a release by tagging a commit whose dry run passed. Every action
 is pinned to a full commit SHA.
@@ -1876,16 +1805,15 @@ micro-monty at `=0.0.3`.
 
 Some controls cannot live in the worktree. Authorized signed commits go directly
 to `main`, and local verification is the authoritative gate. **The repository
-uses local gates and has no CI except the release workflow** (§6.6), which
-builds and attests a pushed tag and creates its GitHub Release. A manual run
-is the pre-tag dry run and releases nothing. The workflow checks nothing else.
+uses local gates and has no CI except the release workflow** (§6.6), which runs
+its pre-packaging `check` job, builds and attests a pushed tag, and creates its
+GitHub Release. A manual run is the pre-tag dry run and releases nothing.
 Worker branches use `just fast <packages>` plus the groups their change needs.
 A change to an install-family test or code it exercises, including crash-sweep
 shapes, requires `just steps tests-install` before handoff.
-The integrator merges each reviewed branch with current main and tightens
-ceilings (§4) before the integration batch gate. Push exactly the tree that
-passed that gate as main's new tip. If main moves first, re-merge, tighten
-again and re-gate. The Linux and Mac runs are concurrent:
+The integrator merges each reviewed branch with current main before the
+integration batch gate. Push exactly the tree that passed that gate as main's
+new tip. If main moves first, re-merge and re-gate. The Linux and Mac runs are concurrent:
 
 - Linux x86_64 musl runs workspace and standalone lint, the test build, and
   the rdeps-scoped parallel, core serial and core durability lanes
@@ -1908,7 +1836,7 @@ packages, warnings denied), and the portable crates are checked for
 
 Commits inside a branch are not gated individually.
 `CHANGELOG.md` is written only at the cut, from landed commits.
-At a cut the integrator tightens ceilings (§4). The cut deploys the
+The cut deploys the
 resulting main tip, not a separately integrated branch. Main can carry an
 install-profile failure that the install tier catches before production.
 A production install requires the batch gate **and** the install tier on the

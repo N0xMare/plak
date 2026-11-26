@@ -13,9 +13,13 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tomllib
 from collections import deque
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -24,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import vcs_listing  # noqa: E402
 from plakous_policy import (  # noqa: E402
+    ABOVE_FACADE_LAYERS,
     PACKAGE_CLASSES,
     Package,
     Workspace,
@@ -36,8 +41,149 @@ from plakous_policy import (  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_LICENSE = "MIT"
+WORKSPACE_REPOSITORY = "https://github.com/N0xMare/plak"
 VENDOR_PACKAGE = "plakous-codex-code-mode-protocol"
 IMAGE_LEAF = "plakous-image"
+PORTABLE_TARGET = "wasm32-unknown-unknown"
+EXPECTED_FACADE_FEATURES = frozenset(
+    {
+        "anthropic",
+        "auth",
+        "composition",
+        "composition-python",
+        "default",
+        "full",
+        "gateway",
+        "mcp",
+        "codex",
+        "grok",
+        "claude",
+        "openai",
+        "openrouter",
+        "sessions-sqlite",
+        "store",
+        "test-support",
+        "web-fetch",
+        "xai",
+    }
+)
+SUPPORTED_COMPILE_FIXTURE_FILES: dict[str, frozenset[str]] = {
+    "agent-consumer": frozenset(
+        {
+            ".cargo/config.toml",
+            "Cargo.lock",
+            "Cargo.toml",
+            "src/control.rs",
+            "src/main.rs",
+            "src/observation.rs",
+            "src/profiles.rs",
+        }
+    ),
+    "facade-consumer": frozenset(
+        {
+            ".cargo/config.toml",
+            "Cargo.lock",
+            "Cargo.toml",
+            "src/configuration.rs",
+            "src/control_observation.rs",
+            "src/custom_model.rs",
+            "src/custom_tool.rs",
+            "src/inventory.rs",
+            "src/lifecycle.rs",
+            "src/lifecycle_configuration.rs",
+            "src/local_composition.rs",
+            "src/main.rs",
+            "src/prompts.rs",
+            "src/providers.rs",
+            "src/sessions.rs",
+        }
+    ),
+    "js-embedder-consumer": frozenset(
+        {".cargo/config.toml", "Cargo.lock", "Cargo.toml", "src/main.rs"}
+    ),
+    "model-consumer": frozenset({".cargo/config.toml", "Cargo.lock", "Cargo.toml", "src/main.rs"}),
+    "tools-consumer": frozenset({".cargo/config.toml", "Cargo.lock", "Cargo.toml", "src/main.rs"}),
+}
+SUPPORTED_COMPILE_FIXTURES: dict[str, dict[str, Any]] = {
+    "agent-consumer": {
+        "description": (
+            "Compile fixture: an out-of-workspace consumer of the `plakous-agent` core crate."
+        ),
+        "dependencies": ("plakous-agent",),
+        "facade-features": (),
+        "extra-dependencies": {},
+    },
+    "facade-consumer": {
+        "description": (
+            "Compile fixture: an out-of-workspace consumer of the `plakous` facade with its "
+            "provider features."
+        ),
+        "dependencies": ("plakous",),
+        "facade-features": (
+            "anthropic",
+            "auth",
+            "composition-python",
+            "codex",
+            "grok",
+            "claude",
+            "openai",
+            "openrouter",
+            "sessions-sqlite",
+            "web-fetch",
+            "xai",
+        ),
+        "extra-dependencies": {
+            "futures-util": "0.3.31",
+            "rusqlite": {
+                "version": "=0.41.0",
+                "default-features": False,
+                "features": ["bundled"],
+            },
+            "serde_json": "1.0",
+            "tempfile": "3.23",
+            "tokio": {
+                "version": "1.48",
+                "features": ["rt-multi-thread", "macros", "sync", "time"],
+            },
+            "uuid": "1",
+        },
+    },
+    "js-embedder-consumer": {
+        "description": (
+            "Compile fixture: an out-of-workspace consumer embedding the JavaScript evaluator "
+            "through the `composition` feature."
+        ),
+        "dependencies": ("plakous",),
+        "facade-features": ("composition", "sessions-sqlite"),
+        "extra-dependencies": {
+            "tempfile": "3.23",
+            "tokio": {
+                "version": "1.48",
+                "features": ["rt-multi-thread", "macros", "sync", "time"],
+            },
+        },
+    },
+    "model-consumer": {
+        "description": (
+            "Compile fixture: an out-of-workspace consumer of the `plakous-model` core crate."
+        ),
+        "dependencies": ("plakous-model",),
+        "facade-features": (),
+        "extra-dependencies": {},
+    },
+    "tools-consumer": {
+        "description": (
+            "Compile fixture: an out-of-workspace consumer of the `plakous-model` and "
+            "`plakous-tools` core crates."
+        ),
+        "dependencies": ("plakous-model", "plakous-tools"),
+        "facade-features": (),
+        "extra-dependencies": {},
+    },
+}
+SUPPORTED_COMPILE_FIXTURE_PATHS = frozenset(
+    f"tests/fixtures/{fixture_name}" for fixture_name in SUPPORTED_COMPILE_FIXTURES
+)
 
 PORTABLE_CRATES = (
     "plakous-model",
@@ -48,6 +194,142 @@ PORTABLE_CRATES = (
     "plakous-agent",
 )
 PORTABLE_DEFAULT_LIBRARIES = ("plakous-store",)
+BANNED_TOKIO_FEATURES = frozenset({"fs", "net", "process", "rt-multi-thread", "signal"})
+BANNED_NATIVE_CRATES = frozenset(
+    {
+        "errno",
+        "filedescriptor",
+        "hyper",
+        "hyper-util",
+        "libc",
+        "linux-raw-sys",
+        "mio",
+        "nix",
+        "notify",
+        "portable-pty",
+        "redox_syscall",
+        "reqwest",
+        "rusqlite",
+        "rustix",
+        "serial2",
+        "socket2",
+    }
+)
+_TREE_LINE = re.compile(
+    r"^(?P<depth>\d+)(?P<body>.+?) feats=\[(?P<features>[^\]]*)\](?P<duplicate> \(\*\))?$"
+)
+_PACKAGE_BODY = re.compile(
+    r"^(?P<name>\S+) v(?P<version>\S+)(?P<proc_macro> \(proc-macro\))?(?: \(.+\))?$"
+)
+
+SourceKey = tuple[str, str]
+FORBIDDEN_CLI_SYMBOLS = frozenset(
+    {"CodexAuthBroker", "CodexLoginStore", "LoginCommand", "OpenCodeXaiLoginStore"}
+)
+FORBIDDEN_CLI_STRINGS = frozenset({"--api-key", "--base-url", "--endpoint", "--origin", "--token"})
+FORBIDDEN_CLI_FOREIGN_FUNCTIONS = frozenset(
+    {
+        "__secure_getenv",
+        "execl",
+        "execle",
+        "execlp",
+        "execv",
+        "execve",
+        "execvp",
+        "execvpe",
+        "getenv",
+        "popen",
+        "posix_spawn",
+        "posix_spawnp",
+        "secure_getenv",
+        "system",
+    }
+)
+FORBIDDEN_PRODUCT_SESSION_AUTHORITY_IDENTIFIERS = frozenset(
+    {
+        "CompactStats",
+        "CompactionThresholds",
+        "compaction_summary",
+        "context_window_for_model",
+        "estimate_tokens",
+        "estimate_transcript_tokens",
+        "fork_session",
+        "hot_swap_model",
+        "keep_from_index",
+        "local_structure_summary",
+        "maybe_compact_session",
+        "model_facing_lines",
+        "product_compaction",
+    }
+)
+FORBIDDEN_PLAKD_TERMINAL_DEPS = ("ratatui", "crossterm", "pulldown-cmark", "syntect", "arboard")
+COMPILE_TIME_ENVIRONMENT_SITES: set[SourceKey] = {
+    ("plakd", "src/build_identity.rs"),
+    ("plakd", "src/commands/exchange_capture.rs"),
+}
+WORKING_DIRECTORY_SITES: set[SourceKey] = {
+    ("plakd", "src/build_identity.rs"),
+    ("plakd", "src/shell/home.rs"),
+    ("plakous-workspace", "src/git_redirect_fence.rs"),
+}
+ENVIRONMENT_READER_SITES: set[SourceKey] = {
+    ("plakd", "src/build_identity/interactive.rs"),
+    ("plakd", "src/commands/doctor.rs"),
+    ("plakd", "src/commands/exchange_capture.rs"),
+    ("plakd", "src/commands/run/face.rs"),
+    ("plakd", "src/commands/support.rs"),
+    ("plakd", "src/diagnostics.rs"),
+    ("plakd", "src/environment.rs"),
+    ("plakd", "src/home/paths.rs"),
+    ("plakd", "src/home/secrets.rs"),
+    ("plakd", "src/oauth_ui.rs"),
+    ("plakd", "src/presentation.rs"),
+    ("plakd", "src/sidecars/js_host.rs"),
+    ("plakd", "src/sidecars/python_bundle.rs"),
+    ("plakd", "src/test_hooks.rs"),
+    ("plakd", "src/test_support.rs"),
+    ("plakous-hosted", "src/runtime/oneshot/test_support_run_deadline.rs"),
+    ("plakous-hosted", "src/test_support_runner.rs"),
+    ("plakous-workspace", "src/git_redirect_fence.rs"),
+    ("plakous-workspace", "src/occupancy_vcs/git.rs"),
+    ("plakous-workspace", "src/occupancy_vcs/mint.rs"),
+    ("plakous-workspace", "src/vcs_fixtures.rs"),
+}
+LAUNCH_DIRECTORY_SITES: dict[str, SourceKey] = {
+    "launch_directory": ("plakd", "src/lib.rs"),
+    "Services::from_env": ("plakd", "src/lib.rs"),
+    "Home::from_env": ("plakd", "src/shell/services.rs"),
+}
+LAUNCH_DIRECTORY_NAMES = frozenset({"Services", "Home", "launch_directory"})
+PROCESS_SITES: set[SourceKey] = {
+    ("plakd", "src/carry/installed.rs"),
+    ("plakd", "src/carry/upgrade/process.rs"),
+    ("plakd", "src/commands/host_install.rs"),
+    ("plakd", "src/commands/login_host.rs"),
+    ("plakd", "src/commands/runner.rs"),
+    ("plakd", "src/commands/runner/dial.rs"),
+    ("plakd", "src/commands/runner/dial/children.rs"),
+    ("plakd", "src/commands/runner/local/start.rs"),
+    ("plakd", "src/commands/support.rs"),
+    ("plakd", "src/host/reexec.rs"),
+    ("plakd", "src/host/starter.rs"),
+    ("plakd", "src/oauth_ui.rs"),
+    ("plakd", "src/operator_process.rs"),
+    ("plakd", "src/product_doctor/jj_cli.rs"),
+    ("plakd", "src/product_doctor/runner_ssh.rs"),
+    ("plakd", "src/terminal_application.rs"),
+    ("plakous-workspace", "src/occupancy_vcs/git.rs"),
+    ("plakous-workspace", "src/occupancy_vcs/mint.rs"),
+    ("plakous-workspace", "src/vcs_fixtures.rs"),
+}
+NON_LAUNCH_PROCESS_SITES: set[SourceKey] = {
+    ("plakd", "src/lib.rs"),
+    ("plakd", "src/main.rs"),
+    ("plakd", "src/snapshot_install/archive.rs"),
+}
+INCLUDED_FILE = re.compile(
+    r'include_(?:str|bytes)!\s*\(\s*(?:concat!\s*\(\s*env!\s*\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*,\s*)?"([^"]+)"'
+)
 
 PRODUCT_EXECUTABLES = ("plakd", "plakous-js-host", "plakous-py-host")
 RQUICKJS_ENGINE_SYMBOL_MARKERS = (
@@ -153,6 +435,19 @@ _FAST_TOKEN = re.compile(
     """,
     re.VERBOSE | re.DOTALL,
 )
+_SIMPLE_TOKEN = re.compile(
+    r"""
+    \s+
+    | //[^\n]*
+    | b?'(?:\\.|[^'\\])'
+    | (?P<str>(?:[bc])?\"(?:\\.|[^\"\\])*\")
+    | (?P<ident>(?:r\#)?[A-Za-z_][A-Za-z0-9_]*)
+    | (?P<colon2>::)
+    | (?P<punct>[^\sA-Za-z_"/]|/(?!/))
+    """,
+    re.VERBOSE | re.DOTALL,
+)
+_RAW_STRING_HINT = re.compile(r'[bc]?r#*"')
 
 
 def cfg_implies_test(predicate: str) -> bool:
@@ -201,7 +496,7 @@ def _block_end(masked: str, opening: int) -> int:
 
 def production_rust_source(source: str) -> str:
     """Blank `#[cfg(test)]` items without truncating later production items."""
-    if "cfg" not in source or "test" not in source:
+    if "cfg" not in source or "test" not in source or not CFG_ATTRIBUTE.search(source):
         return source
     masked = blank_rust_non_code(source)
     spans: list[tuple[int, int]] = []
@@ -278,7 +573,27 @@ def _decode_rust_string(value: str) -> str:
 
 def all_rust_tokens(source: str) -> list[RustToken]:
     """Fast regex-backed Rust tokenizer (comments absent, test items included)."""
-    tokens: list[RustToken] = []
+    if "/*" not in source and _RAW_STRING_HINT.search(source) is None:
+        tokens: list[RustToken] = []
+        append = tokens.append
+        for match in _SIMPLE_TOKEN.finditer(source):
+            kind = match.lastgroup
+            if kind is None:
+                continue
+            if kind == "ident":
+                val = match.group(0)
+                append(RustToken("identifier", val[2:] if val.startswith("r#") else val))
+            elif kind == "str":
+                raw = match.group(0)
+                quote = raw.index('"')
+                append(RustToken("string", _decode_rust_string(raw[quote + 1 : -1])))
+            elif kind == "colon2":
+                append(RustToken("punct", "::"))
+            else:
+                append(RustToken("punct", match.group(0)))
+        return tokens
+
+    tokens = []
     pos = 0
     length = len(source)
     while pos < length:
@@ -554,23 +869,864 @@ def validate_image_leaf(workspace: Workspace) -> list[str]:
     image = workspace.packages.get(IMAGE_LEAF)
     tools = workspace.packages.get("plakous-tools")
     if image is None or tools is None:
-        return []
+        return [f"{IMAGE_LEAF} and plakous-tools must both be workspace members"]
     errors = [
-        f"{IMAGE_LEAF}: depends on workspace package {dep['name']!r}"
+        f"{IMAGE_LEAF}: depends on workspace package {dep['name']!r}; "
+        "the image leaf names no workspace package"
         for dep in image.metadata.get("dependencies", [])
         if dep["name"] in workspace.packages
     ]
     edges = [dep for dep in tools.metadata.get("dependencies", []) if dep["name"] == IMAGE_LEAF]
+    if len(edges) != 1:
+        errors.append(f"plakous-tools: expected exactly one {IMAGE_LEAF} dependency")
     for dep in edges:
         if (
             dep.get("kind") is not None
+            or dep.get("target") is not None
             or dep.get("optional")
             or dep.get("uses_default_features")
             or dep.get("features")
         ):
             errors.append(
-                f"plakous-tools: {IMAGE_LEAF} must be default-features = false with no features"
+                f"plakous-tools: {IMAGE_LEAF} must be a plain normal dependency with "
+                "default-features = false and no features"
             )
+    features = tools.manifest.get("features", {})
+    for feature, members in sorted(features.items() if isinstance(features, dict) else []):
+        for member in members if isinstance(members, list) else []:
+            target = str(member).split("/", 1)[0].removeprefix("dep:").rstrip("?")
+            if target == IMAGE_LEAF:
+                errors.append(
+                    f"plakous-tools: feature {feature!r} enables {member!r}; the tool "
+                    f"contracts take {IMAGE_LEAF} without features"
+                )
+    return errors
+
+
+def fixture_name_for(package: Package) -> str:
+    return "facade-consumer" if package.layer == "facade" else f"{package.short}-consumer"
+
+
+def supported_compile_fixtures(workspace: Workspace) -> dict[str, dict[str, Any]]:
+    contracts: dict[str, dict[str, Any]] = {}
+    for fixture_name, contract in SUPPORTED_COMPILE_FIXTURES.items():
+        fixture_root = f"tests/fixtures/{fixture_name}"
+        manifest: dict[str, Any] = {
+            "package": {
+                "name": f"plakous-{fixture_name}",
+                "version": "0.0.0",
+                "edition": "2024",
+                "rust-version": "1.100.0",
+                "description": contract["description"],
+                "license": WORKSPACE_LICENSE,
+                "repository": WORKSPACE_REPOSITORY,
+                "readme": "../../../README.md",
+                "publish": False,
+                "metadata": {"plakous": {"layer": "test", "class": "repository-only"}},
+            },
+            "dependencies": {},
+            "workspace": {},
+        }
+        for dependency in contract["dependencies"]:
+            package = workspace.packages[dependency]
+            entry: dict[str, Any] = {
+                "version": workspace.root_manifest["workspace"]["package"]["version"],
+                "path": os.path.relpath(package.directory, fixture_root),
+            }
+            if package.layer == "facade":
+                entry["features"] = list(contract["facade-features"])
+            manifest["dependencies"][dependency] = entry
+        manifest["dependencies"].update(contract["extra-dependencies"])
+        contracts[fixture_name] = {
+            "manifest": manifest,
+            "files": SUPPORTED_COMPILE_FIXTURE_FILES[fixture_name],
+        }
+    return contracts
+
+
+def non_target_file_inventory(root: Path) -> tuple[set[str], tuple[str, ...]]:
+    files: set[str] = set()
+    errors: list[str] = []
+    root_mode = root.lstat().st_mode
+    if stat.S_ISLNK(root_mode) or not stat.S_ISDIR(root_mode):
+        errors.append("fixture root must be a regular directory, not a symlink")
+        return files, tuple(errors)
+    for directory, directories, names in os.walk(root):
+        directory_path = Path(directory)
+        traversable_directories: list[str] = []
+        for name in directories:
+            path = directory_path / name
+            relative = path.relative_to(root).as_posix()
+            mode = path.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                errors.append(f"symlink directory is forbidden: {relative}")
+            elif not stat.S_ISDIR(mode):
+                errors.append(f"non-directory traversal entry is forbidden: {relative}")
+            elif name != "target":
+                traversable_directories.append(name)
+        directories[:] = traversable_directories
+        for name in names:
+            path = directory_path / name
+            relative = path.relative_to(root).as_posix()
+            mode = path.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                errors.append(f"symlink file is forbidden: {relative}")
+            elif not stat.S_ISREG(mode):
+                errors.append(f"non-regular file is forbidden: {relative}")
+            else:
+                files.add(relative)
+    return files, tuple(errors)
+
+
+def validate_supported_compile_fixture(
+    fixture_name: str,
+    manifest: dict[str, Any],
+    files: set[str],
+    expected_contract: dict[str, Any],
+    inventory_errors: tuple[str, ...] = (),
+) -> list[str]:
+    errors = [f"{fixture_name}: {error}" for error in inventory_errors]
+    if manifest != expected_contract["manifest"]:
+        errors.append(
+            f"{fixture_name}: normalized manifest differs from the supported fixture contract"
+        )
+    if files != expected_contract["files"]:
+        errors.append(
+            f"{fixture_name}: non-target files {sorted(files)!r}, "
+            f"expected {sorted(expected_contract['files'])!r}"
+        )
+    return errors
+
+
+def validate_workspace_excludes(
+    root_workspace: dict[str, Any],
+    supported_fixture_paths: Iterable[str] = SUPPORTED_COMPILE_FIXTURE_PATHS,
+) -> list[str]:
+    """Keep operator state outside Cargo without hiding unreviewed packages."""
+    excludes = set(root_workspace.get("exclude", []))
+    allowed = set(supported_fixture_paths) | {".plak"}
+    errors: list[str] = []
+    if ".plak" not in excludes:
+        errors.append("workspace must exclude .plak operator state and fork worktrees")
+    unknown_excludes = excludes - allowed
+    if unknown_excludes:
+        errors.append(
+            f"workspace excludes unsupported nested packages: {sorted(unknown_excludes)!r}"
+        )
+    return errors
+
+
+def validate_package_local_includes(package_name: str, sources: dict[str, str]) -> list[str]:
+    """Every `include_str!`/`include_bytes!` stays inside its own package."""
+    errors: list[str] = []
+    for relative, text in sorted(sources.items()):
+        if "include_str!" not in text and "include_bytes!" not in text:
+            continue
+        for match in INCLUDED_FILE.finditer(text):
+            literal = match.group(1)
+            if "CARGO_MANIFEST_DIR" in match.group(0):
+                target = os.path.normpath(literal.lstrip("/"))
+            else:
+                target = os.path.normpath(os.path.join(os.path.dirname(relative), literal))
+            if target == ".." or target.startswith("../") or os.path.isabs(target):
+                line = text.count("\n", 0, match.start()) + 1
+                errors.append(
+                    f"{package_name}: {relative}:{line} includes {literal!r}, "
+                    "outside the package root"
+                )
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Security, facade-boundary, and host/bin authority validators
+# ---------------------------------------------------------------------------
+
+
+def _token_group_end(tokens: list[RustToken], opening: int) -> int:
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    stack = [pairs[tokens[opening].value]]
+    cursor = opening + 1
+    while cursor < len(tokens) and stack:
+        value = tokens[cursor].value
+        if value in pairs:
+            stack.append(pairs[value])
+        elif value == stack[-1]:
+            stack.pop()
+        cursor += 1
+    return cursor
+
+
+def _identifier_values(tokens: list[RustToken]) -> list[str]:
+    return [token.value for token in tokens if token.kind == "identifier"]
+
+
+def _concat_values(tokens: list[RustToken]) -> set[str]:
+    def parse(index: int) -> tuple[str, int] | None:
+        if (
+            index + 2 >= len(tokens)
+            or tokens[index] != RustToken("identifier", "concat")
+            or tokens[index + 1].value != "!"
+            or tokens[index + 2].value not in {"(", "[", "{"}
+        ):
+            return None
+        closing = {"(": ")", "[": "]", "{": "}"}[tokens[index + 2].value]
+        cursor = index + 3
+        parts: list[str] = []
+        expect_value = True
+        while cursor < len(tokens):
+            if tokens[cursor].value == closing:
+                return ("".join(parts), cursor + 1) if not expect_value or not parts else None
+            if not expect_value:
+                if tokens[cursor].value != ",":
+                    return None
+                cursor += 1
+                expect_value = True
+                continue
+            if tokens[cursor].kind == "string":
+                parts.append(tokens[cursor].value)
+                cursor += 1
+            else:
+                nested = parse(cursor)
+                if nested is None:
+                    return None
+                value, cursor = nested
+                parts.append(value)
+            expect_value = False
+        return None
+
+    values: set[str] = set()
+    for index, token in enumerate(tokens):
+        if token == RustToken("identifier", "concat"):
+            parsed = parse(index)
+            if parsed is not None:
+                values.add(parsed[0])
+    return values
+
+
+def _significant_strings(tokens: list[RustToken]) -> set[str]:
+    values = {token.value for token in tokens if token.kind == "string"} | _concat_values(tokens)
+    for start, token in enumerate(tokens):
+        if token.value != "[":
+            continue
+        cursor = start + 1
+        parts: list[str] = []
+        expect_value = True
+        while cursor < len(tokens) and tokens[cursor].value != "]":
+            if expect_value and tokens[cursor].kind == "string":
+                parts.append(tokens[cursor].value)
+                expect_value = False
+            elif not expect_value and tokens[cursor].value == ",":
+                expect_value = True
+            else:
+                parts = []
+                break
+            cursor += 1
+        if (
+            parts
+            and cursor + 4 < len(tokens)
+            and tokens[cursor].value == "]"
+            and tokens[cursor + 1].value == "."
+            and tokens[cursor + 2] == RustToken("identifier", "concat")
+            and tokens[cursor + 3].value == "("
+            and tokens[cursor + 4].value == ")"
+        ):
+            values.add("".join(parts))
+    return values
+
+
+def _use_statement_spans(tokens: list[RustToken]) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(tokens):
+        if tokens[index] != RustToken("identifier", "use"):
+            index += 1
+            continue
+        end = index + 1
+        depths = {"(": 0, "[": 0, "{": 0}
+        while end < len(tokens):
+            value = tokens[end].value
+            if value in depths:
+                depths[value] += 1
+            elif value in {")", "]", "}"}:
+                opening = {")": "(", "]": "[", "}": "{"}[value]
+                depths[opening] = max(0, depths[opening] - 1)
+            elif value == ";" and not any(depths.values()):
+                break
+            end += 1
+        spans.append((index + 1, end))
+        index = end + 1
+    return spans
+
+
+def _use_statements(tokens: list[RustToken]) -> list[list[RustToken]]:
+    return [tokens[start:end] for start, end in _use_statement_spans(tokens)]
+
+
+def _split_top_level(tokens: list[RustToken]) -> list[list[RustToken]]:
+    groups: list[list[RustToken]] = []
+    current: list[RustToken] = []
+    depth = 0
+    for token in tokens:
+        if token.value == "{":
+            depth += 1
+        elif token.value == "}":
+            depth = max(0, depth - 1)
+        if token.value == "," and depth == 0:
+            if current:
+                groups.append(current)
+            current = []
+            continue
+        current.append(token)
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _use_tree_paths(statement: list[RustToken]) -> list[list[str]]:
+    def expand(tokens: list[RustToken], prefix: list[str]) -> list[list[str]]:
+        segments = list(prefix)
+        for index, token in enumerate(tokens):
+            if token.value == "{":
+                depth = 1
+                end = index + 1
+                while end < len(tokens) and depth:
+                    if tokens[end].value == "{":
+                        depth += 1
+                    elif tokens[end].value == "}":
+                        depth -= 1
+                    end += 1
+                paths: list[list[str]] = []
+                for group in _split_top_level(tokens[index + 1 : end - 1]):
+                    paths.extend(expand(group, segments))
+                return paths
+            if token.value == "*":
+                segments.append("*")
+                break
+            if token.kind == "identifier":
+                if token.value == "as":
+                    break
+                segments.append(token.value)
+        return [segments] if segments else []
+
+    return expand(statement, [])
+
+
+def _foreign_function_names(tokens: list[RustToken]) -> set[str]:
+    names: set[str] = set()
+    for index, token in enumerate(tokens):
+        if token != RustToken("identifier", "extern"):
+            continue
+        cursor = index + 1
+        if cursor < len(tokens) and tokens[cursor].kind == "string":
+            cursor += 1
+        if cursor >= len(tokens) or tokens[cursor].value != "{":
+            continue
+        depth = 1
+        cursor += 1
+        while cursor < len(tokens) and depth:
+            if tokens[cursor].value == "{":
+                depth += 1
+            elif tokens[cursor].value == "}":
+                depth -= 1
+            elif (
+                depth == 1
+                and tokens[cursor] == RustToken("identifier", "fn")
+                and cursor + 1 < len(tokens)
+                and tokens[cursor + 1].kind == "identifier"
+            ):
+                names.add(tokens[cursor + 1].value)
+            elif (
+                depth == 1
+                and tokens[cursor] == RustToken("identifier", "link_name")
+                and cursor + 2 < len(tokens)
+                and tokens[cursor + 1].value == "="
+                and tokens[cursor + 2].kind == "string"
+            ):
+                names.add(tokens[cursor + 2].value)
+            cursor += 1
+    return names
+
+
+def _environment_path_names(tokens: list[RustToken]) -> set[str]:
+    return {
+        tokens[index].value
+        for index in range(2, len(tokens))
+        if tokens[index].kind == "identifier"
+        and tokens[index].value in {"var", "var_os", "vars", "vars_os"}
+        and tokens[index - 1].value == "::"
+        and tokens[index - 2] == RustToken("identifier", "env")
+    }
+
+
+def _component_crate_paths(tokens: list[RustToken]) -> set[str]:
+    """Return every `plakous_<x>` crate named as a path root, `use` root, or extern crate."""
+    crates: set[str] = set()
+
+    def is_component(token: RustToken) -> bool:
+        return token.kind == "identifier" and token.value.startswith("plakous_")
+
+    for index, token in enumerate(tokens):
+        if not is_component(token):
+            continue
+        preceded_by_path = index > 0 and tokens[index - 1].value == "::"
+        followed_by_path = index + 1 < len(tokens) and tokens[index + 1].value == "::"
+        extern_crate = (
+            index >= 2
+            and tokens[index - 2] == RustToken("identifier", "extern")
+            and tokens[index - 1] == RustToken("identifier", "crate")
+        )
+        if (followed_by_path and not preceded_by_path) or extern_crate:
+            crates.add(token.value.replace("_", "-"))
+    for statement in _use_statements(tokens):
+        for index, token in enumerate(statement):
+            if not is_component(token):
+                continue
+            if (
+                index == 0
+                or statement[index - 1].value in {"{", ","}
+                and (index < 2 or statement[index - 2].value != "::")
+            ):
+                crates.add(token.value.replace("_", "-"))
+    return crates
+
+
+def validate_claude_oauth_state_comparison(source: str) -> list[str]:
+    """Pin the production callback rejection to subtle's constant-time comparison."""
+    tokens = rust_tokens(source)
+    try:
+        function = next(
+            index
+            for index, token in enumerate(tokens[:-1])
+            if token.value == "fn"
+            and tokens[index + 1].value == "parse_claude_oauth_authorization_input"
+        )
+        opening = next(
+            index for index in range(function, len(tokens)) if tokens[index].value == "{"
+        )
+        body = tokens[opening : _token_group_end(tokens, opening)]
+    except StopIteration:
+        body = []
+    rejection = rust_tokens("""
+        if let Some(state) = state
+            && !bool::from(state.as_bytes().ct_eq(expected_state.as_bytes()))
+        { return None; }
+    """)
+    if any(body[index : index + len(rejection)] == rejection for index in range(len(body))):
+        return []
+    return [
+        "plakous-anthropic:src/oauth.rs: callback state must reject through the pinned constant-time ct_eq comparison"
+    ]
+
+
+def validate_product_session_authority_sources(
+    package: str,
+    sources: dict[str, str],
+    tokens_by_file: dict[str, list[RustToken]] | None = None,
+) -> list[str]:
+    """Forbid known Plak-owned canonical context, compaction, and fork seams."""
+    errors: list[str] = []
+    for path, source in sorted(sources.items()):
+        tokens = tokens_by_file[path] if tokens_by_file is not None else rust_tokens(source)
+        forbidden = sorted(
+            set(_identifier_values(tokens)) & FORBIDDEN_PRODUCT_SESSION_AUTHORITY_IDENTIFIERS
+        )
+        if forbidden:
+            errors.append(
+                f"{package}:{path}: Plak contains competing session authority identifiers: {forbidden!r}"
+            )
+    return errors
+
+
+def validate_product_update_hook_sources(
+    sources: dict[str, str],
+    tokens_by_file: dict[str, list[RustToken]] | None = None,
+) -> list[str]:
+    """Allow only the submission invalidator and its exclusive trace alternative."""
+    update_hooks: list[str] = []
+    trace_hooks: list[str] = []
+    update = RustToken("identifier", "update_hook")
+    trace = rust_tokens("commit_trace::install")
+    for path, source in sorted(sources.items()):
+        if "update_hook" not in source and "commit_trace" not in source:
+            continue
+        tokens = tokens_by_file[path] if tokens_by_file is not None else rust_tokens(source)
+        update_hooks.extend(path for token in tokens if token == update)
+        trace_hooks.extend(
+            path for index in range(len(tokens)) if tokens[index : index + len(trace)] == trace
+        )
+    errors: list[str] = []
+    if update_hooks != ["src/store/views/submissions.rs"]:
+        errors.append(
+            f"plakd: one update hook belongs to the submission index, found {update_hooks!r}"
+        )
+    if trace_hooks != ["src/store/mod.rs"]:
+        errors.append(
+            f"plakd: only the product store opener may install the trace, found {trace_hooks!r}"
+        )
+    return errors
+
+
+def validate_product_home_discovery(package: str, sources: dict[str, str]) -> list[str]:
+    """No host library may discover the product home for its caller."""
+    if package == "plakd":
+        return []
+    errors: list[str] = []
+    for path, source in sorted(sources.items()):
+        if "PlakPaths::from_env" in source:
+            errors.append(
+                f"{package}:{path}: PlakPaths::from_env is composition-root only; "
+                "the product home is a fact a caller states, not one a library discovers"
+            )
+    return errors
+
+
+def validate_facade_only_sources(
+    package_name: str,
+    sources: dict[str, str],
+    permitted: Iterable[str] = (),
+    tokens_by_file: dict[str, list[RustToken]] | None = None,
+) -> list[str]:
+    """Host/bin production sources never spell `plakous_<x>::`; the facade is the surface."""
+    errors: list[str] = []
+    permitted_crates = set(permitted)
+    for path, contents in sorted(sources.items()):
+        if "plakous_" not in contents:
+            continue
+        tokens = tokens_by_file[path] if tokens_by_file is not None else rust_tokens(contents)
+        crates = _component_crate_paths(tokens) - permitted_crates
+        if crates:
+            errors.append(
+                f"{package_name}:{path}: names Plakous component crates {sorted(crates)!r}; "
+                "host/bin sources reach L0 only through `plakous`"
+            )
+    return errors
+
+
+def validate_cli_security_sources(
+    package: str,
+    sources: dict[str, str],
+    tokens_by_file: dict[str, list[RustToken]] | None = None,
+) -> list[str]:
+    """Enforce one host/bin package's reviewed process, environment, and authority boundaries."""
+    errors: list[str] = []
+    if tokens_by_file is None:
+        tokens_by_file = {path: rust_tokens(source) for path, source in sources.items()}
+    all_tokens = [token for tokens in tokens_by_file.values() for token in tokens]
+    identifiers = set(_identifier_values(all_tokens))
+    strings = (
+        set().union(*(_significant_strings(tokens) for tokens in tokens_by_file.values()))
+        if tokens_by_file
+        else set()
+    )
+
+    for symbol in sorted(FORBIDDEN_CLI_SYMBOLS & identifiers):
+        errors.append(f"plakd CLI contains forbidden delegated-login symbol: {symbol}")
+    for value in sorted(FORBIDDEN_CLI_STRINGS & strings):
+        errors.append(f"plakd CLI contains forbidden delegated-login option: {value}")
+    for value in strings:
+        lowered = value.lower().replace("\\", "/")
+        if re.search(r"(?:^|/)\.(?:codex)(?:/|$)|(?:^|/)opencode(?:/|$)", lowered):
+            errors.append("plakd CLI contains forbidden delegated-login storage/owner locator")
+            break
+    if any(re.search(r"(?:^|/)proc/+self/+environ(?:$|/)", value.lower()) for value in strings):
+        errors.append("plakd CLI contains forbidden /proc/self/environ access")
+
+    for path, tokens in sorted(tokens_by_file.items()):
+        site = (package, path)
+        process_import = command_import = False
+        for statement in _use_statements(tokens):
+            names = _identifier_values(statement)
+            if "env" in names and (
+                names != ["std", "env"] or any(token.value in {"*", "as"} for token in statement)
+            ):
+                errors.append(
+                    f"{package}:{path}: plakd CLI must import std::env as a module, not ambient readers"
+                )
+            if "Command" in names and "plakous" in names:
+                errors.append(
+                    f"{package}:{path}: plakd CLI imports a forbidden Command process capability"
+                )
+            for tree_names in _use_tree_paths(statement):
+                if tree_names[:2] == ["std", "process"]:
+                    process_import = True
+                    command_import |= len(tree_names) == 2 or tree_names[2] in {
+                        "Command",
+                        "self",
+                        "*",
+                    }
+        if site not in PROCESS_SITES and (
+            command_import
+            or (process_import and site not in NON_LAUNCH_PROCESS_SITES)
+            or any(
+                [t.value for t in tokens[i : i + 7]]
+                == ["std", "::", "process", "::", "Command", "::", "new"]
+                for i, token in enumerate(tokens)
+                if token == RustToken("identifier", "std")
+            )
+        ):
+            errors.append(f"{package}:{path}: std::process is outside the reviewed process sites")
+
+        foreign = _foreign_function_names(tokens) & FORBIDDEN_CLI_FOREIGN_FUNCTIONS
+        if foreign:
+            errors.append(
+                f"{package}:{path}: plakd CLI declares forbidden foreign environment/process functions: "
+                f"{sorted(foreign)!r}"
+            )
+
+        environment_paths = _environment_path_names(tokens)
+        if environment_paths & {"vars", "vars_os"}:
+            errors.append(f"{package}:{path}: plakd CLI contains ambient environment iteration")
+        if environment_paths & {"var", "var_os"} and site not in ENVIRONMENT_READER_SITES:
+            errors.append(f"{package}:{path}: environment reader outside the reviewed sites")
+        if site not in COMPILE_TIME_ENVIRONMENT_SITES and any(
+            token.kind == "identifier"
+            and token.value in {"env", "option_env"}
+            and tokens[index + 1].value == "!"
+            for index, token in enumerate(tokens[:-1])
+        ):
+            errors.append(f"{package}:{path}: compile-time environment outside the reviewed sites")
+
+        working_directory = {
+            tokens[index].value
+            for index in range(len(tokens))
+            if tokens[index].kind == "identifier"
+            and tokens[index].value in {"current_dir", "set_current_dir"}
+            and (index == 0 or tokens[index - 1].value != ".")
+        }
+        if "set_current_dir" in working_directory:
+            errors.append(f"{package}:{path}: set_current_dir is forbidden")
+        if "current_dir" in working_directory and site not in WORKING_DIRECTORY_SITES:
+            errors.append(
+                f"{package}:{path}: working-directory reads outside the CLI edge; "
+                "below it a workspace is explicit"
+            )
+
+        launch_readers = {
+            "launch_directory"
+            if tokens[index].value == "launch_directory"
+            else f"{tokens[index - 2].value}::from_env"
+            for index in range(len(tokens))
+            if tokens[index].kind == "identifier"
+            and (
+                (
+                    tokens[index].value == "launch_directory"
+                    and (index == 0 or tokens[index - 1].value not in {"fn", "."})
+                    and (
+                        (index > 0 and tokens[index - 1].value == "::")
+                        or (index + 1 < len(tokens) and tokens[index + 1].value == "(")
+                    )
+                )
+                or (
+                    tokens[index].value == "from_env"
+                    and index >= 2
+                    and tokens[index - 1].value == "::"
+                    and tokens[index - 2].value in {"Home", "Services"}
+                )
+            )
+        }
+        renamed = sorted(
+            {
+                tokens[index].value
+                for index in range(len(tokens) - 1)
+                if tokens[index].kind == "identifier"
+                and tokens[index].value in LAUNCH_DIRECTORY_NAMES
+                and tokens[index + 1] == RustToken("identifier", "as")
+            }
+        )
+        if renamed:
+            errors.append(
+                f"{package}:{path}: {renamed!r} imported under another name; the "
+                "launch-directory readers keep their names so the composition-root pin sees them"
+            )
+        unexpected = sorted(name for name in launch_readers if LAUNCH_DIRECTORY_SITES[name] != site)
+        if unexpected:
+            errors.append(
+                f"{package}:{path}: launch-directory readers {unexpected!r} outside their "
+                "reviewed composition-root files"
+            )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Portable wasm32 closure fence
+# ---------------------------------------------------------------------------
+
+
+class _TreeNode(NamedTuple):
+    depth: int
+    name: str
+    version: str
+    features: tuple[str, ...]
+    duplicate: bool
+    proc_macro: bool = False
+
+
+def portable_tree_args(package: str, *, all_features: bool) -> list[str]:
+    args = [
+        "-p",
+        package,
+        "-e",
+        "normal",
+        "--target",
+        PORTABLE_TARGET,
+        "--locked",
+        "--prefix",
+        "depth",
+        "--format",
+        "{p} feats=[{f}]",
+    ]
+    if all_features:
+        args.append("--all-features")
+    return args
+
+
+def parse_feature_tree(output: str) -> tuple[list[_TreeNode], list[str]]:
+    nodes: list[_TreeNode] = []
+    errors: list[str] = []
+    for line_number, line in enumerate(output.splitlines(), 1):
+        if not line.strip():
+            continue
+        match = _TREE_LINE.match(line)
+        body = _PACKAGE_BODY.match(match.group("body")) if match else None
+        if match is None or body is None:
+            errors.append(f"unparsed cargo tree line {line_number}: {line}")
+            continue
+        features = tuple(part for part in match.group("features").split(",") if part)
+        nodes.append(
+            _TreeNode(
+                depth=int(match.group("depth")),
+                name=body.group("name"),
+                version=body.group("version"),
+                features=features,
+                duplicate=match.group("duplicate") is not None,
+                proc_macro=body.group("proc_macro") is not None,
+            )
+        )
+    return nodes, errors
+
+
+def native_offense(node: _TreeNode) -> str | None:
+    if node.name in BANNED_NATIVE_CRATES:
+        return f"{node.name} v{node.version}"
+    if node.name == "tokio":
+        banned = sorted(set(node.features) & BANNED_TOKIO_FEATURES)
+        if banned:
+            label = "feature" if len(banned) == 1 else "features"
+            return f"tokio v{node.version} {label} {', '.join(banned)}"
+    return None
+
+
+def closure_findings(package: str, resolution: str, nodes: list[_TreeNode]) -> list[str]:
+    """Name each banned dependency once, with the path that pulls it in."""
+    if not nodes or nodes[0].depth != 0 or nodes[0].name != package:
+        return [f"{package} [{resolution}]: cargo tree did not start at the crate"]
+    stack: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    findings: list[str] = []
+    host_depth: int | None = None
+    for node in nodes:
+        if host_depth is not None and node.depth > host_depth:
+            continue
+        host_depth = None
+        while stack and stack[-1][0] >= node.depth:
+            stack.pop()
+        if node.proc_macro:
+            host_depth = node.depth
+            continue
+        path = [*(item[1] for item in stack), node.name]
+        stack.append((node.depth, node.name))
+        offense = native_offense(node)
+        if offense is None or offense in seen:
+            continue
+        seen.add(offense)
+        findings.append(f"{package} [{resolution}]: {offense} via {' -> '.join(path)}")
+    return findings
+
+
+def portable_closure_errors(workspace: Workspace) -> list[str]:
+    """Fail when a portable crate's normal closure pulls in native-only deps for wasm32."""
+    lock = workspace.root / "Cargo.lock"
+    try:
+        lock.read_bytes()
+    except OSError as error:
+        return [f"Cargo.lock: {error}"]
+
+    errors: list[str] = []
+    jobs: list[tuple[str, str, list[str]]] = []
+    for package in PORTABLE_CRATES:
+        if package not in workspace.packages:
+            errors.append(f"{package}: portable crate is not a workspace member")
+            continue
+        for resolution, all_features in (("default", False), ("all-features", True)):
+            jobs.append(
+                (package, resolution, portable_tree_args(package, all_features=all_features))
+            )
+
+    def run_one(job: tuple[str, str, list[str]]) -> list[str]:
+        package, resolution, args = job
+        proc = subprocess.run(
+            ["cargo", "tree", *args],
+            cwd=workspace.root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip().splitlines()[:1]
+            suffix = f": {detail[0]}" if detail else ""
+            return [f"{package} [{resolution}]: cargo tree failed{suffix}"]
+        nodes, parse_errors = parse_feature_tree(proc.stdout)
+        if parse_errors:
+            return [f"{package} [{resolution}]: {item}" for item in parse_errors]
+        return closure_findings(package, resolution, nodes)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for result in pool.map(run_one, jobs):
+            errors.extend(result)
+    return errors
+
+
+def supported_target_atomic_polyfill_errors(root: Path = ROOT) -> list[str]:
+    """Keep the unsupported-target atomic-polyfill exception out of supported graphs."""
+
+    def check_target(target: str) -> list[str]:
+        proc = subprocess.run(
+            [
+                "cargo",
+                "tree",
+                "--locked",
+                "--workspace",
+                "--all-features",
+                "--target",
+                target,
+                "--edges",
+                "normal,build",
+                "--prefix",
+                "none",
+                "--format",
+                "{p}",
+            ],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip().splitlines()[:1]
+            suffix = f": {detail[0]}" if detail else ""
+            return [f"{target}: cargo tree failed{suffix}"]
+        if re.search(r"(?m)^atomic-polyfill v", proc.stdout):
+            return [
+                f"{target}: atomic-polyfill is reachable; its unsupported-target "
+                "maintenance exception no longer applies"
+            ]
+        return []
+
+    errors: list[str] = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        for result in pool.map(check_target, ("x86_64-unknown-linux-musl", "aarch64-apple-darwin")):
+            errors.extend(result)
     return errors
 
 
@@ -980,7 +2136,7 @@ def _unbounded_loops(text: str) -> list[str]:
     return loops
 
 
-_FIXTURE_PREFILTER = re.compile(r"\bdone\b|\bsleep\b")
+_FIXTURE_PREFILTER = re.compile(r"(?:\b(?:while|until|for)\b.*\bdone\b)|\bsleep\b", re.S)
 
 
 def validate_fixture_loops(package_name: str, sources: dict[str, str]) -> list[str]:
@@ -1026,6 +2182,15 @@ def _package_rust_files(root: Path, package: Package, listed: list[str]) -> dict
     return result
 
 
+def _production_src_files(rust_files: dict[str, str]) -> dict[str, str]:
+    src_only = {k: v for k, v in rust_files.items() if k.startswith("src/")}
+    test_only = declared_test_module_paths(
+        {k.removeprefix("src/"): v for k, v in src_only.items()},
+        {"lib.rs", "main.rs"},
+    )
+    return {k: v for k, v in src_only.items() if k.removeprefix("src/") not in test_only}
+
+
 def _check_workspace(root: Path = ROOT) -> int:
     graph = _cargo_resolve_graph(root)
     workspace = load_workspace(root, graph=graph)
@@ -1036,6 +2201,12 @@ def _check_workspace(root: Path = ROOT) -> int:
     root_ws = workspace.root_manifest.get("workspace", {})
     if root_ws.get("resolver") != "3":
         errors.append("workspace resolver must be 3")
+    fixtures = supported_compile_fixtures(workspace)
+    errors.extend(
+        validate_workspace_excludes(
+            root_ws, {f"tests/fixtures/{fixture_name}" for fixture_name in fixtures}
+        )
+    )
 
     listed = vcs_listing.listed_files(root)
     errors.extend(validate_tracked_hygiene(root, listed=listed))
@@ -1049,6 +2220,64 @@ def _check_workspace(root: Path = ROOT) -> int:
     errors.extend(validate_harness_pack_independence(workspace))
     errors.extend(validate_neutral_dependencies(workspace))
     errors.extend(validate_image_leaf(workspace))
+
+    for pkg in sorted(packages.values(), key=lambda item: item.name):
+        if pkg.package_class != "supported" or pkg.layer in ABOVE_FACADE_LAYERS:
+            continue
+        if fixture_name_for(pkg) not in fixtures:
+            errors.append(f"{pkg.name}: supported package lacks a consumer fixture contract")
+    for fixture_name, expected_contract in fixtures.items():
+        fixture_root = root / f"tests/fixtures/{fixture_name}"
+        try:
+            with (fixture_root / "Cargo.toml").open("rb") as stream:
+                fixture_manifest = tomllib.load(stream)
+        except OSError as error:
+            errors.append(f"{fixture_name}: {error}")
+            continue
+        fixture_files, fixture_inventory_errors = non_target_file_inventory(fixture_root)
+        errors.extend(
+            validate_supported_compile_fixture(
+                fixture_name,
+                fixture_manifest,
+                fixture_files,
+                expected_contract,
+                fixture_inventory_errors,
+            )
+        )
+
+    app = packages.get("plakd")
+    if app is not None:
+        targets = app.metadata.get("targets", [])
+        binaries = [target for target in targets if "bin" in target["kind"]]
+        if len(binaries) != 1 or binaries[0]["name"] != "plakd":
+            errors.append("plakd must expose exactly one binary named plakd")
+        libraries = [target for target in targets if "lib" in target["kind"]]
+        if len(libraries) != 1 or libraries[0]["name"] != "plakd":
+            errors.append("plakd must expose exactly one library named plakd")
+        for dependency in FORBIDDEN_PLAKD_TERMINAL_DEPS:
+            if dependency in app.manifest.get("dependencies", {}):
+                errors.append(f"plakd: public terminal dependency {dependency} is not allowed")
+
+    host = packages.get("plakous-hosted")
+    if host is not None:
+        targets = host.metadata.get("targets", [])
+        if [target for target in targets if "bin" in target["kind"]]:
+            errors.append("plakous-hosted must not expose binary targets")
+        libraries = [target for target in targets if "lib" in target["kind"]]
+        if len(libraries) != 1 or libraries[0]["name"] != "plakous_hosted":
+            errors.append("plakous-hosted must expose exactly one library named plakous_hosted")
+
+    facade = packages.get("plakous")
+    if facade is not None:
+        features = facade.metadata.get("features", {})
+        actual_features = {name for name in features if not name.startswith("dep:")}
+        if actual_features != EXPECTED_FACADE_FEATURES:
+            errors.append(
+                f"plakous: public features {sorted(actual_features)!r}, "
+                f"expected {sorted(EXPECTED_FACADE_FEATURES)!r}"
+            )
+        if features.get("default") != []:
+            errors.append("plakous: default feature set must remain empty")
 
     for name, pkg in sorted(packages.items()):
         meta = pkg.metadata
@@ -1064,20 +2293,37 @@ def _check_workspace(root: Path = ROOT) -> int:
 
         rust_files = _package_rust_files(root, pkg, listed)
         errors.extend(validate_fixture_loops(name, rust_files))
+        errors.extend(validate_package_local_includes(name, rust_files))
         if name in COMMIT_TRACE_SOURCE_PREFIXES:
             errors.extend(validate_commit_trace_sql(name, rust_files))
-        if pkg.neutral:
-            src_only = {k: v for k, v in rust_files.items() if k.startswith("src/")}
-            test_only = declared_test_module_paths(
-                {k.removeprefix("src/"): v for k, v in src_only.items()},
-                {"lib.rs", "main.rs"},
+        if name == "plakous-anthropic":
+            errors.extend(
+                validate_claude_oauth_state_comparison(rust_files.get("src/oauth.rs", ""))
             )
-            prod_files = {
-                k: v for k, v in src_only.items() if k.removeprefix("src/") not in test_only
-            }
-            errors.extend(validate_neutral_sources(name, prod_files))
+        if pkg.neutral:
+            errors.extend(validate_neutral_sources(name, _production_src_files(rust_files)))
+        if pkg.layer in ABOVE_FACADE_LAYERS:
+            prod_files = _production_src_files(rust_files)
+            tokens_by_file = {path: rust_tokens(src) for path, src in prod_files.items()}
+            errors.extend(
+                validate_product_session_authority_sources(name, prod_files, tokens_by_file)
+            )
+            if name == "plakd":
+                errors.extend(validate_product_update_hook_sources(prod_files, tokens_by_file))
+            errors.extend(validate_product_home_discovery(name, prod_files))
+            errors.extend(validate_cli_security_sources(name, prod_files, tokens_by_file))
+            errors.extend(
+                validate_facade_only_sources(
+                    name,
+                    prod_files,
+                    sorted(policy.edge_exceptions.get(name, ())),
+                    tokens_by_file,
+                )
+            )
 
     errors.extend(graph_isolation_errors(graph))
+    errors.extend(portable_closure_errors(workspace))
+    errors.extend(supported_target_atomic_polyfill_errors(root))
     linkage_errors, linkage_note = artifact_linkage_errors(root)
     errors.extend(linkage_errors)
 

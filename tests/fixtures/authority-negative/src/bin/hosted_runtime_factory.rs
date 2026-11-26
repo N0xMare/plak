@@ -25,6 +25,14 @@ impl RuntimeFactory<plakous_host_protocol::Core> for ExternalFactory {
     ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> {
         unreachable!()
     }
+    fn verify_head<'a>(
+        &'a self,
+        config: &'a mut HostConfig<plakous_host_protocol::Core>,
+        head: SessionLocator,
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, Result<(), CodingSessionOpenFailure>> {
+        unreachable!()
+    }
     fn create<'a>(
         &'a self,
         config: &'a mut HostConfig<plakous_host_protocol::Core>,
@@ -56,6 +64,7 @@ impl RuntimeFactory<plakous_host_protocol::Core> for ExternalFactory {
     fn fork_runtime<'a>(
         &'a self,
         config: &'a HostConfig<plakous_host_protocol::Core>,
+        tree_id: &'a str,
         stderr: &'a mut Vec<u8>,
     ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
         unreachable!()
