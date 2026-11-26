@@ -76,6 +76,7 @@ pub(in crate::host) enum GatePhase {
     StoreHealthRuntime,
     Preservation,
     Bindings,
+    Startup,
     #[serde(other)]
     Unknown,
 }
@@ -103,6 +104,7 @@ impl GateTiming {
             GatePhase::StoreHealthRuntime => "store_health_runtime",
             GatePhase::Preservation => "preservation",
             GatePhase::Bindings => "bindings",
+            GatePhase::Startup => "startup",
             GatePhase::Unknown => "unknown",
         };
         format!("destination phase={phase} elapsed_ms={}", self.elapsed_ms)

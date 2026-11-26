@@ -162,8 +162,12 @@ pub(crate) fn run_host_command(
         evidence: None,
         stage: upgrade::checkpoint::Failure::Startup,
         timings: Vec::new(),
+        verified: None,
     };
     let outcome = serve_host(services, command, inherited, &mut gate);
+    if outcome.is_err() {
+        gate.started();
+    }
     if let (Err(error), Some(checkpoint)) = (&outcome, &gate.checkpoint) {
         return Ok(stop_refused_upgrade(
             paths,
@@ -198,9 +202,23 @@ struct UpgradeGate {
     evidence: Option<upgrade::checkpoint::EvidenceLevel>,
     stage: upgrade::checkpoint::Failure,
     timings: Vec<upgrade::checkpoint::GateTiming>,
+    verified: Option<Instant>,
 }
 
 impl UpgradeGate {
+    /// Times host open and startup, from the end of the gate to readiness
+    /// or to the startup failure.
+    fn started(&mut self) {
+        if let Some(verified) = self.verified.take() {
+            let timing = upgrade::checkpoint::GateTiming::new(
+                upgrade::checkpoint::GatePhase::Startup,
+                verified.elapsed(),
+            );
+            eprintln!("host upgrade: {}", timing.detail());
+            self.timings.push(timing);
+        }
+    }
+
     /// Stopped-store revisions run before the gate, on every startup.
     fn stopped_revisions(&mut self, revise: impl FnOnce() -> CliResult<()>) -> CliResult<()> {
         if self.checkpoint.is_none() {
@@ -227,10 +245,12 @@ impl UpgradeGate {
         self.evidence = Some(verdict?);
         crate::carry::upgrade::crash_cut("after-destination-verification");
         self.stage = upgrade::checkpoint::Failure::Startup;
+        self.verified = Some(Instant::now());
         Ok(())
     }
 
     fn ready(&mut self, paths: &crate::home::paths::PlakPaths) -> CliResult<()> {
+        self.started();
         if let Some(checkpoint) = &self.checkpoint {
             let evidence = self
                 .evidence
