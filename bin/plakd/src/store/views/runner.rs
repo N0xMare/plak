@@ -23,6 +23,8 @@ pub(crate) struct RunnerPlacementRow {
 impl ProductStore {
     /// Occupancy and pin recovery need neither queues nor presentation rows.
     pub(crate) fn runner_placement_rows(&self) -> Result<Vec<RunnerPlacementRow>, String> {
+        #[cfg(test)]
+        runner_read_threads::record(self.paths.product_database());
         self.connection
             .prepare(
                 "SELECT node_tree_id,runner_display,workspace_root,updated_at,
@@ -48,6 +50,8 @@ impl ProductStore {
 
     /// Read stop evidence and its projected binding in the same snapshot.
     pub(crate) fn runner_stop_rows(&self) -> Result<Vec<RunnerStopRow>, String> {
+        #[cfg(test)]
+        runner_read_threads::record(self.paths.product_database());
         let tx = self
             .connection
             .unchecked_transaction()
@@ -138,4 +142,36 @@ fn parse_locator(locator: Option<&str>) -> Result<Option<SessionLocator>, String
         .map(str::parse)
         .transpose()
         .map_err(|_| "product session locator is invalid".to_owned())
+}
+
+#[cfg(test)]
+pub(crate) mod runner_read_threads {
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, PoisonError};
+    use std::thread::{self, ThreadId};
+
+    static READS: Mutex<Vec<(PathBuf, ThreadId)>> = Mutex::new(Vec::new());
+
+    pub(super) fn record(path: PathBuf) {
+        READS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((path, thread::current().id()));
+    }
+
+    pub(crate) fn take(path: &Path) -> Vec<ThreadId> {
+        let mut observed = Vec::new();
+        READS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(database, worker)| {
+                if database == path {
+                    observed.push(*worker);
+                    false
+                } else {
+                    true
+                }
+            });
+        observed
+    }
 }

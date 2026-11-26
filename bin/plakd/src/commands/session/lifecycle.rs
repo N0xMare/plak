@@ -432,6 +432,70 @@ mod tests {
     }
 
     #[test]
+    fn offline_archive_uses_settled_metadata_even_when_history_cannot_be_exported() {
+        use plakous::application::ApplicationExecutor;
+        use plakous::sessions::{
+            AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionOperationId,
+        };
+        use plakous_offline_crash_harness::{
+            BoundaryController, protocol::CrashBoundary, runtime_binding,
+        };
+
+        let (home, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let workspace = home.path().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        paths.ensure_layout().unwrap();
+        let services = Services::for_home(paths.clone());
+        let sessions = services.state_roots().unwrap().runtime_sessions().unwrap();
+        let executor = ApplicationExecutor::new().unwrap();
+        let controller = BoundaryController::quiet_from_evidence_path(
+            CrashBoundary::None,
+            home.path().join("evidence"),
+        )
+        .unwrap();
+        let locator = executor
+            .block_on(async {
+                let CreateSessionOutcome::Created { session, .. } = sessions
+                    .create(CreateSessionRequest::new(
+                        SessionOperationId::new("archive:fixture").unwrap(),
+                        runtime_binding(&workspace, controller).unwrap(),
+                    ))
+                    .await
+                    .unwrap()
+                else {
+                    panic!("runtime was not created")
+                };
+                session
+                    .agent()
+                    .prompt("record canonical history")
+                    .await
+                    .unwrap()
+                    .result()
+                    .await
+                    .unwrap();
+                session.release().await.unwrap()
+            })
+            .unwrap();
+        let mut record = crate::store::sessions::SessionRecord::new(workspace);
+        record.bind_plakous_locator(locator).unwrap();
+        let mut product = crate::store::ProductStore::open(&paths).unwrap();
+        product.commit(&mut record).unwrap();
+
+        let database = paths.runtime_database();
+        assert!(AgentSessions::export_history_sqlite(&database, locator).is_ok());
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        // Leave the branch and runtime metadata intact but make its history unreadable.
+        assert!(connection.execute(
+            "DELETE FROM runtime_object_bytes WHERE id IN (SELECT id FROM runtime_objects WHERE kind=5)",
+            [],
+        ).unwrap() > 0);
+        drop(connection);
+        assert!(AgentSessions::export_history_sqlite(&database, locator).is_err());
+        archive_offline(&services, &record.id).unwrap();
+        assert!(product.lifecycle_metadata(&record.id).unwrap().1);
+    }
+
+    #[test]
     fn rename_and_archive_operate_without_a_runtime_and_preserve_generated_title() {
         let (_home, paths) = crate::home::paths::PlakPaths::isolated_test_home();
         let services = Services::for_home(paths.clone());

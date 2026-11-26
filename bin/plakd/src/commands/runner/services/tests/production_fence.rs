@@ -29,8 +29,10 @@ async fn ready_fence_production_bind_requires_capture_before_reconciliation() {
     production_cut(false, true).await;
 }
 
-#[tokio::test]
-async fn production_bind_accepts_mixed_os_hello_after_reconciliation() {
+#[tokio::test(flavor = "current_thread")]
+async fn production_bind_reconciles_mixed_os_without_reading_history_or_blocking_the_worker() {
+    use crate::store::runner_read_threads;
+
     for os in ["macos", "linux"] {
         let mut fixture = stopped_runtime().await;
         fixture.session.take().unwrap().release().await.unwrap();
@@ -58,11 +60,27 @@ async fn production_bind_accepts_mixed_os_hello_after_reconciliation() {
         assert_eq!(received.descriptor, hello.descriptor);
         stub::seed_cleanup(&fixture.services, &client, fixture.line).await;
         configure_remote(&fixture.services, &hello);
-        let registry = fixture.services.runners();
-        registry.configure(ConfiguredRunner {
-            runner_id: "fixture".into(),
-            names: vec!["fixture".into()],
-        });
+        let paths = fixture.services.paths().unwrap();
+        let database = paths.product_database();
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "INSERT INTO operator_notices(session_id,notice_id,anchor,ordinal,row)
+             VALUES(?1,'unreadable',0,0,'{\"kind\":\"not_a_transcript_row\"}')",
+                [&fixture.record_id],
+            )
+            .unwrap();
+        drop(connection);
+        assert!(
+            crate::store::ProductStore::open(paths)
+                .unwrap()
+                .load(&fixture.record_id)
+                .is_err()
+        );
+        let prepared = super::super::super::registry::prepare(&fixture.services, None).unwrap();
+        let worker = std::thread::current().id();
+        assert_eq!(runner_read_threads::take(&database), [worker]);
+        let registry = prepared.services.runners();
         registry.require_connection("fixture", true);
         let pass = Arc::new(Pass {
             client: client.clone(),
@@ -73,14 +91,24 @@ async fn production_bind_accepts_mixed_os_hello_after_reconciliation() {
             rebind_after_cleanup: false,
         });
         let retries = start_probes_with_dial(
-            &fixture.services,
-            fixture.catalog.clone(),
+            &prepared.services,
+            prepared.local,
             None,
             &tokio::runtime::Handle::current(),
             pass.remote_dial(),
         );
-        let rows = registry.refresh(None).await.unwrap();
+        let rows = registry.refresh(Some(&["fixture".into()])).await.unwrap();
         assert_eq!(rows[0].status, RunnerStatus::Ready);
+        let read_threads = runner_read_threads::take(&database);
+        assert_eq!(
+            read_threads.len(),
+            3,
+            "expected pin lookup, confirmation, and stop reconciliation reads"
+        );
+        assert!(
+            !read_threads.contains(&worker),
+            "refresh read the store on the Tokio worker"
+        );
         assert_eq!(pass.cleanups.load(Ordering::SeqCst), 1);
         assert_eq!(pass.count.load(Ordering::SeqCst), 1);
         assert_eq!(retries.lock().unwrap()["fixture"].delay, 0);

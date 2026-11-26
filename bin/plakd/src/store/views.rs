@@ -25,6 +25,8 @@ pub(super) mod intents;
 pub(super) use intents::attention_facts_on;
 pub(super) use intents::intents_of;
 mod runner;
+#[cfg(test)]
+pub(crate) use runner::runner_read_threads;
 mod submissions;
 pub(super) use submissions::VerifiedSubmissions;
 use submissions::load_submissions_where;

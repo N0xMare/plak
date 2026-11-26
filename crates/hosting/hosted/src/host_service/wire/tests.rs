@@ -14,6 +14,52 @@ fn root() -> NodeAddress {
 }
 
 #[test]
+fn oversized_assistant_delta_reaches_wire_client_in_ordered_chunks() {
+    use plakous_host_protocol::Core;
+
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let service = HostService::new(actions.clone(), root(), ATTACHMENT_CAPACITY);
+    let attachment = service.attach(&root(), Face::Remote).unwrap();
+    let mut wire = WireConnection::on_service(service.clone(), Vec::new(), actions, Leave::Detach);
+    wire.attachment = Some(attachment);
+
+    let (channel, events) = crate::surface_protocol::host_event_channel::<Core>();
+    let sender = crate::runtime::Sender::over(channel);
+    // The whole event cannot fit after JSON escaping. A multibyte character
+    // straddles the producer's chunk boundary.
+    let text = format!(
+        "{}🦀{}",
+        "\0".repeat(1024 * 1024 - 1),
+        "\0".repeat(2 * 1024 * 1024)
+    );
+    crate::runtime::send_assistant_delta(&sender, text.clone());
+    while let Ok(event) = events.try_recv() {
+        service.observe(event);
+    }
+    wire.flush().unwrap();
+
+    let mut frames = 0;
+    let mut received = String::new();
+    for frame in host_frames(&wire.stdout.inner) {
+        if let HostFrame::Event {
+            attachment: observed,
+            observation: SessionObservation::AssistantDelta(delta),
+            ..
+        } = frame
+        {
+            assert_eq!(observed, attachment);
+            frames += 1;
+            received.push_str(&delta);
+        }
+    }
+    assert!(frames > 1);
+    assert!(
+        received == text,
+        "wire client did not receive the complete assistant text"
+    );
+}
+
+#[test]
 fn a_too_large_paced_patch_requests_a_fresh_scope_without_closing() {
     use plakous_host_protocol::Core;
     use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem, TranscriptPatch};

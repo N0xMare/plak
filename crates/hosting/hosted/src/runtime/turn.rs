@@ -706,7 +706,7 @@ pub(super) fn flush_assistant_delta<P: plakous_host_protocol::ProtocolExtension>
     }
 }
 
-pub(super) fn send_assistant_delta<P: plakous_host_protocol::ProtocolExtension>(
+pub(crate) fn send_assistant_delta<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     text: String,
 ) {

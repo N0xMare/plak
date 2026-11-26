@@ -221,6 +221,8 @@ pub(crate) use tree::bounded_text as bounded_notice_text;
 mod turn;
 #[cfg(test)]
 pub(crate) use turn::agent_error_remedy;
+#[cfg(test)]
+pub(crate) use turn::send_assistant_delta;
 pub(crate) use turn::truncation_note;
 mod turn_drive;
 use turn_drive::{TurnHost, drive_one_turn};

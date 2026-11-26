@@ -27,6 +27,8 @@ use sessions::{
     ProductCompactReason, QueueDrainState, QueueItem, SessionNode, SessionRecord,
     SessionWorkflowKind, StoreBaseline, digest_parts,
 };
+#[cfg(test)]
+pub(crate) use views::runner_read_threads;
 
 pub(crate) struct BindingRecordDisposition {
     pub(crate) tree: String,
