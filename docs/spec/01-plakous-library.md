@@ -6977,7 +6977,7 @@ operator resolution, never process-death proof. Closed/expired namespaces permit
 and close for resolution. Results use the control channel; output production reserves
 remaining bulk-frame capacity before advancing any cursor or directional sequence.
 
-Client protocol 12 maps these operations through consented product requests,
+The client wire protocol maps these operations through consented product requests,
 independent terminal streams and explicit operator-terminal residency outcomes
 (chapter 02 §4.4); runner versioning remains independent.
 `operator.scope.inventory` is paired-host recovery metadata, not a client listing:

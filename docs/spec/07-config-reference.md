@@ -14,8 +14,7 @@ Operator-facing instructions live in
 ## 1. Files and discovery
 
 Host operators may edit a home template through confirmed, typed
-`template_put`, introduced in protocol 7 (current client protocol 12). This is
-the explicit exception to file-authored template
+`template_put`. This is the explicit exception to file-authored template
 bodies: ordinary config saves and `config_patch` still refuse body changes.
 User-profile writes use root/working_set only; built-ins are read-only. No
 console operation accepts a filesystem destination or raw TOML.
@@ -50,7 +49,7 @@ release retained capacity without positive original-instance/process-loss proof.
 The current state directory is `state/r28.e39.p39.t11/`: runtime SQLite
 schema 28, runtime format epoch 39, product generation 39, and tree generation 11
 (current product store revision 40 and tree store revision 13).
-These are format identities, not configuration keys. Client wire protocol 12
+These are format identities, not configuration keys. Client wire protocol 13
 and runner protocol 9 require separate exact matches, with no negotiation.
 The product store records `sessions.account_choices`. Runtime
 epoch 39 removes the credential-store path from Codex and SuperGrok
@@ -1004,12 +1003,11 @@ section; omitted keys continue to follow defaults. Every root binding edit copie
 fresh unshared name (`default`, `default-2`, and so on), preserving its other
 fields and leaving the previous template file untouched. Saves preflight all
 existing template bodies and refuse changes to them; edit user or project
-files directly, or use the confirmed home `template_put` exception introduced
-in protocol 7 (current client protocol 12).
+files directly, or use the confirmed home `template_put` exception.
 `config_patch` never edits a body. Unrelated settings saves do not rewrite templates.
 
-`config_patch`, `template_put` and `profile_put`, introduced in protocol 7
-(current client protocol 12), publish one file per request. All require a matching content etag and one-use consent; stale
+`config_patch`, `template_put` and `profile_put` publish one file per request.
+All require a matching content etag and one-use consent; stale
 etags return conflict and no write. The shared home publication lock covers
 read-current, comparison, complete candidate validation and atomic publication;
 CLI home key edits reread under this lock as well. Recheck actual bytes before

@@ -44,11 +44,10 @@ For a Codex subscription template, set `service_tier = "fast"` or
 `service_tier = "ultrafast"`, or omit it for Standard. Run
 `plakd models <account>` to check the tiers offered for the exact model and
 account. An unavailable tier is refused, not replaced with a different one.
-Select Ultrafast in the template file and select that template with
-`root.agent` or a profile; the protocol-12 console's template Fast toggle
-cannot select Ultrafast. The protocol's generic session model picker and
-settings can still select Ultrafast where the catalog offers it, and can show
-it on the active session binding.
+Set the tier in the template file or send a confirmed `template_put` change
+to `service_tier` through the host console. Select that template with
+`root.agent` or a profile. The session model picker can also select Ultrafast
+where the catalog offers it.
 
 `config.toml` holds no templates: an `[agent.<name>]` block there is refused at
 load with a message to move it into `agents/`.

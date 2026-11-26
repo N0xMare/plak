@@ -137,7 +137,8 @@ dedicated links. Upgrade the gateway **before** importing sessions:
 
 The new gateway serves v1 to the old host and v2 to the new host. Then run
 the destination's `plakd host upgrade --expect-binary <id>` and re-pin clients
-to host wire protocol 12; protocol 11 receives a typed `VersionMismatch`.
+to that build's exact host wire version. Other versions receive a typed
+`version_mismatch` refusal.
 Once the carry commits, recovery is fix-forward only.
 If the host was carried first, upgrade the gateway, then restart the host.
 The running host keeps its negotiated protocol; Codex and SuperGrok refuse

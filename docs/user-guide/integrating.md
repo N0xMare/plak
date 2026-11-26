@@ -95,13 +95,20 @@ agent id is not necessarily the literal `root`. Attach that address:
 {"frame":"request","id":2,"op":{"op":"attach","node":{"tree_id":"<tree-id>","agent_id":"<root-agent-id>"}}}
 ```
 
-The response with `id: 2` answers `attached` and names an attachment and its
-transcript mode. Assemble snapshot parts through `last: true` before applying
-the newest page. Request older pages with the opaque cursor, and repair a
-missing live append with `read_transcript_row` at the first missing UTF-8
-byte. Offer a retained revision only when the exact in-memory viewport is
-available; otherwise start with the first page. An `attachment_status`
-request reports the attachment's transport counters without changing its revision.
+The successful response answers `attached` and names an attachment with
+`transcript.mode: "first_page"`. If attach explicitly returns
+`outcome.refused.refusal: "backpressure"`, retry after a short delay with a
+fresh request id and a bounded wait. Read snapshot frames for the returned
+attachment, assembling parts from `part: 0` through `last: true` with the same
+scope and revision before applying the page. Keep each item keyed by
+`(anchor, lane, ordinal)` and use those same keys for the `live_rows` byte
+lengths. Preserve the full precision of JSON integer IDs and anchors; fields
+defined as decimal strings, such as recorded token counts, remain strings.
+Request older pages with the opaque cursor, and repair a missing live append
+with `read_transcript_row` at the first missing UTF-8 byte. Offer a retained
+revision only when the exact in-memory viewport is available; otherwise
+start with the first page. An `attachment_status` request reports the
+attachment's transport counters without changing its revision.
 Keep request ids distinct and correlate responses by id while reading other
 frames. Send `{"frame":"bye"}` before closing. Reconnect means a new attach,
 not replaying requests or inferring lost model/tool outcomes.

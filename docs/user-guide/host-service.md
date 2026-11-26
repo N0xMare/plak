@@ -443,7 +443,8 @@ keys after accepting new work.
 For the 0.0.5 cut (`r28.e38.p38.t11` → `r28.e39.p39.t11`), rewrite named
 account references in templates to provider kinds (for example,
 `account = "codex/work"` becomes `account = "codex"`). Upgrade the gateway
-before importing Codex or SuperGrok sessions, and use protocol-12 clients.
+before importing Codex or SuperGrok sessions, and use clients that match the
+destination build's exact wire version.
 If startup reports `host_upgrade_legacy_receipt_pending`, inspect the old
 coordinated upgrade using its original builds. This host refuses pending
 upgrades and acknowledged upgrades with abandoned mappings. Do not delete
@@ -478,7 +479,7 @@ both. Once a host/line becomes retention-only, reinstalling or downgrading
 cannot restore native control. An incompatible endpoint requires its matching
 build to settle the original jobs; if the original process is proved lost,
 follow the reported lost-job remedy rather than starting or replaying it.
-Retention endpoint 1, native runner protocol 9, host wire 12 and JSONL 1 are
+Retention endpoint 1, native runner protocol 9, host wire 13 and JSONL 1 are
 independent versions. Retention cannot transfer jobs across a state-key cut.
 
 The Linux unit leaves WorkingDirectory unset, using systemd's user-service

@@ -2996,7 +2996,7 @@ public runtime invariant.
 Settings payload and publication fixtures use product fields. Client-local
 preferences are not serialized or persisted by the host. Role checks refuse
 remote legacy saves before product dispatch; confirmed operator paths keep
-their capability, consent and etag rules (current client protocol 12).
+their capability, consent and etag rules.
 Product DTO contract examples decode and re-encode unchanged before and after
 extraction, including temporary reload values. Schema extraction is checked
 against raw `plakd wire schema` output with an uninstalled executable and an

@@ -1,6 +1,7 @@
 """A test-only socket driver against a real, offline-scripted host."""
 
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import Mock, patch
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +25,44 @@ EXAMPLE = ROOT / "tests/tooling/fixtures/host_client.py"
 spec = importlib.util.spec_from_file_location("host_client", EXAMPLE)
 host_client = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(host_client)
+
+
+class FirstPageTests(unittest.TestCase):
+    def test_backpressure_retries_and_assembles_the_keyed_page(self):
+        fixture = ROOT / "crates/hosting/plakd-wire-types/tests/fixtures/protocol-13-host.jsonl"
+        attached, first, last, *_ = map(json.loads, fixture.read_text().splitlines())
+        anchor = (1 << 64) - 1
+        last["items"][0]["key"]["anchor"] = anchor
+        last["live_rows"][0]["row"]["anchor"] = anchor
+        frames = [
+            {"frame": "response", "id": 1, "outcome": {"refused": {"refusal": "backpressure"}}},
+            attached | {"id": 2},
+            first,
+            last | {"attachment": 99},
+            last,
+        ]
+        transport = Mock()
+        transport.makefile.return_value = io.BytesIO(
+            b"".join(json.dumps(frame).encode() + b"\n" for frame in frames)
+        )
+        with patch.object(host_client.socket, "socket", return_value=transport):
+            client = host_client.Client("unused")
+        with client:
+            node = {"tree_id": "tree-1", "agent_id": "root"}
+            page = client.attach_first_page(1, node)
+        requests = [json.loads(call.args[0]) for call in transport.sendall.call_args_list]
+        self.assertEqual(
+            requests,
+            [
+                {"frame": "request", "id": 1, "op": {"op": "attach", "node": node}},
+                {"frame": "request", "id": 2, "op": {"op": "attach", "node": node}},
+                {"frame": "bye"},
+            ],
+        )
+        self.assertEqual(page["items"], first["items"] + last["items"])
+        self.assertEqual(page["live_rows"], {(anchor, "runtime", 0): 5})
+        self.assertEqual(page["metadata"]["revision"], first["revision"])
+        self.assertEqual(page["metadata"]["older_cursor"], first["older_cursor"])
 
 
 class ReferenceClientTests(unittest.TestCase):
@@ -173,14 +213,20 @@ class ReferenceClientTests(unittest.TestCase):
 
     def test_socket_driver_reads_a_real_attach_snapshot_without_a_turn(self):
         session = self.create_session()
-        frames = host_client.inspect_session(self.socket, session)
+        frames, page = host_client.inspect_session(self.socket, session)
         self.assertEqual(frames[0]["proto"], host_client.WIRE_VERSION)
         answers = [
-            frame["outcome"]["ok"]["answer"] for frame in frames if frame["frame"] == "response"
+            frame["outcome"]["ok"]["answer"]
+            for frame in frames
+            if frame["frame"] == "response" and "ok" in frame["outcome"]
         ]
         self.assertEqual(answers, ["sessions", "attached"])
         self.assertEqual(frames[-1]["frame"], "snapshot")
         self.assertTrue(frames[-1]["last"])
+        self.assertEqual(page["metadata"]["scope"], "root")
+        self.assertEqual(
+            page["metadata"]["revision"]["host_generation"], frames[0]["host_generation"]
+        )
         evidence = self.root / "evidence.jsonl"
         self.assertFalse(evidence.exists() and evidence.read_text().strip())
         schema = subprocess.run(
@@ -230,8 +276,9 @@ class ReferenceClientTests(unittest.TestCase):
             rows = client.request(listing["id"], listing["op"])["rows"]
             node = next(row["node"] for row in rows if row["session"] == session)
             self.assertEqual(set(node), set(attach["op"]["node"]))
-            attach["op"]["node"] = node
-            self.assertEqual(client.request(attach["id"], attach["op"])["answer"], "attached")
+            self.assertEqual(attach["op"], {"op": "attach", "node": attach["op"]["node"]})
+            page = client.attach_first_page(attach["id"], node)
+            self.assertEqual(page["metadata"]["scope"], "root")
 
 
 if __name__ == "__main__":
