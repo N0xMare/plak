@@ -81,7 +81,7 @@ fn reload_probe_checks_config_and_requires_offline_migration_for_changed_keys() 
     assert!(target.refusal(&key).is_none());
     assert_eq!(
         target.refusal("different-key").as_deref(),
-        Some(crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED)
+        Some(crate::carry::OFFLINE_MIGRATION_REQUIRED)
     );
 }
 
@@ -154,6 +154,6 @@ fn work_in_flight_refuses_only_a_carrying_reload() {
     }
     assert_eq!(
         reload_refusal(&target("r99.e99.p99.t99", None), running, None).as_deref(),
-        Some(crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED)
+        Some(crate::carry::OFFLINE_MIGRATION_REQUIRED)
     );
 }

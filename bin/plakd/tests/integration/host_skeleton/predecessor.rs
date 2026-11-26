@@ -1,4 +1,6 @@
-//! The cut path against a literal production predecessor, without upgrade overrides.
+//! The restart-upgrade path from a literal production predecessor, without
+//! test overrides: planned stop of the predecessor, stopped backup, start of
+//! the candidate on the same stores.
 
 use super::*;
 use crate::gateway_process::GatewayProcess;
@@ -14,7 +16,7 @@ use plakous_recursive_subagents::{
 };
 use plakous_recursive_subagents_store::SqliteTreeStore;
 use serde_json::Value;
-use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _, symlink};
+use std::os::unix::fs::{PermissionsExt as _, symlink};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -31,89 +33,9 @@ const HISTORY: [&str; 3] = [
 const STREAM: &str = "predecessor streaming";
 const FINAL: &str = "predecessor stream completed";
 const RESUMED: &str = "candidate reply";
-const DIFFERENT_STATE_KEY: &str = "host_upgrade_offline_migration_required";
 
 #[test]
-fn production_predecessor_with_a_missing_child_evaluator_can_upgrade() {
-    let old = PathBuf::from(std::env::var_os("PLAK_INSTALL_PREDECESSOR").unwrap()).join("plakd");
-    let candidate = PathBuf::from(std::env::var_os("PLAK_TEST_BINARY").unwrap());
-    let (fixture, _) = root_wake::child_fixture(false).expect("short fixture socket paths");
-    let (before, after) = probe_pair(&fixture, &old, &candidate);
-    if before["state_key"] == after["state_key"] {
-        upgrade::reopen::children::missing_evaluator_upgrade(
-            &fixture,
-            &old,
-            &candidate,
-            source_wire_version(&fixture, &old),
-            |session| {
-                source::idle_locator(&source::open(&fixture), session, 1);
-            },
-        );
-    }
-}
-
-#[test]
-fn production_predecessor_refuses_a_destination_only_unreadable_child() {
-    let old = PathBuf::from(std::env::var_os("PLAK_INSTALL_PREDECESSOR").unwrap()).join("plakd");
-    let candidate = PathBuf::from(std::env::var_os("PLAK_TEST_BINARY").unwrap());
-    let (fixture, _) = root_wake::child_fixture(false).expect("short fixture socket paths");
-    let (before, after) = probe_pair(&fixture, &old, &candidate);
-    if before["state_key"] != after["state_key"] {
-        return;
-    }
-    let _cleanup = upgrade::HomeHost(fixture.home());
-    let mut host =
-        await_serving_host(spawn_host(image_command(&fixture, &old).arg("host"))).unwrap();
-    let (mut client, _, node) = upgrade::reopen::children::spawn_child_with_idle(
-        &fixture,
-        Client::connect_at_version(&host.socket, source_wire_version(&fixture, &old)),
-        |session| {
-            source::idle_locator(&source::open(&fixture), session, 1);
-        },
-    );
-    let coordinator = UnixStream::connect(fixture.home().join("host/upgrade.sock")).unwrap();
-    coordinator.set_read_timeout(Some(WAIT)).unwrap();
-    let mut line = String::new();
-    BufReader::new(coordinator).read_line(&mut line).unwrap();
-    let identity: Value = serde_json::from_str(&line).unwrap();
-    assert_eq!(identity["binary"], before["binary_id"]);
-    let compares_child_heads = identity["child_reopen_baseline"].as_bool().unwrap_or(false);
-    let id = after["binary_id"].as_str().unwrap();
-    let result = image_command(&fixture, &candidate)
-        .env("PLAK_TEST_CHILD_BINDING_UNREADABLE_IMAGE", &candidate)
-        .args(["host", "upgrade", "--expect-binary", id, "--drain", "0"])
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    assert!(!result.status.success(), "{stderr}");
-    assert!(
-        stderr.contains("host_upgrade_child_reopen_refused: 1 affected child session(s)"),
-        "{stderr}"
-    );
-    assert!(
-        stderr.contains("child binding is unreadable in this image"),
-        "{stderr}"
-    );
-    assert_eq!(
-        stderr.contains("qualification phase=exact_reopen "),
-        compares_child_heads,
-        "only a comparing source should receive the request before this refusal: {stderr}"
-    );
-    assert!(
-        !stderr.contains("resolving earlier admission verdicts"),
-        "{stderr}"
-    );
-    assert!(matches!(
-        client.request(4, new_session(&fixture.workspace())),
-        Outcome::Ok(Answer::Created { .. })
-    ));
-    std::fs::write(fixture.root.join("release-child"), []).unwrap();
-    root_wake::submitted_result(&fixture, &node);
-    stop(&mut host);
-}
-
-#[test]
-fn production_predecessor_upgrade_preserves_live_work() {
+fn production_predecessor_restart_upgrade_preserves_live_work() {
     let directory = std::env::var_os("PLAK_INSTALL_PREDECESSOR")
         .expect("prepare the pinned predecessor with tools/gate/build_predecessor.py");
     let old = PathBuf::from(directory).join("plakd");
@@ -121,6 +43,7 @@ fn production_predecessor_upgrade_preserves_live_work() {
         std::env::var_os("PLAK_TEST_BINARY").expect("install profile requires the candidate build"),
     );
     let (fixture, script) = root_wake::child_fixture(true).expect("short fixture socket paths");
+    let candidate = restart::identified_image(&fixture, &candidate, 'b');
     let workspace = fixture.root.join("local");
     std::fs::create_dir(&workspace).unwrap();
     let mut paired = Paired::new(&fixture, &old);
@@ -128,40 +51,46 @@ fn production_predecessor_upgrade_preserves_live_work() {
     paired.pair(&fixture, &old);
 
     let (old_facts, new_facts) = probe_pair(&fixture, &old, &candidate);
-    let new_id = new_facts["binary_id"].as_str().unwrap();
-    let same_key = old_facts["state_key"] == new_facts["state_key"];
-    if same_key {
-        seed_script(&fixture, &script);
-    } else {
-        let mut script = script;
-        script["steps"] = json!([stream_step(&fixture)]);
-        fixture.write_script(&script);
+    let new_id = binary_id(&fixture, &candidate);
+    if old_facts["state_key"] != new_facts["state_key"] {
+        let mut source = start_host(&fixture, &old, &paired, &socket, &workspace);
+        let refusal = fixture
+            .base_command_from(&candidate)
+            .arg("host")
+            .output()
+            .unwrap();
+        assert!(!refusal.status.success(), "{refusal:?}");
+        assert!(
+            String::from_utf8_lossy(&refusal.stderr).contains("state key"),
+            "{refusal:?}"
+        );
+        Client::connect_at_version(&source.socket, source_wire_version(&fixture, &old));
+        stop(&mut source);
+        return;
     }
+    seed_script(&fixture, &script);
 
     run(fixture
         .base_command_from(&old)
         .args(["mcp", "test", "fake"]));
-    let mut gateway = start_gateway(&fixture, &old);
+    let _gateway = start_gateway(&fixture, &old);
+    let health: Value = serde_json::from_str(&run(fixture
+        .base_command_from(&candidate)
+        .args(["gateway", "check", "--json"])))
+    .unwrap();
+    assert_eq!(health["holder"], true);
+    assert!(health["accounts"].is_array() && health["versions"].is_array());
     let old_service = gateway_check(&fixture, &old);
     assert_eq!(gateway_check(&fixture, &candidate), old_service);
     let mut local = start_local_runner(&fixture, &old);
     let runner_pids = (local.id(), paired.daemon.id());
     let mut host = start_host(&fixture, &old, &paired, &socket, &workspace);
     let pid = host.child.as_ref().unwrap().id();
-    let inode = std::fs::symlink_metadata(&socket).unwrap().ino();
     let old_wire = source_wire_version(&fixture, &old);
     let mut client = Client::connect_at_version(&host.socket, old_wire);
-    runner::wait_local_runner_ready_on(&mut client);
     paired.ready(&mut client);
     let login = crate::web_endpoint::handoff_cookie(&socket);
     let mut web = Browser::connect(&socket, &login, old_wire);
-    let mut upgrade = upgrade_command(&fixture, &candidate, &paired, new_id);
-    if !same_key {
-        let (_, node) = create_root(&mut client, &workspace);
-        refuse_changed_key(&fixture, &mut upgrade, &mut client, &mut web, &node);
-        stop(&mut host);
-        return;
-    }
 
     let document = fixture.root.join("predecessor-export.json");
     let root = seed(&fixture, &mut client, &workspace, &old, &document);
@@ -184,20 +113,20 @@ fn production_predecessor_upgrade_preserves_live_work() {
         child_dispatches(&fixture) == 1
     });
 
-    run(fixture.base_command_from(&old).args(["gateway", "drain"]));
-    gateway.wait_for_drain();
-    let _gateway = start_gateway(&fixture, &candidate);
-    let new_service = gateway_check(&fixture, &old);
-    assert_ne!(
-        old_service, new_service,
-        "the gateway instance did not change"
-    );
-    assert_eq!(gateway_check(&fixture, &candidate), new_service);
-
     paired.advance(&candidate);
-    handoff(&fixture, upgrade.arg("--backup-store"), &mut web, new_id);
-    assert_host_reexec(&mut host, &socket, pid, inode);
-    assert_private_backup(&fixture);
+    drop(client);
+    stop(&mut host);
+    assert!(web.expect_stopped() <= 1, "duplicate source terminal");
+    let backup = fixture.root.join("stopped-backup");
+    run(fixture
+        .base_command_from(&candidate)
+        .args(["store", "backup", "--stopped"])
+        .arg(&backup));
+    assert_private_backup(&backup);
+    let mut host = start_host(&fixture, &candidate, &paired, &socket, &workspace);
+    let successor_pid = host.child.as_ref().unwrap().id();
+    assert_ne!(successor_pid, pid);
+    assert_eq!(gateway_check(&fixture, &candidate), old_service);
 
     let mut web = Browser::connect(&socket, &login, WIRE_VERSION);
     assert_ne!(web.welcome.host_generation, old_generation);
@@ -215,7 +144,14 @@ fn production_predecessor_upgrade_preserves_live_work() {
         "old paired daemon exited"
     );
     std::fs::write(fixture.root.join("finish-stream"), []).unwrap();
-    verify_resumed_root(&fixture, &mut web, &root, &prior, pid, original_job);
+    verify_resumed_root(
+        &fixture,
+        &mut web,
+        &root,
+        &prior,
+        successor_pid,
+        original_job,
+    );
     let imported = import(&fixture, &candidate, &workspace, &document);
     assert_ne!(imported, root.id);
     assert_imported_history(&fixture, &imported);
@@ -224,202 +160,21 @@ fn production_predecessor_upgrade_preserves_live_work() {
     assert_child_continued_once(&fixture, &root.node);
 }
 
-fn assert_private_backup(fixture: &Fixture) {
-    let paths = PlakPaths::explicit(fixture.home());
-    let mut backups = std::fs::read_dir(paths.state_dir().join("upgrade-backups")).unwrap();
-    let backup = backups.next().unwrap().unwrap().path();
-    assert!(backups.next().is_none());
+fn assert_private_backup(directory: &Path) {
     for name in ["product.sqlite3", "subagents.sqlite3", "runtime.sqlite3"] {
-        let meta = std::fs::symlink_metadata(backup.join(name)).unwrap();
+        let meta = std::fs::symlink_metadata(directory.join(name)).unwrap();
         assert!(meta.is_file() && meta.permissions().mode() & 0o777 == 0o600);
     }
 }
 
-#[test]
-fn a_serving_predecessor_blocks_upgrade_verdict_acknowledgement() {
-    let old = PathBuf::from(std::env::var_os("PLAK_INSTALL_PREDECESSOR").unwrap()).join("plakd");
-    let candidate = PathBuf::from(std::env::var_os("PLAK_TEST_BINARY").unwrap());
-    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
-    let (before, after) = probe_pair(&fixture, &old, &candidate);
-    if before["state_key"] != after["state_key"] {
-        return;
-    }
-    fixture.start_gateway_with(&[]);
-    let mut host =
-        await_serving_host(spawn_host(fixture.base_command_from(&old).arg("host"))).unwrap();
-    // An interrupted exec can be followed by a manager start through the
-    // unchanged service link. The old image cannot see the durable fence.
-    let path = fixture.home().join("host/upgrade-checkpoint-verdict");
-    let id = uuid::Uuid::new_v4().to_string();
-    let pending = json!({
-        "version":1, "state_key": after["state_key"], "nonce": id,
-        "runtime_expected": false, "outcome": "Pending"
-    })
-    .to_string();
-    write_private(&path, &pending);
-    let mut recovery = fixture.base_command_from(&candidate);
-    recovery.args(["host", "upgrade-verdict", "--acknowledge", &id]);
-    let refused = recovery.output().unwrap();
-    assert!(
-        !refused.status.success()
-            && String::from_utf8_lossy(&refused.stderr)
-                .contains("host_upgrade_acknowledge_requires_stopped_home"),
-        "{refused:?}"
-    );
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), pending);
-    assert_eq!(
-        Client::connect_at_version(&host.socket, source_wire_version(&fixture, &old))
-            .request(1, Op::Ping),
-        Outcome::Ok(Answer::Pong)
-    );
-    stop(&mut host);
-    let missing = recovery.output().unwrap();
-    assert!(
-        !missing.status.success()
-            && String::from_utf8_lossy(&missing.stderr)
-                .contains("host_upgrade_acknowledge_baseline_unproven"),
-        "{missing:?}"
-    );
-    assert_eq!(std::fs::read_to_string(path).unwrap(), pending);
-}
-
-#[test]
-fn production_predecessor_never_observes_ready_after_destination_preservation_refusal() {
-    let directory = std::env::var_os("PLAK_INSTALL_PREDECESSOR").unwrap();
-    let old = PathBuf::from(directory).join("plakd");
-    let candidate = PathBuf::from(std::env::var_os("PLAK_TEST_BINARY").unwrap());
-    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
-    let _cleanup = upgrade::HomeHost(fixture.home());
-    let (old_facts, new_facts) = probe_pair(&fixture, &old, &candidate);
-    if old_facts["state_key"] != new_facts["state_key"] {
-        return;
-    }
-    fixture.start_gateway_with(&[]);
-    let id = new_facts["binary_id"].as_str().unwrap();
-    let gate = fixture.root.join("hold-exec");
-    std::fs::write(&gate, []).unwrap();
-    let mut host = await_serving_host(spawn_host(
-        fixture
-            .base_command_from(&old)
-            .env("PLAK_TEST_HOST_BEFORE_PAIRED_EXEC", &gate)
-            .arg("host"),
-    ))
-    .unwrap();
-    let mut child = Child::spawn(
-        fixture
-            .base_command_from(&candidate)
-            .args(["host", "upgrade", "--expect-binary", id, "--drain", "0"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped()),
-    );
-    let deadline = Instant::now() + WAIT;
-    loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let line = host
-            .lines
-            .recv_timeout(remaining)
-            .expect("source never reached exec");
-        if line.contains("waiting at paired exec gate") {
-            break;
-        }
-    }
-    upgrade::preservation::replace_store_identity(&fixture);
-    std::fs::remove_file(gate).unwrap();
-    eventually("gated requester did not report failure", || {
-        child.try_wait().unwrap().is_some()
-    });
-    let result = child.wait().unwrap();
-    let mut detail = String::new();
-    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut detail).unwrap();
-    assert_eq!(result.code(), Some(5), "{detail}");
-    assert!(
-        detail.contains(
-            "host_upgrade_fix_forward_required: destination preservation failed after surrender"
-        ),
-        "{detail}"
-    );
-    let status = host.child.take().unwrap().wait().unwrap();
-    // Restart-on-failure must not relaunch the predecessor's service link.
-    assert!(status.success());
-    assert!(!fixture.home().join("host/upgrade.sock").exists());
-}
-
-fn assert_host_reexec(host: &mut Host, socket: &Path, pid: u32, inode: u64) {
-    let child = host.child.as_mut().unwrap();
-    assert_eq!(child.id(), pid);
-    assert!(child.try_wait().unwrap().is_none());
-    assert_eq!(std::fs::symlink_metadata(socket).unwrap().ino(), inode);
-}
-
-fn upgrade_command(fixture: &Fixture, candidate: &Path, paired: &Paired, id: &str) -> Command {
-    let mut command = fixture.base_command_from(candidate);
-    command.env("PATH", &paired.path).args([
-        "host",
-        "upgrade",
-        "--expect-binary",
-        id,
-        "--drain",
-        "0",
-    ]);
-    command
-}
-
-fn refuse_changed_key(
-    fixture: &Fixture,
-    upgrade: &mut Command,
-    client: &mut Client,
-    web: &mut Browser,
-    node: &NodeAddress,
-) {
-    web.attach(node);
-    web.prompt("stream on the source while the other key is refused");
-    web.wait_for_text(STREAM);
-    let refused = upgrade.output().unwrap();
-    assert!(!refused.status.success(), "{refused:?}");
-    let detail = String::from_utf8_lossy(&refused.stderr);
-    assert!(
-        detail.lines().any(|line| line
-            .strip_prefix("plakd: ")
-            .and_then(|error| error.split_once(':'))
-            .is_some_and(|(code, _)| code == DIFFERENT_STATE_KEY)),
-        "{detail}"
-    );
-    assert_eq!(client.request(40, Op::Ping), Outcome::Ok(Answer::Pong));
-    assert!(!fixture.home().join("host/upgrades").exists());
-    std::fs::write(fixture.root.join("finish-stream"), []).unwrap();
-    web.expect_completed();
-}
-
-fn handoff(fixture: &Fixture, upgrade: &mut Command, web: &mut Browser, new_id: &str) {
-    let log_path = fixture.root.join("upgrade.log");
-    let log = std::fs::File::create(&log_path).unwrap();
-    let mut upgrading = Child::spawn(upgrade.stdout(log.try_clone().unwrap()).stderr(log));
-    let mut check_upgrade = || {
-        if let Some(status) = upgrading.try_wait().unwrap() {
-            assert!(
-                status.success(),
-                "{}",
-                std::fs::read_to_string(&log_path).unwrap()
-            );
-        }
-    };
-    assert_eq!(
-        web.lifecycle(HostLifecyclePhase::Draining, new_id, &mut check_upgrade),
-        0
-    );
-    let terminals = web.lifecycle(HostLifecyclePhase::Restarting, new_id, &mut check_upgrade);
-    assert!(
-        terminals + web.expect_closed() <= 1,
-        "duplicate source terminal"
-    );
-    eventually("candidate upgrade CLI did not exit", || {
-        upgrading.try_wait().unwrap().is_some()
-    });
-    assert!(
-        upgrading.wait().unwrap().success(),
-        "{}",
-        std::fs::read_to_string(log_path).unwrap()
-    );
+/// The candidate's binary id, as `plakd version` names it.
+fn binary_id(fixture: &Fixture, image: &Path) -> String {
+    let label = run(fixture.base_command_from(image).arg("version"));
+    label
+        .split_once("; binary ")
+        .and_then(|(_, rest)| rest.split([';', ')']).next())
+        .unwrap()
+        .to_owned()
 }
 
 fn verify_resumed_root(
@@ -540,7 +295,7 @@ fn eventually(detail: &str, mut ready: impl FnMut() -> bool) {
 fn probe(fixture: &Fixture, binary: &Path) -> Value {
     serde_json::from_str(&run(fixture
         .base_command_from(binary)
-        .args(["version", "--host-upgrade-probe"])))
+        .args(["version", "--build-info"])))
     .unwrap()
 }
 
@@ -557,14 +312,15 @@ fn probe_pair(fixture: &Fixture, old: &Path, candidate: &Path) -> (Value, Value)
     let new_facts = probe(fixture, candidate);
     let pin = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.config/install-predecessor");
     assert_eq!(
-        old_facts["runner_version"]["source_revision"],
+        old_facts["revision"],
         std::fs::read_to_string(pin).unwrap().trim()
     );
     assert_ne!(
-        old_facts["binary_id"], new_facts["binary_id"],
+        binary_id(fixture, old),
+        binary_id(fixture, candidate),
         "the test requires two distinct executables"
     );
-    assert_ne!(old_facts["runner_version"], new_facts["runner_version"]);
+    assert_ne!(old_facts["revision"], new_facts["revision"]);
     (old_facts, new_facts)
 }
 

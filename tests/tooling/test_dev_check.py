@@ -1302,7 +1302,7 @@ os.execv(real, [real, *sys.argv[1:]])
         parallel, durability, serial = self.filtersets(calls)
         self.assertEqual(parallel, durability)
         self.assertNotEqual(parallel, serial)
-        self.assertIn('binary(=deploy)', parallel)
+        self.assertIn('package(=plakous-mcp-fake-server)', parallel)
         for expression in (parallel, serial):
             self.assertTrue(expression.endswith(' & (rdeps(=plakd))'), expression)
         self.assertEqual(

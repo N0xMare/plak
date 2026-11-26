@@ -213,7 +213,6 @@ pub(crate) use account::unsent_continue_notice;
 mod handoff;
 #[cfg(test)]
 pub(in crate::runtime) use handoff::hooks as handoff_hooks;
-pub(crate) use handoff::record_tree_handoff;
 mod idle;
 mod loss_resume;
 mod open;
@@ -226,7 +225,6 @@ mod residency;
 mod restored;
 mod run_until_idle;
 mod session_executor;
-mod step_hold;
 mod stop;
 pub(in crate::runtime) mod transient;
 pub(in crate::runtime) mod wake;
@@ -698,9 +696,6 @@ impl<'a, 'o, P: plakous_host_protocol::ProtocolExtension> crate::node::Role<Root
         actor: &mut RootActor<'a, P>,
         cx: &mut RootLoop<'o>,
     ) -> crate::node::Next<RootPrompt, CliResult<()>> {
-        if actor.wait_step_hold().await {
-            return crate::node::Next::End(Ok(()));
-        }
         if actor.role.config.store.storage_unavailable() {
             actor.role.storage_interrupted |= actor.role.config.store.storage_wait_cancelled();
         } else {
@@ -754,9 +749,6 @@ impl<'a, 'o, P: plakous_host_protocol::ProtocolExtension> crate::node::Role<Root
         cx: &mut RootLoop<'o>,
         prompt: RootPrompt,
     ) -> crate::node::Served<CliResult<()>> {
-        if actor.wait_step_hold().await {
-            return crate::node::Served::End(Ok(()));
-        }
         let RootPrompt {
             text: raw_text,
             queued_delivery,

@@ -231,7 +231,7 @@ fn refuse_legacy_host(home: &Path) -> io::Result<()> {
             "plak-host.service and plak-host.service.d/"
         };
         return Err(io::Error::other(format!(
-            "legacy host definition at {}; after `plakd host upgrade` commits, run `{stop}` if loaded, back up and remove {backup}, then retry `plakd host install`",
+            "legacy host definition at {}; after the host has restarted on the new build, run `{stop}` if loaded, back up and remove {backup}, then retry `plakd host install`",
             path.display(),
         )));
     }

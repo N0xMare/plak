@@ -17,6 +17,8 @@ USAGE:
   plakd session import <path>
   plakd session delete <session> [--yes] [--abandon-children] [--abandon-jobs]
   plakd session gc <session> | --all
+  plakd session check-binding --all | --gating [--store-probe <stores>]
+  plakd session check-reopen <session> [--store-probe <stores>]
   plakd session reload <session> --expect-binary <binary-id>
 
   show/log accept .cN to read only that child. Child log reads its canonical

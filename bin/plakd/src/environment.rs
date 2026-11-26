@@ -2,7 +2,7 @@
 
 #[allow(dead_code, reason = "only hosted transports render the restart remedy")]
 pub(crate) const HOST_RESTART_REMEDY: &str =
-    "run the installed build's `plakd host upgrade --expect-binary <id>` with its binary id";
+    "qualify the installed build, then stop and restart the host service on it";
 
 #[allow(dead_code, reason = "only the web host starts a separate runner")]
 pub(crate) fn service_managed() -> bool {
@@ -50,13 +50,6 @@ pub(crate) fn user_manager_environment() -> Vec<(&'static str, std::ffi::OsStrin
 
 pub(crate) fn xdg_config_home() -> Option<std::path::PathBuf> {
     std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
-}
-
-pub(crate) const REEXEC_PROBE: &str = "PLAK_HOST_UPGRADE_PROBE_REEXEC_V4";
-pub(crate) const HOST_REEXEC: &str = "PLAK_HOST_REEXEC_V1";
-
-pub(crate) fn upgrade_reexec_probe() -> bool {
-    std::env::var_os(REEXEC_PROBE).is_some()
 }
 
 #[cfg(feature = "web")]

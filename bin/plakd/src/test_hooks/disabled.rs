@@ -86,11 +86,6 @@ pub(crate) fn upgrade_state_key() -> Option<String> {
     None
 }
 
-#[cfg(feature = "web")]
-pub(crate) const fn upgrade_backup_limit(limit: u64) -> u64 {
-    limit
-}
-
 pub(crate) const fn upgrade_runner_revision() -> Option<String> {
     None
 }
@@ -106,9 +101,6 @@ pub(crate) const fn upgrade_runner_environment() -> Vec<(&'static str, std::ffi:
     dead_code,
     reason = "only the optional host can exercise same-image handoff"
 )]
-pub(crate) const fn force_host_upgrade() -> bool {
-    false
-}
 #[allow(
     clippy::unnecessary_wraps,
     reason = "same seam when test hooks are disabled"
@@ -118,18 +110,7 @@ pub(crate) const fn gate_upgrade_reopen(_id: &str) -> Result<(), String> {
 }
 #[allow(dead_code, reason = "only the optional host coordinates upgrades")]
 pub(crate) fn upgrade_crash_cut(_name: &str) {}
-#[allow(dead_code, reason = "only the optional host prepares upgrades")]
-pub(crate) const fn upgrade_preparation_refused(_name: &str) -> bool {
-    false
-}
 
-pub(crate) const fn upgrade_reexec_probe_omitted() -> bool {
-    false
-}
-#[allow(dead_code, reason = "only the optional host starts replacement images")]
-pub(crate) fn upgrade_key_environment(_key: &str) -> impl Iterator<Item = (&'static str, String)> {
-    std::iter::empty()
-}
 pub(crate) const fn profile_route_ready(
     _catalog: &[plakous_host_protocol::views::ProviderSection],
     _account: &str,

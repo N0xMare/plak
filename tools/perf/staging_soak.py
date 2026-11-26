@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the same synthetic workload before and after a native same-key handoff."""
+"""Run the same synthetic workload before and after a same-key restart upgrade."""
 
 import argparse
 import asyncio
@@ -372,27 +372,18 @@ async def phase(fixture, roles, args, heavy, work, parked, image, which, load_li
         return result
 
 
-async def handoff(fixture, host, before, expected):
-    requester = await fixture.spawn(
-        "host",
-        "upgrade",
-        "--expect-binary",
-        expected["binary_id"],
-        "--drain",
-        "30s",
-        pipes=True,
-    )
-    reply, _ = await asyncio.wait_for(requester.communicate(), timeout=180)
-    await fixture.stop(requester)
-    if requester.returncode or reply.strip():
-        raise RuntimeError("native same-key upgrade did not succeed; inspect the scratch host log")
-    identity(host.pid, fixture.binary, expected["sha256"])
+async def restart(fixture, roles, before, expected):
+    """The restart upgrade: a planned stop of the source host, then the
+    candidate image on the same home and stores."""
+    await fixture.stop(roles["host"])
+    roles["host"] = await start_host(fixture)
+    identity(roles["host"].pid, fixture.binary, expected["sha256"])
     after = await fresh(fixture, expected["binary_id"])
     if after == before:
-        raise RuntimeError("native upgrade did not advance the wire host generation")
+        raise RuntimeError("the restart did not advance the wire host generation")
     return {
-        "kind": "native_same_key",
-        "pid": host.pid,
+        "kind": "restart",
+        "pid": roles["host"].pid,
         "source_generation": before,
         "candidate_generation": after,
     }
@@ -425,7 +416,7 @@ async def new_window(fixture, args, measured, side, load_limit):
         roles["host"] = await start_host(fixture)
         transition = {"kind": "same_image_restart"}
     else:
-        transition = await handoff(fixture, roles["host"], before, measured[1])
+        transition = await restart(fixture, roles, before, measured[1])
     return roles, measured[1], transition
 
 

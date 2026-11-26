@@ -54,7 +54,6 @@ mod command;
 pub mod commands;
 #[cfg(test)]
 mod composition_tests;
-mod deploy;
 mod diagnostics;
 mod dispatch;
 #[doc(hidden)]
@@ -83,6 +82,7 @@ pub(crate) mod terminal_application;
 mod terminal_registry;
 mod usage_remedy;
 pub mod wire_transport;
+mod writers;
 /// Plak's own storage home: where the XDG layout puts each file, and the
 /// credentials kept under it.
 #[doc(hidden)]
@@ -130,6 +130,8 @@ mod host;
 #[cfg(not(feature = "web"))]
 #[path = "host_unavailable.rs"]
 mod host;
+#[path = "host/lock.rs"]
+mod host_lock;
 mod observation_projection;
 #[cfg(all(test, unix))]
 mod product_compaction_runtime_e2e_tests;
@@ -230,8 +232,6 @@ use crate::presentation::{
 };
 use crate::shell::services::Services;
 
-const HOST_REEXEC_ARG: &str = "__host-reexec-v4";
-
 /// Run the Plak CLI using process arguments from the environment.
 pub fn main_from_env() -> ExitCode {
     open_file_limit::raise();
@@ -240,7 +240,7 @@ pub fn main_from_env() -> ExitCode {
     let _ = local_time_zone();
     let mut arguments = env::args_os();
     build_identity::record_launch(arguments.next().as_deref());
-    let mut arguments: Vec<_> = arguments.collect();
+    let arguments: Vec<_> = arguments.collect();
     #[cfg(feature = "test-support")]
     if let Err(error) = test_hooks::lifetime::enforce() {
         return run_to_exit(Err(CliFailure::new(format!("test owner lock: {error}"))));
@@ -252,11 +252,7 @@ pub fn main_from_env() -> ExitCode {
             }),
         );
     }
-    let reexec = arguments.first().is_some_and(|arg| arg == HOST_REEXEC_ARG);
-    if reexec {
-        arguments.remove(0);
-    }
-    run_to_exit(run(arguments, reexec))
+    run_to_exit(run(arguments))
 }
 
 /// This process's zone, read once and reused; UTC when the platform cannot
@@ -271,7 +267,7 @@ fn local_time_zone() -> &'static jiff::tz::TimeZone {
 /// Exit codes (spec 02 §3.3): 0 ok, 2 usage, 3 auth, 4 cancel, 5 agent,
 /// 6 run bound, 8 retryable local operation, 130 escalated quit, else 1.
 pub fn run_from_args(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
-    run_to_exit(run(arguments, false))
+    run_to_exit(run(arguments))
 }
 
 fn run_to_exit(result: CliResult<ProcessOutcome>) -> ExitCode {
@@ -310,7 +306,8 @@ fn log_start(binary: &str, command: &str) {
 fn log_command_start(command: &Command) {
     match command {
         Command::StateKey
-        | Command::HostUpgradeProbe { .. }
+        | Command::SessionCheckReopen { .. }
+        | Command::StoreRehearse { .. }
         | Command::ReloadProbe
         | Command::ReopenProbe { .. }
         | Command::WriteBinaryManifest { .. }
@@ -327,14 +324,7 @@ fn log_command_start(command: &Command) {
     }
 }
 
-fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult<ProcessOutcome> {
-    let host_reexec = if reexec {
-        let (binary, inherited) = host::receive_reexec()?;
-        build_identity::use_reexec_identity(binary);
-        Some(inherited)
-    } else {
-        None
-    };
+fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcome> {
     // The launch directory, read once: the CLI's workspace, and what a
     // relative path on the command line means. Nothing below resolves a
     // path against the process working directory.
@@ -350,11 +340,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         test_hooks::install().map_err(CliFailure::new)?;
     }
     let command = cli::parse(arguments)?.resolved_against(launch.as_deref());
-    if reexec && !matches!(&command, Command::Host(_)) {
-        return Err(CliFailure::new(
-            "host transport handoff requires the host command",
-        ));
-    }
 
     if matches!(command, Command::Help) {
         Services::install_identity_cache_from_env(launch.as_deref());
@@ -368,19 +353,15 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
             return wire_schema::print(&mut io::stdout().lock());
         }
         Command::BuildInfo => return build_identity::print_build_info(&mut io::stdout().lock()),
-        Command::Deploy(action) => return deploy::run(action),
-        Command::DeployTarget => return deploy::target(),
         Command::Snapshot(action) => {
             return snapshot_install::run(action, &mut io::stdout().lock());
-        }
-        Command::DeployCanary(ref options) if options.capabilities => {
-            return deploy::canary::capabilities(&mut io::stdout().lock());
         }
         _ => {}
     }
 
     if let Command::Runner(commands::runner::RunnerCommand::Connect {
         binary: Some(binary),
+        ..
     }) = &command
     {
         return commands::runner::connect_binary(binary);
@@ -429,6 +410,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         | Command::ReopenProbe {
             store_probe: Some(path),
             ..
+        }
+        | Command::SessionCheckReopen {
+            store_probe: Some(path),
+            ..
         } => services.with_store_probe(path)?,
         _ => services,
     };
@@ -440,24 +425,18 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
             &mut io::stdout().lock(),
         );
     }
-    if let Command::HostUpgradeProbe { service } = &command {
-        return carry::upgrade::print_probe(
-            &services,
-            service.as_deref(),
-            &mut io::stdout().lock(),
-        );
+    if let Command::SessionCheckReopen { session, .. } = &command {
+        let mut stdout = io::stdout().lock();
+        serde_json::to_writer(&mut stdout, &carry::check_reopen(&services, session))
+            .map_err(|_| CliFailure::new("stdout failed"))?;
+        writeln!(stdout).map_err(|_| CliFailure::new("stdout failed"))?;
+        return Ok(ProcessOutcome::Success);
+    }
+    if let Command::StoreRehearse { into } = &command {
+        return host::rehearse_stores(&services, into, &mut io::stdout().lock());
     }
     if let Command::HostInstall(install) = &command {
         return commands::host_install::run(install, services.paths(), &mut io::stdout().lock());
-    }
-    if let Command::DeployCanary(options) = command {
-        return deploy::canary::run(&services, options, &mut io::stdout().lock());
-    }
-    if let Command::DeployCredentialGeneration(account) = command {
-        let generation = gateway::deployment_generation(&services, &account)?;
-        writeln!(io::stdout().lock(), "{generation}")
-            .map_err(|_| CliFailure::new("stdout failed"))?;
-        return Ok(ProcessOutcome::Success);
     }
     if let Command::Gateway(command) = command {
         gateway::execute(&services, command, &mut io::stdout().lock())?;
@@ -474,7 +453,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
     {
         return Ok(outcome);
     }
-    let _upgrade_admission = if (command_needs_product_state(&command)
+    let _writer_admission = if (command_needs_product_state(&command)
         && !matches!(command, Command::Host(_)))
         || matches!(
             command,
@@ -486,7 +465,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
             .paths()?
             .ensure_private_state_home()
             .map_err(CliFailure::new)?;
-        Some(carry::upgrade::admission(services.paths()?, false)?)
+        Some(writers::admission(services.paths()?, false)?)
     } else {
         None
     };
@@ -583,25 +562,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
     // Machine transports own their streams before standard-stream locks.
     let command = match command {
         command @ Command::Agent { .. } => return run_agent_command(&services, command),
-        Command::Host(command) => return host::run_host_command(&services, &command, host_reexec),
+        Command::Host(command) => return host::run_host_command(&services, &command),
         Command::HostConnect { auto_start } => return host::connect_stdio(&services, auto_start),
-        Command::HostUpgrade {
-            expect_binary,
-            drain,
-            backup_store,
-            inspection,
-        } => {
-            return host::upgrade(
-                &services,
-                &expect_binary,
-                drain.unwrap_or_default(),
-                backup_store,
-                inspection,
-            );
-        }
-        Command::HostUpgradeVerdict { acknowledge } => {
-            return host::upgrade_verdict(&services, acknowledge, &mut io::stdout());
-        }
+        Command::HostWake { session, text } => return host::wake(&services, &session, &text),
         // The runner bridge owns raw stdin and stdout, so it runs before the
         // process takes their locks.
         Command::Runner(command) => {
@@ -674,7 +637,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         }
         Command::ReopenProbe {
             session,
-            host_upgrade_reopen,
             child_binding_probe,
             ..
         } => {
@@ -682,11 +644,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
                 serde_json::to_writer(
                     &mut stdout,
                     &carry::child_reopen_probe(&services, &session)?,
-                )
-            } else if host_upgrade_reopen {
-                serde_json::to_writer(
-                    &mut stdout,
-                    &carry::upgrade_reopen_probe(&services, &session),
                 )
             } else {
                 serde_json::to_writer(&mut stdout, &carry::reopen_probe(&services, &session))
@@ -701,9 +658,8 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         }
         Command::BuildInfo
         | Command::WriteBinaryManifest { .. }
-        | Command::HostUpgradeProbe { .. } => {
-            Err(CliFailure::new("internal command dispatch error"))
-        }
+        | Command::SessionCheckReopen { .. }
+        | Command::StoreRehearse { .. } => Err(CliFailure::new("internal command dispatch error")),
         Command::StateKey => {
             writeln!(stdout, "{}", home::state::state_key())
                 .map_err(|_| CliFailure::new("stdout failed"))?;
@@ -737,17 +693,21 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
             },
             &mut stdout,
         ),
-        Command::Doctor => run_doctor(&services, &mut stdout),
+        Command::Doctor { json } => run_doctor(&services, json, &mut stdout),
         Command::StatusJson => runtime_headroom::write_status(services.paths()?, &mut stdout, true),
         Command::StoreBackup {
             directory,
+            stopped,
             budget_secs,
-        } => store_backup::run_with_budget(
-            services.paths()?,
-            &directory,
-            store_backup::resolve_budget(budget_secs)?,
-            &mut stdout,
-        ),
+        } => {
+            let paths = services.paths()?;
+            let budget = store_backup::resolve_budget(budget_secs)?;
+            if stopped {
+                store_backup::stopped(paths, &directory, budget, &mut stdout)
+            } else {
+                store_backup::run_with_budget(paths, &directory, budget, &mut stdout)
+            }
+        }
         Command::TreeRelease { tree_id, force } => {
             if !force {
                 return Err(CliFailure::classified(
@@ -1268,17 +1228,14 @@ fn execute_command<Backend: AccountOps>(
         | Command::Host(_)
         | Command::HostInstall(_)
         | Command::HostConnect { .. }
-        | Command::HostUpgrade { .. }
-        | Command::HostUpgradeVerdict { .. }
+        | Command::HostWake { .. }
         | Command::WireSchema
         | Command::BuildInfo
         | Command::SessionCheckBinding { .. }
+        | Command::SessionCheckReopen { .. }
+        | Command::StoreRehearse { .. }
         | Command::SessionTraceReceipt(_)
-        | Command::Deploy(_)
-        | Command::DeployTarget
         | Command::Snapshot(_)
-        | Command::DeployCanary(_)
-        | Command::DeployCredentialGeneration(_)
         | Command::Help
         | Command::CommandHelp { .. }
         | Command::Version
@@ -1289,11 +1246,10 @@ fn execute_command<Backend: AccountOps>(
         | Command::StateKey
         | Command::WriteBinaryManifest { .. }
         | Command::ReloadProbe
-        | Command::HostUpgradeProbe { .. }
         | Command::ReopenProbe { .. }
         | Command::CarryProbe { .. }
         | Command::ExportVersion
-        | Command::Doctor
+        | Command::Doctor { .. }
         | Command::StatusJson
         | Command::StoreBackup { .. }
         | Command::Gateway(_)

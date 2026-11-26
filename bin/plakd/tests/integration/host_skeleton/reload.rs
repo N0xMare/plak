@@ -91,7 +91,7 @@ fn a_host_refuses_requested_reload_without_any_client_or_redispatch() {
         assert_eq!(
             outcome["reason"],
             format!(
-                "this session runs in plakd host{build}; restarting the host moves it onto the installed build (run the installed build's `plakd host upgrade --expect-binary <id>` with its binary id)"
+                "this session runs in plakd host{build}; restarting the host moves it onto the installed build (qualify the installed build, then stop and restart the host service on it)"
             )
         );
         let mut later = Client::connect(&host);

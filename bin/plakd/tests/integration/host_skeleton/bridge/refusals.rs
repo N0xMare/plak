@@ -123,7 +123,7 @@ fn bridge_refusal_incompatible_state_requires_a_live_kernel_lock() {
 }
 
 #[test]
-fn bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed() {
+fn bridge_refusal_startup_timeout_and_stopping_are_distinct() {
     let Some(fixture) = fixture() else { return };
     let key = plakd::home::state::state_key();
     let held = held_lock(&fixture, &key, "starting");
@@ -143,19 +143,4 @@ fn bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed() {
     );
     assert!(!fixture.home().join("host/auto-start.log").exists());
     drop(held);
-    let held = held_lock(&fixture, &key, "restarting");
-    let mut bridge = Bridge::start(&fixture);
-    bridge.hello(WIRE_VERSION);
-    assert!(
-        bridge
-            .lines
-            .recv_timeout(Duration::from_millis(100))
-            .is_err(),
-        "restart was refused instead of awaited"
-    );
-    drop(held);
-    let mut host = start(&fixture);
-    assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
-    bridge.finish();
-    stop(&mut host);
 }

@@ -240,7 +240,9 @@ fn rehearsal_prepares_wal_before_concurrent_probes() {
     // unchanged product-shaped copy and the revised copy must be ready.
     for (schema, name) in [(&BASE, "unchanged"), (&CURRENT, "revised")] {
         let copy = directory.path().join(name);
-        schema.rehearse(&source_path, &copy).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        copy_snapshot_bounded(&source_path, &copy, 1024 * 1024, deadline).unwrap();
+        schema.rehearse_copy(&copy, deadline).unwrap();
         let reader = pin_read(&copy);
         let writer = schema.open_writer(&copy, |_| Ok(())).unwrap();
         assert_eq!(

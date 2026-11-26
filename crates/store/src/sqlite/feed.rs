@@ -231,50 +231,6 @@ pub(super) fn require_readable_versions(c: &Connection) -> Result<(), SessionSto
     .unwrap_or(Ok(()))
 }
 
-pub(super) fn visit_advances(
-    snapshot: &Connection,
-    selector: SessionRef,
-    after: u64,
-    mut visit: impl FnMut(FeedRecord) -> bool,
-) -> Result<(), SessionStoreError> {
-    let mut query = snapshot
-        .prepare(
-            "SELECT seq,checkpoint_id,record,integrity FROM session_feed
-             WHERE session_id=?1 AND branch_id=?2 AND change=2 AND seq>?3 ORDER BY seq",
-        )
-        .map_err(map_sqlite)?;
-    let mut rows = query
-        .query(params![
-            id(selector.session_id()),
-            id(selector.branch_id()),
-            i64n(after)?
-        ])
-        .map_err(map_sqlite)?;
-    let branch = id(selector.branch_id());
-    while let Some(row) = rows.next().map_err(map_sqlite)? {
-        let checkpoint: String = row.get(1).map_err(map_sqlite)?;
-        let record = decode_row(
-            selector.session_id(),
-            nonnegative(row.get(0).map_err(map_sqlite)?)?,
-            &branch,
-            2,
-            Some(&checkpoint),
-            row.get_ref(2)
-                .map_err(map_sqlite)?
-                .as_blob()
-                .map_err(|_| SessionStoreError::corrupt())?,
-            row.get_ref(3)
-                .map_err(map_sqlite)?
-                .as_blob()
-                .map_err(|_| SessionStoreError::corrupt())?,
-        )?;
-        if !visit(record) {
-            break;
-        }
-    }
-    Ok(())
-}
-
 fn heads(c: &Connection, session_id: SessionId) -> Result<Vec<BranchHead>, SessionStoreError> {
     let mut statement = c
         .prepare("SELECT branch_id FROM branches WHERE session_id=?1 ORDER BY branch_id")

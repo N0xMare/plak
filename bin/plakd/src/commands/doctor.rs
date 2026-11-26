@@ -16,6 +16,7 @@ use crate::{
 
 pub(crate) fn run_doctor(
     services: &Services,
+    json: bool,
     stdout: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
     let paths = services.paths()?;
@@ -203,20 +204,16 @@ pub(crate) fn run_doctor(
         },
     });
 
-    let checks = report.checks;
-    let report = product_doctor::DoctorReport::from_checks(checks);
+    let report = product_doctor::DoctorReport::from_checks(report.checks);
+    if json {
+        return write_json(services, &report, stdout);
+    }
     writeln!(stdout, "plakd doctor\n").map_err(|_| CliFailure::new("stdout failed"))?;
     let mut table = cli_output::Table::new(["CHECK", "RESULT", "DETAIL", "FIX"]);
     for check in &report.checks {
         table
             .push([
-                match check.kind {
-                    product_doctor::CheckKind::OauthCodex => "OAuth codex".to_owned(),
-                    product_doctor::CheckKind::OauthXai => "OAuth grok".to_owned(),
-                    product_doctor::CheckKind::OauthClaude => "OAuth claude".to_owned(),
-                    product_doctor::CheckKind::OpenRouterCatalog => "OpenRouter catalog".to_owned(),
-                    _ => title_case_token(check.kind.key()),
-                },
+                check_label(check.kind),
                 check.severity.label().to_ascii_uppercase(),
                 format!("{} · {}", check.result, check.detail),
                 check.remediation.as_deref().unwrap_or("—").to_owned(),
@@ -256,6 +253,20 @@ pub(crate) fn run_doctor(
         errors
     )
     .map_err(|_| CliFailure::new("stdout failed"))?;
+    doctor_outcome(errors)
+}
+
+fn check_label(kind: product_doctor::CheckKind) -> String {
+    match kind {
+        product_doctor::CheckKind::OauthCodex => "OAuth codex".to_owned(),
+        product_doctor::CheckKind::OauthXai => "OAuth grok".to_owned(),
+        product_doctor::CheckKind::OauthClaude => "OAuth claude".to_owned(),
+        product_doctor::CheckKind::OpenRouterCatalog => "OpenRouter catalog".to_owned(),
+        _ => title_case_token(kind.key()),
+    }
+}
+
+fn doctor_outcome(errors: usize) -> CliResult<ProcessOutcome> {
     if errors > 0 {
         Err(CliFailure::classified(
             CliFailureKind::Agent,
@@ -266,8 +277,94 @@ pub(crate) fn run_doctor(
     }
 }
 
-/// The role label and text `session show` prints for one transcript row;
-/// rows without operator text are skipped.
+/// `plakd doctor --json`: the same checks and exit status as the table, as
+/// one object keyed by stable check names rather than display labels.
+fn write_json(
+    services: &Services,
+    report: &product_doctor::DoctorReport,
+    stdout: &mut dyn io::Write,
+) -> CliResult<ProcessOutcome> {
+    let paths = services.paths()?;
+    let mut notes = Vec::new();
+    let legacy_warnings = home::state::report_legacy_state(paths, &mut notes)
+        .map_err(|_| CliFailure::new("doctor report failed"))?;
+    let expiry_warnings =
+        crate::review_expiry::write_warnings(&mut notes, services.now_unix_seconds())
+            .map_err(|_| CliFailure::new("doctor report failed"))?;
+    let gateway = crate::gateway::doctor_line(services);
+    let errors = report.summary.errors + usize::from(gateway.is_err());
+    let value = JsonReport {
+        version: 1,
+        state_key: home::state::state_key(),
+        checks: report
+            .checks
+            .iter()
+            .map(|check| JsonCheck {
+                check: check.kind.key(),
+                group: check.group,
+                severity: check.severity.label(),
+                result: &check.result,
+                detail: &check.detail,
+                remediation: check.remediation.as_deref(),
+            })
+            .collect(),
+        gateway: match &gateway {
+            Ok(line) => JsonGateway {
+                ok: true,
+                detail: line,
+            },
+            Err(error) => JsonGateway {
+                ok: false,
+                detail: error,
+            },
+        },
+        revision_copies: store::revisions::backup_count(paths),
+        notes: String::from_utf8_lossy(&notes),
+        summary: JsonSummary {
+            ok: report.summary.ok,
+            warnings: report.summary.warnings + legacy_warnings + expiry_warnings,
+            failures: errors,
+        },
+    };
+    serde_json::to_writer(&mut *stdout, &value).map_err(|_| CliFailure::new("stdout failed"))?;
+    writeln!(stdout).map_err(|_| CliFailure::new("stdout failed"))?;
+    doctor_outcome(errors)
+}
+
+#[derive(serde::Serialize)]
+struct JsonReport<'a> {
+    version: u8,
+    state_key: String,
+    checks: Vec<JsonCheck<'a>>,
+    gateway: JsonGateway<'a>,
+    revision_copies: usize,
+    notes: std::borrow::Cow<'a, str>,
+    summary: JsonSummary,
+}
+
+#[derive(serde::Serialize)]
+struct JsonCheck<'a> {
+    check: &'static str,
+    group: &'static str,
+    severity: &'static str,
+    result: &'a str,
+    detail: &'a str,
+    remediation: Option<&'a str>,
+}
+
+#[derive(serde::Serialize)]
+struct JsonGateway<'a> {
+    ok: bool,
+    detail: &'a str,
+}
+
+#[derive(serde::Serialize)]
+struct JsonSummary {
+    ok: usize,
+    warnings: usize,
+    failures: usize,
+}
+
 /// Readiness of every template the root can spawn, from the same local
 /// inputs as the root template check.
 fn doctor_spawn_templates(

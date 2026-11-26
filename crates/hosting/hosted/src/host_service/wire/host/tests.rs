@@ -7,8 +7,6 @@ use super::*;
 use crate::runtime::HostWorkerHandle;
 
 mod lifecycle;
-mod step_drain;
-mod verdicts;
 
 /// The frames written so far, shared between the connection and the test.
 #[derive(Clone, Default)]
@@ -3084,67 +3082,6 @@ fn a_closed_host_opens_and_creates_nothing() {
     );
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
     assert!(fake.0.creates.lock().unwrap().is_empty());
-}
-
-#[test]
-fn a_host_upgrade_pause_refuses_new_work_and_drop_restores_the_old_owner() {
-    let (host, fake) = host(&["s1", "s2"]);
-    let out = Out::default();
-    let mut connection = host.connect(
-        out.clone(),
-        Face::Remote,
-        HostPrincipal::Socket(501),
-        || false,
-    );
-    request(&mut connection, 9, Op::Attach { node: node("s2") });
-    attached(&out.take(), 9);
-    let pause = host.pause_admissions().unwrap();
-    assert!(host.pause_admissions().is_err());
-    request(&mut connection, 1, Op::Attach { node: node("s1") });
-    assert!(matches!(
-        outcome(&out.take(), 1),
-        Outcome::Refused(RequestRefusal::Backpressure)
-    ));
-    request(&mut connection, 2, Op::Ping);
-    assert_eq!(outcome(&out.take(), 2), Outcome::Ok(Answer::Pong));
-    request(
-        &mut connection,
-        3,
-        Op::ListSessions {
-            workspace: None,
-            runner: None,
-            include_archived: false,
-        },
-    );
-    assert!(
-        matches!(outcome(&out.take(), 3), Outcome::Ok(Answer::Sessions { rows }) if rows.len() == 2)
-    );
-    let mut second = host.connect(
-        out.clone(),
-        Face::Remote,
-        HostPrincipal::Socket(501),
-        || false,
-    );
-    request(&mut second, 4, Op::Attach { node: node("s2") });
-    let attachment = attached(&out.take(), 4);
-    request(
-        &mut second,
-        5,
-        Op::Intent {
-            attachment,
-            intent: SessionIntent::Prompt("not sent".into()),
-            client_id: None,
-            blobs: Vec::new(),
-        },
-    );
-    assert_eq!(
-        outcome(&out.take(), 5),
-        Outcome::Refused(RequestRefusal::Backpressure)
-    );
-    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
-    drop(pause);
-    request(&mut connection, 6, Op::Attach { node: node("s1") });
-    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
 }
 
 fn binding(session: &str) -> SessionObservation<Core> {

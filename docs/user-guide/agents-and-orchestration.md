@@ -128,8 +128,9 @@ When the session opens, one warning lists everything the lost host left held
 `pending` or `running`, and the parent's next turn gets one `[harness]` note
 naming the children the loss interrupted (once per run of plakd; a handed-off
 child is not named).
-With `[host] resume_after_loss = "continue"` such children continue once by
-themselves. One whose wake was still pending rejoins that wake instead.
+Under `plakd host`, by default (`[host] resume_after_loss = "continue"`) such
+children continue once by themselves; `"hold"` waits for your Resume, as
+embedded faces do when the key is unset. One whose wake was still pending rejoins that wake instead.
 A Resume for a child that is already due to continue, for example after a
 planned handoff, reports that it is already continuing and starts no extra
 turn. JSONL roots and roots with auto-continue disabled must use `wait_agent` to learn child results before
@@ -257,9 +258,10 @@ a timeout does not mean the child was cancelled or that spawning it again is
 safe. A repeated identical `request_key` identifies the original admitted spawn,
 including its candidate inputs, even after its workspace changes.
 
-Reopening reconciles the tree without replaying uncertain work. By default,
-lost work is held for your Resume; `[host] resume_after_loss = "continue"`
-instead admits one continuation instruction turn. A child the lost
+Reopening reconciles the tree without replaying uncertain work. Under `plakd host`
+lost work continues by default with one continuation instruction turn;
+`[host] resume_after_loss = "hold"` instead keeps it for your Resume, which
+is also the embedded faces' default. A child the lost
 `plakd` left parked between turns is marked `interrupted` (owner lost) when the
 tree reopens. A child that was mid-turn, or whose own turn ended recovery
 required, is recovered rather than stranded: its session is reopened exactly,

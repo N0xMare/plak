@@ -16,7 +16,7 @@ impl ReloadTarget {
             .as_deref()
             .is_some_and(|key| key != running_key)
         {
-            return Some(super::upgrade::OFFLINE_MIGRATION_REQUIRED.to_owned());
+            return Some(super::OFFLINE_MIGRATION_REQUIRED.to_owned());
         }
         if let Some(error) = &self.capacity_error {
             return Some(error.clone());

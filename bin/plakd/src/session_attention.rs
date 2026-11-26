@@ -1,26 +1,17 @@
 use std::io::{self, Write};
 
-use plakous_hosted::runtime::ResumeAfterLoss;
 use plakous_hosted::runtime::operator_attention::PendingTreeWork;
 use plakous_recursive_subagents_store::{SqliteTreeStore, TreeInspection};
 
 use crate::home::paths::PlakPaths;
-use crate::product_config::{ProductConfig, ResumeAfterLoss as ConfiguredPolicy};
+use crate::product_config::ProductConfig;
 use crate::store::ProductStore;
-
-pub(crate) fn policy(config: &ProductConfig) -> ResumeAfterLoss {
-    if config.resume_after_loss == Some(ConfiguredPolicy::Continue) {
-        ResumeAfterLoss::Continue
-    } else {
-        ResumeAfterLoss::Hold
-    }
-}
 
 pub(super) fn write_status(paths: &PlakPaths, out: &mut dyn Write) -> io::Result<()> {
     let inspection = ProductConfig::load_home_file(paths)
         .map_err(|_| ())
         .and_then(|config| {
-            let policy = policy(&config);
+            let policy = config.resume_after_loss(true);
             ProductStore::inspect_attention_roots(paths, policy)
                 .map(|roots| (policy, roots))
                 .map_err(|_| ())

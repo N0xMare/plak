@@ -99,8 +99,7 @@ impl ReopenProbe {
     }
 }
 
-/// Only the host coordinator can defer this verdict, and it must then check
-/// the held head before surrender.
+/// The inspected head moved and needs a fresh check before stopping.
 pub(crate) const REOPEN_HEAD_ADVANCED: &str = "head_advanced";
 
 /// How far ahead of now a native access token must stay valid for the probe
@@ -128,9 +127,8 @@ pub(crate) fn reopen_probe(services: &crate::shell::services::Services, id: &str
 }
 
 #[derive(Deserialize, Serialize)]
-pub(crate) struct UpgradeReopenProbe {
-    // Older coordinators read just the flat verdict, which applies fallback
-    // classification. A comparing coordinator reads the independent root.
+pub(crate) struct CheckReopenReport {
+    // Keep the combined verdict and the separate root result when a child refuses.
     #[serde(flatten)]
     pub(crate) verdict: ReopenProbe,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -141,21 +139,15 @@ pub(crate) struct UpgradeReopenProbe {
     child_qualification: Option<child_reopen::ChildReopenQualification>,
 }
 
-pub(crate) fn upgrade_reopen_probe(
+pub(crate) fn check_reopen(
     services: &crate::shell::services::Services,
     id: &str,
-) -> UpgradeReopenProbe {
-    let probe = || -> Result<UpgradeReopenProbe, String> {
+) -> CheckReopenReport {
+    let probe = || -> Result<CheckReopenReport, String> {
         let (paths, record) = probe_session(services, id)?;
         crate::test_hooks::gate_upgrade_reopen(&record.id)?;
         let children = inspect_children(paths, &record)?;
-        let audit = if children.needs_legacy_audit() {
-            crate::host::legacy_child_audit(paths).map_err(|error| error.message().to_owned())?
-        } else {
-            None
-        };
-        let mut qualification =
-            children.qualify(child_reopen::ChildBaseline::Legacy(audit.as_ref()));
+        let mut qualification = children.qualify();
         let root = probe_root(services, paths, record, true).unwrap_or_else(ReopenProbe::refused);
         let (verdict, root) = match std::mem::take(&mut qualification.regressions).into_report() {
             Some(regressions) => {
@@ -173,14 +165,14 @@ pub(crate) fn upgrade_reopen_probe(
         };
         let child_inspection = children.into_faults();
         let child_qualification = child_inspection.is_some().then_some(qualification);
-        Ok(UpgradeReopenProbe {
+        Ok(CheckReopenReport {
             verdict,
             root,
             child_inspection,
             child_qualification,
         })
     };
-    probe().unwrap_or_else(|reason| UpgradeReopenProbe {
+    probe().unwrap_or_else(|reason| CheckReopenReport {
         verdict: ReopenProbe::refused(reason),
         root: None,
         child_inspection: None,
@@ -224,7 +216,7 @@ fn probe_root(
     services: &crate::shell::services::Services,
     paths: &PlakPaths,
     record: SessionRecord,
-    host_upgrade: bool,
+    restart_probe: bool,
 ) -> Result<ReopenProbe, String> {
     let (_, recorded, _, views) =
         crate::store::ProductStore::inspect_projection_read_only(paths, &record.id)?;
@@ -234,8 +226,8 @@ fn probe_root(
     let head = views.as_ref().map_or(recorded, |views| {
         plakous_hosted::runtime::projected_head(recorded, views)
     });
-    let verify = if host_upgrade {
-        crate::commands::session::verify_host_upgrade_reopen
+    let verify = if restart_probe {
+        crate::commands::session::verify_restart_reopen
     } else {
         crate::commands::session::verify_exact_reopen
     };

@@ -49,10 +49,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
     /// longer reads the mailbox, so readiness must not wake the loop.
     pub(super) fn takes_actions(&self) -> bool {
         !self.quit_after_terminal
-            && (self.housekeeping.mailbox_closed
-                || !self.host.events.step_control.requested()
-                || self.host.actions.abandon_and_release_requested()
-                || self.host.deferred.borrow().has_deferred_stop_or_interrupt())
     }
 
     /// Suppresses child wakes before the tree stop and the root record. A
@@ -170,12 +166,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         reason = "readiness reads, template refreshes, unreachable mailbox flags and empty polls retain distinct control meanings"
     )]
     pub(super) async fn poll_actions(&mut self) -> bool {
-        let held = self.host.events.step_control.requested();
-        if held {
-            self.housekeeping.mailbox_closed =
-                !crate::interrupt::InterruptWatch::deferring(self.host.actions, self.host.deferred)
-                    .drain();
-        }
         crate::call_detail::note_attached(&self.host.session.id);
         self.host
             .last_tree_revision
@@ -198,15 +188,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         if self.takes_actions() {
             let mut acknowledgement = None;
             let mut command_reply = false;
-            let received = if held {
-                self.host
-                    .deferred
-                    .borrow_mut()
-                    .take_step_control()
-                    .ok_or(TryRecvError::Empty)
-            } else {
-                take_next(self.host.deferred, || self.host.actions.try_recv())
-            };
+            let received = take_next(self.host.deferred, || self.host.actions.try_recv());
             let read = match received.as_deref() {
                 Ok(UserAction::Extension(intent)) => surface::accounts_read(
                     self.host.surface.as_deref(),

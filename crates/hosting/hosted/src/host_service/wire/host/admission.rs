@@ -1,7 +1,7 @@
 //! Principal-wide console budgets shared by every connection of a host.
 
 use super::reads::HostPrincipal;
-use crate::error::{CliFailure, CliResult};
+use crate::error::CliFailure;
 use plakous_host_protocol::wire::RequestRefusal;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -112,42 +112,6 @@ impl Rate {
     }
 }
 
-/// A reversible host-upgrade admission pause. It never cancels running work.
-pub struct AdmissionPause {
-    pub(super) gate: Arc<std::sync::RwLock<bool>>,
-    committed: Arc<std::sync::atomic::AtomicBool>,
-    cancelled: Arc<std::sync::atomic::AtomicBool>,
-}
-
-#[derive(Default)]
-pub(super) enum PausedControls {
-    #[default]
-    Refuse,
-    Allow,
-}
-
-impl AdmissionPause {
-    /// Linearizes surrender against an existing-session stop, without opening ingress.
-    ///
-    /// # Errors
-    /// An operator control or requester loss cancelled preparation.
-    pub fn commit(&self) -> CliResult<()> {
-        let _gate = self.gate.write().unwrap_or_else(PoisonError::into_inner);
-        if self.cancelled.load(std::sync::atomic::Ordering::Acquire) {
-            return Err(CliFailure::new("host upgrade cancelled before surrender"));
-        }
-        self.committed
-            .store(true, std::sync::atomic::Ordering::Release);
-        Ok(())
-    }
-}
-
-impl Drop for AdmissionPause {
-    fn drop(&mut self) {
-        *self.gate.write().unwrap_or_else(PoisonError::into_inner) = false;
-    }
-}
-
 impl<P: plakous_host_protocol::ProtocolExtension> super::SessionHost<P>
 where
     P: 'static,
@@ -156,86 +120,6 @@ where
     plakous_host_protocol::wire::HostFrame<P>: serde::Serialize,
     plakous_host_protocol::wire::ClientFrame<P>: serde::de::DeserializeOwned,
 {
-    /// Refuses new client requests after previously admitted frame handlers
-    /// return. Running work continues. Dropping the permit restores admissions.
-    ///
-    /// # Errors
-    /// Another upgrade already paused this host, or the host is stopping.
-    pub fn pause_admissions(&self) -> CliResult<AdmissionPause> {
-        self.pause(Arc::default(), PausedControls::Refuse)
-    }
-
-    /// Pauses ingress with the coordinator's cancellation flag while still
-    /// admitting Stop and Interrupt until the pause is sealed.
-    ///
-    /// # Errors
-    /// Another pause exists or the host is stopping.
-    pub fn pause_admissions_for_upgrade(
-        &self,
-        cancelled: Arc<std::sync::atomic::AtomicBool>,
-    ) -> CliResult<AdmissionPause> {
-        self.pause(cancelled, PausedControls::Allow)
-    }
-
-    /// Joins Stop receipts after sealing ingress and before publishing Ready.
-    ///
-    /// # Errors
-    /// The pause does not own the host, or admitted stops did not settle in time.
-    pub fn join_paused_stops(&self, pause: &AdmissionPause, deadline: Instant) -> CliResult<()> {
-        use std::sync::atomic::Ordering;
-        if !Arc::ptr_eq(&pause.gate, &self.upgrade_admission)
-            || !pause.committed.load(Ordering::Acquire)
-        {
-            return Err(CliFailure::new(
-                "joining stops requires a sealed upgrade pause",
-            ));
-        }
-        loop {
-            {
-                let mut pending = self
-                    .pending_stops
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
-                pending.retain(|stop| stop.pending());
-                if pending.is_empty() {
-                    return Ok(());
-                }
-            }
-            if pause.cancelled.load(Ordering::Acquire) || Instant::now() >= deadline {
-                return Err(CliFailure::new(
-                    "host_upgrade_stop_unsettled: a stop did not settle before surrender",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-    }
-
-    fn pause(
-        &self,
-        cancelled: Arc<std::sync::atomic::AtomicBool>,
-        controls: PausedControls,
-    ) -> CliResult<AdmissionPause> {
-        let mut paused = self
-            .upgrade_admission
-            .write()
-            .unwrap_or_else(PoisonError::into_inner);
-        if *paused || self.closed() {
-            return Err(CliFailure::new("the host is already upgrading or stopping"));
-        }
-        *paused = true;
-        self.upgrade_committed
-            .store(false, std::sync::atomic::Ordering::Release);
-        *self
-            .upgrade_controls
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = controls;
-        Ok(AdmissionPause {
-            gate: Arc::clone(&self.upgrade_admission),
-            committed: Arc::clone(&self.upgrade_committed),
-            cancelled,
-        })
-    }
-
     /// Stops the host, so no session opens or is created from here on, then
     /// releases every resident session as a planned handoff, all at once,
     /// each joined within `deadline`; the sessions that did not release in

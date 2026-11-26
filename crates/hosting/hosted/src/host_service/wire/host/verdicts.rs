@@ -1,13 +1,12 @@
-//! The paused host's admission verdict barrier, before planned surrender.
+//! Buffered transport output tracking for a host connection.
 
-use super::{AdmissionPause, HostConnection, SessionHost, SlotView};
-use crate::error::{CliFailure, CliResult};
+use super::HostConnection;
+use crate::error::CliResult;
 use plakous_host_protocol::{
     ProtocolExtension,
     wire::{ClientFrame, HostFrame},
 };
-use std::sync::{Arc, PoisonError};
-use std::time::Instant;
+use std::sync::Arc;
 
 impl<P: ProtocolExtension, W: std::io::Write> HostConnection<P, W>
 where
@@ -52,52 +51,5 @@ where
         if let Some(link) = &mut self.readonly {
             link.connection.output_sent();
         }
-    }
-}
-
-impl<P: ProtocolExtension> SessionHost<P>
-where
-    P: 'static,
-    P::Intent: Send,
-    P::Observation: Send,
-    HostFrame<P>: serde::Serialize,
-    ClientFrame<P>: serde::de::DeserializeOwned,
-{
-    /// Resolves reservations made before `pause`: safely withdraw unclaimed
-    /// mailbox inputs with upgrading `DraftRejected`, then join already-claimed
-    /// inputs' normal durable verdicts and their write attempts. A disconnected
-    /// attachment loses delivery, not the durable admission fact.
-    ///
-    /// The caller closes ingress first and supplies one absolute host-wide
-    /// deadline. Failure must abort preparation, never permit surrender.
-    /// Neither draft identities nor this barrier are carried across generations.
-    /// This is a blocking join: connection writer tasks must keep running.
-    ///
-    /// # Errors
-    /// A foreign/inactive pause, or unresolved admission/delivery at the deadline.
-    pub fn resolve_paused_drafts(
-        &self,
-        pause: &AdmissionPause,
-        deadline: Instant,
-        cancelled: &std::sync::atomic::AtomicBool,
-    ) -> CliResult<()> {
-        if !Arc::ptr_eq(&pause.gate, &self.upgrade_admission)
-            || !*self
-                .upgrade_admission
-                .read()
-                .unwrap_or_else(PoisonError::into_inner)
-        {
-            return Err(CliFailure::new(
-                "draft verdict resolution requires this host's upgrade admission pause",
-            ));
-        }
-        for slot in self.slots() {
-            if let SlotView::Resident(session) = slot.peek() {
-                session.reject_queued_wire_drafts();
-            }
-        }
-        self.drafts
-            .wait_resolved(deadline, cancelled)
-            .map_err(CliFailure::new)
     }
 }

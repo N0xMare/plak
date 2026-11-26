@@ -71,17 +71,6 @@ pub(crate) fn run(action: Action, stdout: &mut dyn Write) -> CliResult<ProcessOu
     Ok(ProcessOutcome::Success)
 }
 
-pub(crate) fn install_dir(path: &Path) -> CliResult<PathBuf> {
-    install(&Install {
-        from: path.to_owned(),
-        manifest: None,
-        no_link: true,
-        flavor: Flavor::Release,
-        source_build: None,
-        release_download: false,
-    })
-}
-
 fn install(options: &Install) -> CliResult<PathBuf> {
     check(
         options.flavor != Flavor::Maintainer || options.source_build.is_some(),
@@ -188,23 +177,6 @@ fn admit_build(manifest: &Manifest, source_build: bool) -> CliResult<()> {
 
 pub(crate) fn link_snapshot(id: &str) -> CliResult<()> {
     Layout::resolve(Flavor::Release)?.link_verified(id)
-}
-
-pub(crate) fn link_snapshot_in(home: &Path, flavor: Flavor, id: &str) -> CliResult<()> {
-    Layout::from_home(home, flavor)?.link_verified(id)
-}
-
-pub(crate) fn verified_snapshot_in(home: &Path, flavor: Flavor, id: &str) -> CliResult<PathBuf> {
-    Layout::from_home(home, flavor)?.verified(id)
-}
-
-pub(crate) fn stage_maintainer(
-    path: &Path,
-    raw: &[u8],
-    m: &maintainer::Manifest,
-) -> CliResult<PathBuf> {
-    m.check_current(path)?;
-    Layout::resolve(Flavor::Maintainer)?.publish(path, &m.files, &m.snapshot_id, Some(raw))
 }
 
 struct Layout {
@@ -535,10 +507,6 @@ fn owned(path: &Path) -> CliResult<()> {
         fs::symlink_metadata(path).map_err(io)?.uid() == rustix::process::geteuid().as_raw(),
         "foreign installation directory refused",
     )
-}
-
-pub(crate) fn require_owned(path: &Path) -> CliResult<()> {
-    owned(path)
 }
 
 fn owned_image(path: &Path) -> CliResult<()> {

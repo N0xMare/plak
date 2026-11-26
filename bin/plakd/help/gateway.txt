@@ -14,7 +14,7 @@ USAGE:
   plakd gateway enable [--account <ref>] [--caller <id>]
   plakd gateway drain
   plakd gateway audit [--since <rfc3339>] [--caller <id>]
-  plakd gateway check
+  plakd gateway check [--json]
 
   `serve` is the only process that opens the credential store while it holds
   the exclusive holder lock. A same-UID client on its Unix socket is the local
@@ -24,3 +24,5 @@ USAGE:
   `install` writes the user service for a gateway-only machine. It seeds
   ~/.local/bin/plakd-gateway if absent and never starts the service. Upgrade
   by draining, switching that link, restarting and running `gateway check`.
+  `check --json` prints the holder, served versions, instance and each
+  account's credential status and generation as one object.

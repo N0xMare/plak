@@ -93,7 +93,7 @@ pub(crate) fn probe_stores(paths: &PlakPaths, root: &Path) -> CliResult<PathBuf>
         || !canonical.is_dir()
     {
         return Err(CliFailure::new(
-            "invalid scratch store directory for upgrade probe",
+            "--store-probe must name the stores directory of a rehearsal directly under the product home",
         ));
     }
     Ok(canonical)

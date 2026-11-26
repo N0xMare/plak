@@ -89,6 +89,6 @@ are not prerequisites or authority for current behavior.
   [comment style](docs/spec/06-build-and-support-surface.md#code-style).
 - Do not install or interrupt a running session merely to review a refactor.
   For an authorized product host change, follow the tested snapshot and
-  paired upgrade rules in [06 §6.3](docs/spec/06-build-and-support-surface.md#63-updating).
+  restart-upgrade rules in [06 §6.3](docs/spec/06-build-and-support-surface.md#63-updating).
 - Never put credentials, auth headers, private session data or unsanitized
   provider fixtures in the tree, logs or tests. No `unsafe`.

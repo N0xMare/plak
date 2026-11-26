@@ -21,37 +21,33 @@ fn startup_discards_abandoned_copies_but_keeps_live_and_final_copies() {
     let active_runtime = state.join(format!(".runtime-bootstrap-{}-0", std::process::id()));
     fs::create_dir(&active_runtime).unwrap();
 
-    let probe = paths.home().join(".tmpABCdef");
-    fs::create_dir_all(probe.join("stores")).unwrap();
-    fs::write(probe.join("stores/subagents.sqlite3"), b"scratch").unwrap();
-    for name in [
-        "runtime.sqlite3",
-        "runtime.sqlite3-wal",
-        "runtime.sqlite3-shm",
-        "runtime.pre-codec-bootstrap.sqlite3",
-    ] {
-        fs::write(probe.join("stores").join(name), b"scratch").unwrap();
-    }
-    fs::write(probe.join("service.json"), b"{}").unwrap();
-    let live = super::super::request_rehearsal(&probe).unwrap();
-    let unrelated = paths.home().join(".tmp456abc/stores");
-    fs::create_dir_all(&unrelated).unwrap();
-    fs::write(unrelated.join("product.sqlite3"), b"not a probe").unwrap();
-
     stale_copies(&paths);
     assert!(!staging.exists());
     assert!(!abandoned_runtime.exists());
     assert!(active_runtime.exists());
-    assert!(probe.join("stores/runtime.sqlite3").is_file());
-    assert!(probe.join("stores/subagents.sqlite3").is_file());
-    drop(live);
-    stale_copies(&paths);
-    assert!(!probe.exists());
     assert_eq!(fs::read(final_copy).unwrap(), b"published");
-    assert_eq!(
-        fs::read(unrelated.join("product.sqlite3")).unwrap(),
-        b"not a probe"
-    );
     assert_eq!(fs::read(runtime_copy).unwrap(), b"published runtime");
     assert_eq!(crate::store::revisions::backup_count(&paths), 2);
+}
+
+#[test]
+fn startup_reclaims_only_unlocked_legacy_probe_copies() {
+    let (_temporary, paths) = PlakPaths::isolated_test_home();
+    paths.ensure_layout().unwrap();
+    let probe = |name: &str| {
+        let path = paths.home().join(name);
+        fs::create_dir_all(path.join("stores")).unwrap();
+        fs::write(path.join("stores/product.sqlite3-wal"), []).unwrap();
+        fs::write(path.join("scratch-request"), []).unwrap();
+        path
+    };
+    let abandoned = probe(".tmp123abc");
+    let live = probe(".tmp321abc");
+    let held = lock_marker(&live.join("scratch-request"), false).unwrap();
+    stale_copies(&paths);
+    assert!(!abandoned.exists());
+    assert!(live.exists());
+    drop(held);
+    stale_copies(&paths);
+    assert!(!live.exists());
 }

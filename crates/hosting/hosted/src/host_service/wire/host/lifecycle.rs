@@ -3,45 +3,8 @@
 use super::{ClientFrame, HostConnection, HostFrame, PoisonError, ProtocolExtension, SessionHost};
 use crate::error::CliResult;
 use plakous_host_protocol::wire::HostLifecycle;
-use std::time::Instant;
-
-/// Process-local lifecycle facts. Starting and its readiness edge were not
-/// published on the protocol 12 connection.
-#[derive(Clone, Debug)]
-pub enum LifecycleState<P: ProtocolExtension> {
-    /// An existing product lifecycle transition.
-    Transition(HostLifecycle<P>),
-    /// A host that can answer Welcome but has not yet reopened admission.
-    Starting {
-        /// The same generation returned in Welcome.
-        host_generation: u64,
-    },
-    /// That successor completed startup and reopened admission.
-    Started {
-        /// The same generation returned in Welcome.
-        host_generation: u64,
-    },
-}
-
-/// Draft projection called by the connection writer with a current countdown.
-pub type LifecycleOutput<P> = fn(&mut dyn std::io::Write, LifecycleState<P>, u64) -> CliResult<()>;
-
-#[derive(Clone)]
-pub(super) struct Notice<P: ProtocolExtension> {
-    state: LifecycleState<P>,
-    deadline: Option<Instant>,
-}
-
-impl<P: ProtocolExtension> Notice<P> {
-    fn remaining(&self, now: Instant) -> u64 {
-        self.deadline.map_or(0, |deadline| {
-            let remaining = deadline.saturating_duration_since(now);
-            remaining
-                .as_secs()
-                .saturating_add(u64::from(remaining.subsec_nanos() != 0))
-        })
-    }
-}
+/// Product projection called by the connection writer.
+pub type LifecycleOutput<P> = fn(&mut dyn std::io::Write, HostLifecycle<P>) -> CliResult<()>;
 
 pub(super) struct Delivery<T> {
     pending: std::collections::VecDeque<T>,
@@ -67,14 +30,10 @@ impl<P: ProtocolExtension> SessionHost<P> {
     /// Latest advisory state, independent of admission.
     #[must_use]
     pub fn lifecycle(&self) -> Option<HostLifecycle<P>> {
-        let latest = self
-            .lifecycle_latest
+        self.lifecycle_latest
             .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        match &latest.as_ref()?.state {
-            LifecycleState::Transition(notice) => Some(notice.clone()),
-            _ => None,
-        }
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Joins transport send attempts, not peer receipt or any request verdict.
@@ -106,75 +65,25 @@ where
     /// Publishes advisory product state only to handshaken connections.
     /// It does not touch admission, sessions, drafts or their outcomes.
     pub fn publish_lifecycle(&self, notice: HostLifecycle<P>) {
-        self.publish_lifecycle_until(notice, None);
-    }
-
-    /// Publishes existing advisory state with its active monotonic deadline.
-    pub fn publish_lifecycle_until(&self, notice: HostLifecycle<P>, deadline: Option<Instant>) {
-        self.publish(Notice {
-            state: LifecycleState::Transition(notice),
-            deadline,
-        });
-    }
-
-    /// Publishes successor startup independently of the bridge handshake.
-    pub fn publish_starting(&self, deadline: Instant) {
-        self.publish(Notice {
-            state: LifecycleState::Starting {
-                host_generation: self.generation,
-            },
-            deadline: Some(deadline),
-        });
-    }
-
-    /// Publishes readiness only if startup is still the active phase.
-    pub fn publish_started(&self) {
         let mut latest = self
             .lifecycle_latest
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if matches!(
-            latest.as_ref().map(|notice| &notice.state),
-            Some(LifecycleState::Starting { .. })
-        ) {
-            self.publish_locked(
-                &mut latest,
-                Notice {
-                    state: LifecycleState::Started {
-                        host_generation: self.generation,
-                    },
-                    deadline: None,
-                },
-            );
-            drop(latest);
-            self.changed();
-        }
-    }
-
-    fn publish(&self, notice: Notice<P>) {
-        let mut latest = self
-            .lifecycle_latest
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        self.publish_locked(&mut latest, notice);
-        drop(latest);
-        self.changed();
-    }
-
-    fn publish_locked(&self, latest: &mut Option<Notice<P>>, notice: Notice<P>) {
         let mut deliveries = self
             .lifecycle
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         for delivery in deliveries.values_mut() {
             let queue = &mut delivery.pending;
-            // A slow client must not grow host memory across repeated aborted upgrades.
             if queue.len() == 16 {
                 queue.pop_front();
             }
             queue.push_back(notice.clone());
         }
         *latest = Some(notice);
+        drop(deliveries);
+        drop(latest);
+        self.changed();
     }
 }
 
@@ -197,13 +106,6 @@ where
     /// # Errors
     /// The transport outbox cannot accept a frame.
     pub fn flush_lifecycle(&mut self) -> CliResult<()> {
-        self.flush_lifecycle_at(Instant::now)
-    }
-
-    pub(in super::super) fn flush_lifecycle_at(
-        &mut self,
-        mut now: impl FnMut() -> Instant,
-    ) -> CliResult<()> {
         let notices = self
             .host
             .lifecycle
@@ -216,10 +118,9 @@ where
             });
         for notice in notices {
             if let Some(output) = self.lifecycle_output {
-                let remaining = notice.remaining(now());
-                output(&mut self.out, notice.state, remaining)?;
-            } else if let LifecycleState::Transition(legacy) = notice.state {
-                self.write(&HostFrame::<P>::from(legacy))?;
+                output(&mut self.out, notice)?;
+            } else {
+                self.write(&HostFrame::<P>::from(notice))?;
             }
         }
         if !self.buffered_output {

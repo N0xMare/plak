@@ -513,30 +513,6 @@ fn sqlite_integrity(
     Ok(None)
 }
 
-#[cfg(feature = "web")]
-pub(crate) fn upgrade_database_healthy(path: &Path, deadline: std::time::Instant) -> bool {
-    use rusqlite::{Connection, OpenFlags};
-    use std::time::Instant;
-
-    match fs::symlink_metadata(path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
-        Ok(metadata) if metadata.is_file() => {}
-        _ => return false,
-    }
-    let check = || -> rusqlite::Result<bool> {
-        let mut connection = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )?;
-        // A concurrent opener may be rebuilding the WAL index; wait for it
-        // within the caller's bound rather than failing the check.
-        connection.busy_timeout(deadline.saturating_duration_since(Instant::now()))?;
-        connection.progress_handler(4096, Some(move || Instant::now() >= deadline))?;
-        Ok(sqlite_integrity(&connection, "PRAGMA quick_check(1)")?.is_none())
-    };
-    Instant::now() < deadline && check().unwrap_or(false)
-}
-
 fn state_database_error(error: rusqlite::Error) -> DatabaseStatus {
     match error.sqlite_error_code() {
         Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase) => {

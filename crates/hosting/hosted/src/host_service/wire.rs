@@ -388,10 +388,6 @@ impl<P: ProtocolExtension> StopSettlement<P> {
         }
         outcome.clone()
     }
-
-    fn pending(&self) -> bool {
-        self.outcome().is_none()
-    }
 }
 
 /// How many roots a connection remembers telling its client: an attach of
@@ -1637,10 +1633,9 @@ mod slot;
 pub use super::attachment::AttachmentStatus;
 pub use super::retained::{ViewportRead, ViewportRevision, ViewportStart};
 pub use host::{
-    AdmissionPause, ClientInput, Created, Creation, DirectoryProjection, DirectorySlot,
-    HistoryBinding, HostConnection, HostPrincipal, HostReadLimits, HostReadTask,
-    HostRequestContext, HostSessions, HostStepDrain, LifecycleOutput, LifecycleState,
-    PickerProgress, PreparedViewport, SessionHost, StepDrainMonitor, StoredSessionView,
+    ClientInput, Created, Creation, DirectoryProjection, DirectorySlot, HistoryBinding,
+    HostConnection, HostPrincipal, HostReadLimits, HostReadTask, HostRequestContext, HostSessions,
+    LifecycleOutput, PickerProgress, PreparedViewport, SessionHost, StoredSessionView,
     TranscriptRead, ViewportMode,
 };
 pub use lines::{Line, LineSender, Lines, lines};

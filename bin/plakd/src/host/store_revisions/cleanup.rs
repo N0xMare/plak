@@ -98,7 +98,7 @@ fn discard_probe(directory: &Path) {
     {
         return;
     }
-    let marker = directory.join(super::REQUEST);
+    let marker = directory.join("scratch-request");
     let Some(_probe) = lock_marker(&marker, true) else {
         return;
     };

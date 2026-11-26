@@ -15,7 +15,7 @@ pub(crate) mod trace;
 
 pub(crate) use attached::{
     probe_carry_capacity, probe_prepared_capacity, run_attached_action, verify_exact_reopen,
-    verify_host_upgrade_reopen,
+    verify_restart_reopen,
 };
 
 pub use binding::seed_new_session_binding;

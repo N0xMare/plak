@@ -181,13 +181,13 @@ pub(crate) async fn qualify(
     command: &str,
 ) -> CliResult<Dialed> {
     let host_id = super::existing_host_id(paths)?;
-    let (child, stream) = ssh_stream(destination, command).map_err(|failure| {
-        CliFailure::new(format!(
-            "runner qualification transport failed: {failure:?}"
-        ))
-    })?;
+    let (child, stream) = children::bridge(&mut ssh_command(
+        destination,
+        &[command, "runner", "connect", "--stdio", "--no-start"],
+    ))
+    .map_err(|_| CliFailure::new("runner qualification transport failed"))?;
     let (client, hello) = RunnerClient::connect_qualification(stream, host_id, version(), crate::test_hooks::runner_windows()).await
-        .map_err(|failure| CliFailure::new(format!("host_upgrade_runner_qualification: {failure:?}; advance the runner dedicated link to the matching snapshot first; retain the old build to inspect and drain old workers")))?;
+        .map_err(|failure| CliFailure::new(format!("check_reopen_runner_qualification: {failure:?}; point the runner link at the matching snapshot and start its daemon before checking reopen")))?;
     Ok(Dialed {
         client,
         hello,

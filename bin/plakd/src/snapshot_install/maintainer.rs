@@ -1,7 +1,7 @@
-//! Pinned build and ELF facts for deployment of a maintainer install.
+//! Pinned build and ELF facts for a maintainer snapshot install.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -48,17 +48,6 @@ impl Manifest {
         shipping::canonical(&manifest).map(Some)
     }
 
-    pub(crate) fn parse(raw: &[u8]) -> CliResult<Self> {
-        let manifest: Self = serde_json::from_slice(raw)
-            .map_err(|_| fail("invalid maintainer snapshot manifest"))?;
-        check(
-            shipping::canonical(&manifest)? == raw,
-            "noncanonical maintainer snapshot manifest",
-        )?;
-        manifest.validate()?;
-        Ok(manifest)
-    }
-
     fn validate(&self) -> CliResult<()> {
         check(
             self.snapshot_schema == 1
@@ -82,62 +71,6 @@ impl Manifest {
             "maintainer snapshot id differs",
         )
     }
-
-    pub(crate) fn inputs(&self, root: &Path) -> CliResult<BTreeMap<String, PathBuf>> {
-        check(
-            root.file_name().and_then(|n| n.to_str()) == Some(&self.snapshot_id)
-                && root
-                    .parent()
-                    .and_then(Path::file_name)
-                    .and_then(|n| n.to_str())
-                    == Some("maintainer"),
-            "expected the installer-published maintainer snapshot directory",
-        )?;
-        let sidecar_root = super::parent(super::parent(root)?)?.join("sidecars");
-        let mut paths = BTreeMap::new();
-        for name in NAMES {
-            let file = &self.files[name];
-            let path = root.join(name);
-            let path = if name == "plakd" {
-                path
-            } else {
-                let expected = sidecar_root.join(name).join(&file.sha256).join(name);
-                check(
-                    std::fs::read_link(&path).map_err(shipping::io)? == expected,
-                    "maintainer sidecar link is not canonical",
-                )?;
-                expected
-            };
-            file.verify(&path)?;
-            paths.insert(name.to_owned(), path);
-        }
-        check(
-            shipping::read(&root.join("state-key"), 1024)?
-                == format!("{}\n", self.build_info.state_key).as_bytes(),
-            "maintainer state-key marker differs from build info",
-        )?;
-        Ok(paths)
-    }
-
-    pub(super) fn check_current(&self, path: &Path) -> CliResult<()> {
-        self.check_running(&current()?, native()?, path)
-    }
-
-    fn check_running(&self, running: &BuildInfo, platform: &str, path: &Path) -> CliResult<()> {
-        check(
-            platform == self.platform
-                && *running == self.build_info
-                && build_is_deployable(running),
-            "maintainer installer and pinned build info differ",
-        )?;
-        if let Some(expected) = self.glibc {
-            check(
-                glibc_ceiling(path)? == expected,
-                "transferred GLIBC ceiling differs from the manifest",
-            )?;
-        }
-        Ok(())
-    }
 }
 
 fn build_is_deployable(build: &BuildInfo) -> bool {
@@ -146,26 +79,6 @@ fn build_is_deployable(build: &BuildInfo) -> bool {
         && build.omitted_features.is_empty()
         && build.product_version == plakous::VERSION
         && shipping::revision(&build.revision)
-}
-
-pub(crate) fn check_bootstrap(platform: &str, revision: &str, state_key: &str) -> CliResult<()> {
-    check_bootstrap_pin(&current()?, native()?, platform, revision, state_key)
-}
-
-fn check_bootstrap_pin(
-    running: &BuildInfo,
-    native: &str,
-    platform: &str,
-    revision: &str,
-    state_key: &str,
-) -> CliResult<()> {
-    check(
-        native == platform
-            && running.revision == revision
-            && running.state_key == state_key
-            && build_is_deployable(running),
-        "running maintainer candidate differs from pinned platform or build info",
-    )
 }
 
 fn native() -> CliResult<&'static str> {

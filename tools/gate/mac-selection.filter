@@ -22,7 +22,6 @@ package(=plakous-mcp-fake-server)
 (package(=plakd) & binary(=integration) & test(/^(host_install|product_doctor_contract|diagnostics_contract|cli_contract|host_skeleton::(bridge|singleton|reload)|offline_e2e::leftover_jobs|lingering_owner|runner_contract|web_endpoint|telemetry_contract)/))
 (package(=plakd) & binary(=integration) & test(=offline_e2e::real_process_cli_sigint_releases_and_resumes_exact_session))
 (package(=plakd) & kind(lib) & test(/^oauth_ui::tests::/))
-binary(=deploy)
 
 # serial
 (package(=plakous-runner) & test(/operator::pty::/))

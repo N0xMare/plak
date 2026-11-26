@@ -104,9 +104,8 @@ type DiscoveryResult = Result<UnixStream, Box<(BridgeUnavailableReason, CliFailu
 
 fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
     let verify = |failure| Box::new((BridgeUnavailableReason::VerificationFailed, failure));
-    let began = Instant::now();
     let discovery_window = bridge_discovery_window(DISCOVERY_WINDOW);
-    let mut deadline = began
+    let deadline = Instant::now()
         + if auto_start {
             Duration::from_secs(30)
         } else {
@@ -115,43 +114,21 @@ fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
     let key = crate::home::state::state_key();
     let socket = paths.host_run_dir().join(format!("{key}.sock"));
     let mut started = false;
-    let mut waiting_for_restart = false;
     loop {
         let holder = hosts::lock_holder(&hosts::home_lock(paths)).map_err(verify)?;
-        // Do not fill the inherited listener's backlog with discovery probes
-        // while the lock proves a committed restart is in progress.
-        let live = if marked(holder.as_deref(), &[], "restarting") {
-            Vec::new()
-        } else {
-            hosts::live_until(paths, deadline).map_err(verify)?
-        };
+        let live = hosts::live_until(paths, deadline).map_err(verify)?;
         if live.len() > 1 {
             return Err(Box::new((
                 BridgeUnavailableReason::IncompatibleState,
                 hosts::conflict(&live),
             )));
         }
-        let restarting = marked(holder.as_deref(), &live, "restarting");
-        waiting_for_restart |= restarting;
         let stopping = marked(holder.as_deref(), &live, "stopping");
         if stopping {
             return Err(Box::new((
                 BridgeUnavailableReason::Stopping,
                 CliFailure::new("the host is stopping; retry; no embedded session was started"),
             )));
-        }
-        if restarting {
-            deadline = deadline.min(began + discovery_window);
-            if Instant::now() >= deadline {
-                return Err(Box::new((
-                    BridgeUnavailableReason::Starting,
-                    CliFailure::new(
-                        "the planned host restart did not become ready before the discovery deadline",
-                    ),
-                )));
-            }
-            std::thread::sleep(Duration::from_millis(25));
-            continue;
         }
         if live.iter().any(|host| host.key != key) {
             return Err(Box::new((
@@ -172,7 +149,7 @@ fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
                 ))));
             }
         }
-        if !started && !waiting_for_restart && live.is_empty() && holder.is_none() {
+        if !started && live.is_empty() && holder.is_none() {
             if auto_start {
                 started = super::starter::start(paths, deadline)
                     .map_err(|error| Box::new((error.reason, *error.failure)))?;

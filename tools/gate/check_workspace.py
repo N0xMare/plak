@@ -303,7 +303,6 @@ LAUNCH_DIRECTORY_SITES: dict[str, SourceKey] = {
 LAUNCH_DIRECTORY_NAMES = frozenset({"Services", "Home", "launch_directory"})
 PROCESS_SITES: set[SourceKey] = {
     ("plakd", "src/carry/installed.rs"),
-    ("plakd", "src/carry/upgrade/process.rs"),
     ("plakd", "src/commands/host_install.rs"),
     ("plakd", "src/commands/login_host.rs"),
     ("plakd", "src/commands/runner.rs"),
@@ -311,7 +310,6 @@ PROCESS_SITES: set[SourceKey] = {
     ("plakd", "src/commands/runner/dial/children.rs"),
     ("plakd", "src/commands/runner/local/start.rs"),
     ("plakd", "src/commands/support.rs"),
-    ("plakd", "src/host/reexec.rs"),
     ("plakd", "src/host/starter.rs"),
     ("plakd", "src/oauth_ui.rs"),
     ("plakd", "src/operator_process.rs"),

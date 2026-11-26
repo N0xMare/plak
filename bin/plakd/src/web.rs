@@ -34,13 +34,6 @@ pub(crate) use auth::{WebAccess, WebOrigin};
 use listen::Listen;
 pub(crate) use listen::Listener;
 
-pub(crate) fn preflight(services: &Services, args: &crate::command::HostWeb) -> CliResult<()> {
-    let policy = WebPolicy::load(services, args)?;
-    load_ui(policy.ui.as_deref(), policy.switches)?;
-    let _ = auth::CookieKey::load(services.paths()?)?;
-    Ok(())
-}
-
 /// The home-only listener and capability policy captured before serving.
 pub(crate) struct WebPolicy {
     listen: Listen,
@@ -65,11 +58,8 @@ impl WebPolicy {
         })
     }
 
-    pub(crate) async fn bind_listener(
-        &self,
-        inherited: Option<std::os::fd::OwnedFd>,
-    ) -> CliResult<Listener> {
-        Listener::bind(self.listen.clone(), inherited).await
+    pub(crate) async fn bind_listener(&self) -> CliResult<Listener> {
+        Listener::bind(self.listen.clone()).await
     }
 }
 
@@ -91,7 +81,7 @@ pub(crate) struct WebEndpoint {
 }
 
 impl WebEndpoint {
-    /// Composes the endpoint around the host's bound or inherited listener.
+    /// Composes the endpoint around the host's bound listener.
     ///
     /// # Errors
     ///

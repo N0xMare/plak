@@ -1,32 +1,11 @@
-//! Withdraw only unclaimed inputs; join durable verdicts and their wire writes.
+//! Track durable draft verdicts until their wire writes are attempted.
 
 use super::DraftDelivery;
-use crate::host_service::{HostService, fanout::Publication};
-use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptRow};
-use plakous_host_protocol::wire::{AttachmentId, ClientDraftId};
-use plakous_host_protocol::{ProtocolExtension, SessionObservation};
-use std::collections::BTreeSet;
+use crate::host_service::HostService;
+use plakous_host_protocol::ProtocolExtension;
+use plakous_host_protocol::wire::AttachmentId;
 
 impl<P: ProtocolExtension> HostService<P> {
-    pub(in crate::host_service) fn reject_queued_wire_drafts(&self) {
-        let Some(sender) = self.mailbox() else { return };
-        let notice = Publication::prepare(SessionObservation::Row(TranscriptRow::error(
-            NoticeScope::Session,
-            "the host is upgrading; this draft was not admitted",
-        )));
-        let mut state = self.lock();
-        let ids: BTreeSet<_> = state
-            .pending_drafts
-            .keys()
-            .map(ToString::to_string)
-            .collect();
-        for (correlation, _delivery) in sender.withdraw_queued_correlations(&ids) {
-            if let Ok(id) = correlation.parse() {
-                state.reject_upgrading_draft(id, self.capacity, &notice);
-            }
-        }
-    }
-
     pub(in crate::host_service) fn take_draft_delivery(
         &self,
         attachment: AttachmentId,
@@ -64,34 +43,5 @@ impl<P: ProtocolExtension> crate::host_service::State<P> {
         {
             self.draft_outputs.insert((attachment, *seq), delivery);
         }
-    }
-
-    fn reject_upgrading_draft(
-        &mut self,
-        id: ClientDraftId,
-        capacity: usize,
-        notice: &Publication<P>,
-    ) {
-        let Some(pending) = self.pending_drafts.remove(&id) else {
-            return;
-        };
-        let mut delivery = Some(pending.verdict(false));
-        let Some((attachment, rejection)) = self.draft_inputs.remove(&id) else {
-            return;
-        };
-        let Some(held) = self
-            .attachments
-            .get_mut(&attachment)
-            .filter(|held| !held.dropped)
-        else {
-            return;
-        };
-        let capacity = held.capacity(capacity);
-        for Publication { observation, size } in [notice.clone(), rejection] {
-            let class = observation.class();
-            held.offer(observation.into(), class, capacity, size);
-            held.correlate_draft(Some(id));
-        }
-        self.track_draft_delivery(attachment, &mut delivery);
     }
 }

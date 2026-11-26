@@ -7,9 +7,8 @@ use super::super::slot::HeldSession;
 use super::archived::StoredAttachment;
 use super::{
     Arc, CliFailure, CliResult, ClientFrame, DeserializeOwned, Forwarded, HostConnection,
-    HostFrame, NodeAddress, NodeLink, Outcome, PoisonError, PreparedViewport, ProtocolExtension,
-    RequestRefusal, Serialize, SessionHost, ViewportMode, ViewportRead, ViewportRevision, Write,
-    stopping,
+    HostFrame, NodeAddress, NodeLink, Outcome, PreparedViewport, ProtocolExtension, RequestRefusal,
+    Serialize, SessionHost, ViewportMode, ViewportRead, ViewportRevision, Write, stopping,
 };
 
 const MAX_QUEUED_ATTACHES: usize = 4;
@@ -296,14 +295,10 @@ where
         let allow_open = request.allow_open;
         let retained = request.retained.clone();
         runtime.spawn_blocking(move || {
-            let paused = host
-                .upgrade_admission
-                .read()
-                .unwrap_or_else(PoisonError::into_inner);
             if send.is_closed() {
                 return;
             }
-            let result = host.prepare_attach(&node, allow_open && !*paused, retained.as_ref());
+            let result = host.prepare_attach(&node, allow_open, retained.as_ref());
             if send.is_closed() {
                 return;
             }

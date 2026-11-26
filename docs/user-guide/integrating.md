@@ -113,24 +113,13 @@ Keep request ids distinct and correlate responses by id while reading other
 frames. Send `{"frame":"bye"}` before closing. Reconnect means a new attach,
 not replaying requests or inferring lost model/tool outcomes.
 
-An admitted planned restart or upgrade may send `host_lifecycle` before closing.
-Its phase is `starting`, `draining`, `restarting`, `stopping`, or `running`
-(readiness or an aborted drain). The countdown is advisory: zero means
-elapsed or no active countdown.
-`cross_key_upgrade` remains in the wire format but is no longer emitted.
-Optional `target` names the binary id and state key; optional
-`retry_after_ms` is at most 30000. Treat these as advisory only: reconnect and
-attach afresh, and never replay a prompt because of a notice or a lost reply.
-Notices can be missed or repeated. A state-key cut is offline: reconnect to
-the new host and attach using the IDs printed by import.
-
-During an admission pause, a `blob_refused` identifies a blob that was not
-admitted; it says nothing about its draft. Hold unsent drafts and their blobs
-in the client. A Welcome from the expected binary and a different host generation
-confirms the handoff, not that owed sessions have loaded. Retry an attach or
-prompt that explicitly returns `backpressure` until the session is ready.
-For a refused prompt, keep its submission ID and resend its blobs with the
-retry; a missing reply is not a refusal and does not authorize replay.
+A planned stop may send `host_lifecycle` with phase `stopping` and reason
+`shutdown` before closing. Other phases and reasons are reserved.
+Notices can be missed or repeated. Reconnect and attach afresh, and never
+replay a prompt because of a notice or a lost reply. A different host
+generation from the expected binary confirms a new host, not that owed
+sessions have loaded. For a state-key cut, attach using the IDs printed by
+offline import.
 
 The stdio bridge reads one bounded Hello first. With a matching version it can
 instead print one `{"frame":"refused","kind":"bridge_unavailable","reason":"absent","retry_after_ms":500}`

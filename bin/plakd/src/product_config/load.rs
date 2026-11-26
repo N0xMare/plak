@@ -279,7 +279,8 @@ pub struct ProductConfig {
     /// `[tools.<name>]` and `[mcp_servers.<id>]`: options for the optional
     /// tools templates list. A trusted project replaces entries by name.
     pub tool_sections: ToolSections,
-    /// `[host] resume_after_loss`, only when the file sets it (unset holds).
+    /// `[host] resume_after_loss`, only when the file sets it (unset continues
+    /// under `plakd host` and holds in embedded faces).
     pub resume_after_loss: Option<ResumeAfterLoss>,
     /// `[runners.<name>]`, home-scoped; parsed and validated only.
     pub runners: BTreeMap<String, super::RunnerConfig>,
@@ -488,16 +489,22 @@ impl ProductConfig {
             api_full_window: self.api_full_window,
             topology_enabled: self.subagents,
             auto_continue: self.auto_continue,
-            resume_after_loss: match self.resume_after_loss {
-                Some(ResumeAfterLoss::Continue) => {
-                    plakous_hosted::runtime::ResumeAfterLoss::Continue
-                }
-                Some(ResumeAfterLoss::Hold) | None => {
-                    plakous_hosted::runtime::ResumeAfterLoss::Hold
-                }
-            },
+            resume_after_loss: self.resume_after_loss(super::keys::hosted_losses_continue()),
             requests_per_account: self.requests_per_account,
             root_template: self.root_template_fact(),
+        }
+    }
+
+    pub(crate) fn resume_after_loss(
+        &self,
+        hosted: bool,
+    ) -> plakous_hosted::runtime::ResumeAfterLoss {
+        use plakous_hosted::runtime::ResumeAfterLoss as Policy;
+        match self.resume_after_loss {
+            Some(ResumeAfterLoss::Hold) => Policy::Hold,
+            Some(ResumeAfterLoss::Continue) => Policy::Continue,
+            None if hosted => Policy::Continue,
+            None => Policy::Hold,
         }
     }
 

@@ -45,7 +45,6 @@ fn observed_tick(
     host.role.last_tree_observed_at = Instant::now()
         .checked_sub(super::super::TREE_OBSERVE_INTERVAL)
         .unwrap();
-    host.role.events.step_control.changed.notify_one();
     host.block(async |host| {
         RootRole::next(
             host,

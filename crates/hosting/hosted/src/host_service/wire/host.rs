@@ -23,9 +23,9 @@ use std::time::{Duration, Instant};
 
 use plakous_host_protocol::ProtocolExtension;
 use plakous_host_protocol::wire::{
-    Answer, AttachmentId, ClientFrame, HostFrame, NodeAddress, Op, Outcome, RequestRefusal,
-    ResidentReason, SessionActivity, SessionEnvironment, SessionResidency, SessionRow, Welcome,
-    WireError,
+    Answer, AttachmentId, ClientFrame, HostFrame, HostLifecycle, NodeAddress, Op, Outcome,
+    RequestRefusal, ResidentReason, SessionActivity, SessionEnvironment, SessionResidency,
+    SessionRow, Welcome, WireError,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -243,21 +243,16 @@ mod directory;
 mod history;
 mod lifecycle;
 mod product;
-mod upgrade_controls;
 mod verdicts;
 pub use directory::{DirectoryProjection, DirectorySlot};
 pub use history::{ClientInput, HistoryBinding, PreparedViewport, TranscriptRead, ViewportMode};
-pub use lifecycle::{LifecycleOutput, LifecycleState};
+pub use lifecycle::LifecycleOutput;
 pub use product::HostSessions;
 
 /// The sessions one host serves.
 pub struct SessionHost<P: ProtocolExtension> {
-    lifecycle: Mutex<BTreeMap<u64, lifecycle::Delivery<lifecycle::Notice<P>>>>,
-    lifecycle_latest: Mutex<Option<lifecycle::Notice<P>>>,
-    upgrade_admission: Arc<std::sync::RwLock<bool>>,
-    upgrade_controls: Mutex<admission::PausedControls>,
-    upgrade_committed: Arc<std::sync::atomic::AtomicBool>,
-    pending_stops: Mutex<Vec<Arc<super::StopSettlement<P>>>>,
+    lifecycle: Mutex<BTreeMap<u64, lifecycle::Delivery<HostLifecycle<P>>>>,
+    lifecycle_latest: Mutex<Option<HostLifecycle<P>>>,
     admission: admission::Admission,
     next_connection: AtomicU64,
     drafts: super::super::drafts::DraftRegistry,
@@ -323,10 +318,6 @@ where
         Arc::new(Self {
             lifecycle: Mutex::default(),
             lifecycle_latest: Mutex::default(),
-            upgrade_admission: Arc::default(),
-            upgrade_controls: Mutex::default(),
-            upgrade_committed: Arc::default(),
-            pending_stops: Mutex::default(),
             admission,
             next_connection: AtomicU64::new(1),
             drafts: super::super::drafts::DraftRegistry::default(),
@@ -762,8 +753,6 @@ where
     ///
     /// A lost output.
     pub fn frame(&mut self, line: Result<String, WireError>) -> CliResult<bool> {
-        let gate = Arc::clone(&self.host.upgrade_admission);
-        let paused = gate.read().unwrap_or_else(PoisonError::into_inner);
         let Ok(text) = line else {
             self.leave();
             return Ok(false);
@@ -787,20 +776,6 @@ where
                 return self.read_transcript(id, attachment, request);
             }
         };
-        if *paused && !self.allowed_during_pause(&frame) {
-            match frame {
-                ClientFrame::Request { id, .. } => {
-                    self.discard_blob_staging()?;
-                    self.write(&HostFrame::<P>::Response {
-                        id,
-                        outcome: Outcome::Refused(RequestRefusal::Backpressure),
-                    })?;
-                }
-                ClientFrame::Blob(chunk) => self.discard_blob_part(chunk.id)?,
-                _ => {}
-            }
-            return Ok(true);
-        }
         let ClientFrame::Request { id, op } = frame else {
             // A blob precedes the intent that names it, on the node
             // attachment; with none it is no one's.
@@ -836,7 +811,7 @@ where
         ) {
             self.flush_attachments(false)?;
         }
-        match self.request(id, op, &text, !*paused, retained)? {
+        match self.request(id, op, &text, true, retained)? {
             Forwarded::Answered(outcome) => {
                 self.discard_blob_staging()?;
                 self.write(&HostFrame::<P>::Response { id, outcome })?;
@@ -1092,9 +1067,6 @@ where
             .is_some_and(|link| link.session.session_id() == session)
         {
             let reading = self.forward(text.to_owned())?;
-            if let Some(link) = &self.node {
-                self.track_stop(&link.connection);
-            }
             return Ok(Forwarded::Reading(reading));
         }
         if !self.knows(session) {
@@ -1119,7 +1091,6 @@ where
                     connection = connection.identified(login.clone());
                 }
                 let reading = connection.frame(Ok(text.to_owned()))?;
-                self.track_stop(&connection);
                 self.draining = Some(NodeLink {
                     changes: session.changes(),
                     releases,
@@ -1130,18 +1101,6 @@ where
                 Ok(Forwarded::Reading(reading))
             }
             Err(failure) => refused(self.host.sessions.refusal(session, &failure)),
-        }
-    }
-
-    fn track_stop(&self, connection: &WireConnection<P, W>) {
-        if let Some((_, stop, _)) = &connection.stop {
-            let mut pending = self
-                .host
-                .pending_stops
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            pending.retain(|tracked| tracked.pending());
-            pending.push(Arc::clone(stop));
         }
     }
 
@@ -1779,11 +1738,9 @@ enum Forwarded<P: ProtocolExtension> {
 
 mod operator;
 mod reads;
-pub use admission::{AdmissionPause, HostReadLimits};
+pub use admission::HostReadLimits;
 pub use reads::{HostPrincipal, HostReadTask, HostRequestContext};
 mod admission;
-mod step_drain;
-pub use step_drain::{HostStepDrain, StepDrainMonitor};
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]

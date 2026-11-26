@@ -328,12 +328,6 @@ pub(super) fn store_error(error: SessionStoreError) -> AgentSessionsError {
             error.to_string(),
         );
     }
-    if error == SessionStoreError::BootstrapRehearsalTooLarge {
-        return AgentSessionsError::new(
-            AgentSessionsErrorKind::StorageUnavailable,
-            error.to_string(),
-        );
-    }
     if matches!(
         error,
         SessionStoreError::UnsupportedRuntimeEpoch(_)

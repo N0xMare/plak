@@ -299,7 +299,7 @@ fn host_install_refuses_the_legacy_host_before_writing() {
     assert!(!output.status.success());
     let error = String::from_utf8(output.stderr).unwrap();
     assert!(
-        error.contains("after `plakd host upgrade` commits"),
+        error.contains("after the host has restarted on the new build"),
         "{error}"
     );
     assert!(

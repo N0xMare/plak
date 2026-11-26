@@ -7,7 +7,6 @@ mod observation_filter;
 #[cfg(target_os = "linux")]
 mod replay_profile;
 mod review;
-mod verdicts;
 
 fn root() -> NodeAddress {
     NodeAddress {

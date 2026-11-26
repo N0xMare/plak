@@ -79,16 +79,13 @@ Linux installation reloads the user manager; macOS installation never invokes
 `launchctl`. Neither enables or starts the service. Follow the printed
 commands; see [service setup](host-service.md#install).
 
-`plakd host upgrade --expect-binary <id> [--drain <duration|idle>] [--backup-store]` runs
-from the destination build and only upgrades within the same state key. It
-drains roots and children at joined runtime boundaries, using a 60-second
-natural-drain budget by default. A changed key refuses before drain; use
-[offline migration](host-service.md#offline-migration-at-a-format-cut).
-Use `--backup-store` to save private, size-bounded SQLite copies before
-surrender. It is off by default and is not an automatic rollback mechanism.
-Upgrade succeeds only after the destination verifies health and preservation.
-After a same-key store revision commits, start the destination if it is no
-longer running; the older build refuses that store.
+A host upgrade is a restart of the host service on the same stores; see
+[upgrade](host-service.md#upgrade-reload-and-logs). `plakd host wake --session
+<id> --text <text>` submits one prompt to a session through the running host
+and never starts one. `plakd store rehearse --into <dir>`, `plakd session
+check-binding --gating` and `plakd session check-reopen <id>` check a new build
+against a serving home without writing its stores; `plakd doctor --json` and
+`plakd gateway check --json` print their reports as JSON.
 
 ## Exit codes
 

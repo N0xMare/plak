@@ -172,17 +172,10 @@ Git version mismatch instead returns `workspace_read_failed` with
 no compatible field for the version evidence, and the host does not substitute
 its own Git version.
 
-The bounded drain countdown uses the natural-drain deadline, not the
-verdict-barrier floor; an idle drain has no countdown. A paired successor
-that already sent Welcome can report `starting` with reason `paired_upgrade` while
-recovering its inventory. Its countdown starts in the replacement image and
-does not inherit the source's drain deadline. Round remaining time up to
-whole seconds, so zero means the deadline elapsed or there is no countdown.
-The startup countdown is advisory: it cannot abandon a slow inventory or
-change the requester's separate readiness wait. Once inventory reopens
-admission and host readiness is recorded, the successor can report `running`
-with reason `paired_upgrade` and no countdown. `startup` and
-`cross_key_upgrade` are reserved.
+A planned stop emits `stopping` with reason `shutdown` and no active
+countdown. Other phases and reasons remain decodable but are reserved and
+are not emitted, including `draining`, `restarting`, and the paired
+successor's `starting` and `running` notices.
 A bridge that cannot reach Welcome uses the typed discovery refusal.
 
 Codex template writes use `{"field":"service_tier","value":"fast"}` or

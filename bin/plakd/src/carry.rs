@@ -13,10 +13,10 @@ mod history;
 mod import;
 mod installed;
 pub(crate) mod intent;
+pub(crate) mod placement;
 pub(crate) mod rebind;
 mod reference;
 mod reload;
-pub(crate) mod upgrade;
 
 pub(crate) use document::{
     CarryDocument, IMPORTABLE_VERSIONS, VERSION, private_dir, read_document, write_document,
@@ -26,9 +26,8 @@ pub(crate) use history::{TraceHistory, redact_payload};
 
 pub(crate) use export::{export_session, new_carry_file};
 pub(crate) use reload::{
-    CarryCapacityProbe, ChildReopenRefusal, REOPEN_HEAD_ADVANCED, ReloadProbe, ReloadTarget,
-    ReopenProbe, UpgradeReopenProbe, child_reopen, child_reopen_probe, reload_probe,
-    reopen_credential_gate, reopen_probe, upgrade_reopen_probe,
+    CarryCapacityProbe, REOPEN_HEAD_ADVANCED, ReloadProbe, ReloadTarget, ReopenProbe, check_reopen,
+    child_reopen_probe, reload_probe, reopen_credential_gate, reopen_probe,
 };
 /// A running turn refuses a reload or rebind whose successor is another
 /// session: only a reload that resumes the same session hands it off.
@@ -38,6 +37,26 @@ pub(crate) const CARRY_REFUSED_TURN: &str =
 /// Running sub-agents refuse a reload or rebind whose successor is another
 /// session, for the same reason.
 pub(crate) const CARRY_REFUSED_CHILDREN: &str = "reload refused: sub-agents are still running";
+
+pub(crate) const OFFLINE_MIGRATION_REQUIRED: &str = "host_upgrade_offline_migration_required: a state-key change requires offline migration; settle work and stop the source host, use the source build to export sessions and the destination build to import them, then start the destination host";
+
+pub(crate) fn state_key_valid(value: &str) -> bool {
+    let mut parts = value.split('.');
+    for prefix in ['r', 'e', 'p', 't'] {
+        if parts
+            .next()
+            .and_then(|part| part.strip_prefix(prefix))
+            .is_none_or(|number| {
+                number.is_empty()
+                    || !number.bytes().all(|byte| byte.is_ascii_digit())
+                    || number.parse::<u32>().is_err()
+            })
+        {
+            return false;
+        }
+    }
+    parts.next().is_none()
+}
 
 /// The installed build a reload of `session_id` would start, and this
 /// build's refusal of it, resolved while the session is still attached.

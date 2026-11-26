@@ -314,7 +314,6 @@ enum RootWake {
     AccountRead,
     Notice,
     Jobs,
-    StepControl,
     Cancel,
     Projection(bool),
     Queue(Option<sessions::QueueCommands>),
@@ -394,21 +393,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
     }
 
     fn ready(&mut self) -> impl Future<Output = RootWake> {
-        let step = &self.host.events.step_control;
-        let step_changed = step.changed.notified();
-        // Publish the owner boundary even if a ready runtime event wins
-        // before the lower-priority select below is polled.
-        step.observe_agent(Some(self.host.job_agent));
-        if step.requested() {
-            step.owner_boundary(
-                Some(self.host.job_agent),
-                Some(self.control.turn_id()),
-                crate::topology_runtime::lookup(&self.host.live_target.tree_id),
-            );
-        }
         let takes_actions = self.takes_actions();
         let deferred_ready = takes_actions && self.host.deferred.borrow().has_deferred();
-        let accepts_intents = takes_actions || (step.requested() && !self.quit_after_terminal);
+        let accepts_intents = takes_actions;
         let flush = (!self.delta_buf.is_empty())
             .then(|| (self.last_flush + super::turn::ASSISTANT_DELTA_WINDOW).into());
         let state = &mut self.housekeeping;
@@ -440,7 +427,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
                 () = std::future::ready(()), if drained => RootWake::Drained,
                 () = actions.ready(), if accepts_intents => RootWake::Intent,
                 () = std::future::ready(()), if deferred_ready => RootWake::Deferred,
-                () = step_changed => RootWake::StepControl,
                 () = control.wait_until_settled(), if cancel_pending => RootWake::Cancel,
                 () = wait_deadline(cancel_at) => RootWake::Cancel,
                 () = wait_deadline(flush) => RootWake::Flush,

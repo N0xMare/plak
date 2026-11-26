@@ -10,35 +10,68 @@ use super::AdminLink;
 use super::ServerConfig;
 use super::address::GatewayAddress;
 
-pub(crate) fn deployment_generation(services: &Services, account: &str) -> CliResult<u64> {
-    use plakous::gateway::protocol::facts::{CredentialStatus, FactsReply, FactsRequest};
-    use plakous::gateway::protocol::{Endpoint, GatewayAccount};
+/// `plakd gateway check --json`: the holder, served versions and instance,
+/// and each enrolled account's credential status and generation. It reads
+/// facts only; it never refreshes, dispatches or changes a flag.
+#[derive(serde::Serialize)]
+struct CheckReport {
+    address: String,
+    instance: String,
+    versions: Vec<u16>,
+    holder: bool,
+    accounts: Vec<CheckAccount>,
+}
 
-    let custody = services.custody()?;
-    let link = custody
-        .admin()
-        .ok_or_else(|| CliFailure::new("deploy requires an enrolled gateway"))?;
-    verify_holder(services, link)?;
-    let account = GatewayAccount::new(account.to_owned())
-        .map_err(|_| CliFailure::new("invalid deploy account"))?;
-    let answer = super::client::request::<FactsReply>(
-        &link.address,
-        link.key(),
-        Endpoint::Facts,
-        &FactsRequest {
-            accounts: vec![account.clone()],
-        },
-    )?;
-    if let [row] = answer.facts.as_slice()
-        && row.account == account
-        && row.credential.status == CredentialStatus::Ready
-        && let Some(generation) = row.credential.generation
-    {
-        return Ok(generation);
+#[derive(serde::Serialize)]
+struct CheckAccount {
+    account: String,
+    status: plakous::gateway::protocol::facts::CredentialStatus,
+    generation: Option<u64>,
+}
+
+fn json_check(services: &Services, stdout: &mut dyn Write) -> CliResult<()> {
+    use plakous::gateway::protocol::Endpoint;
+    use plakous::gateway::protocol::facts::{FactsReply, FactsRequest};
+
+    let link = cli_link(services)?;
+    verify_holder(services, &link)?;
+    let versions = super::client::versions(&link.address, link.key())?;
+    let accounts = super::listed_accounts(&link.address, link.key())?;
+    let facts = if accounts.is_empty() {
+        Vec::new()
+    } else {
+        super::client::request::<FactsReply>(
+            &link.address,
+            link.key(),
+            Endpoint::Facts,
+            &FactsRequest {
+                accounts: accounts.clone(),
+            },
+        )?
+        .facts
+    };
+    let mut rows = Vec::with_capacity(facts.len());
+    for account in &accounts {
+        let row = facts
+            .iter()
+            .find(|row| &row.account == account)
+            .ok_or_else(|| CliFailure::new("gateway facts omitted an enrolled account"))?;
+        rows.push(CheckAccount {
+            account: account.to_string(),
+            status: row.credential.status,
+            generation: row.credential.generation,
+        });
     }
-    Err(CliFailure::new(
-        "deploy credential generation is unavailable",
-    ))
+    let report = CheckReport {
+        address: link.address.label(),
+        instance: versions.instance.as_str().to_owned(),
+        versions: versions.versions,
+        holder: true,
+        accounts: rows,
+    };
+    serde_json::to_writer(&mut *stdout, &report)
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    writeln!(stdout).map_err(|error| CliFailure::new(error.to_string()))
 }
 
 pub(crate) fn execute(
@@ -123,7 +156,8 @@ pub(crate) fn execute(
             }
             Ok(())
         }
-        GatewayCommand::Check => live_check(services, stdout),
+        GatewayCommand::Check { json: false } => live_check(services, stdout),
+        GatewayCommand::Check { json: true } => json_check(services, stdout),
     }
 }
 

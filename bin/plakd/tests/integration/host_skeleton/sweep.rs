@@ -101,26 +101,14 @@ fn drive(
         .unwrap();
     let mut records = Vec::new();
     let mut unknown = BTreeSet::new();
-    client.send(&ClientFrame::Request {
-        id: 2,
-        op: Op::Attach { node: row.node },
-    });
-    let attachment = loop {
-        match client.next() {
-            HostFrame::Response {
-                id: 2,
-                outcome: Outcome::Ok(Answer::Attached { attachment }),
-            } => break attachment,
-            HostFrame::Event { observation, .. } => {
-                unknown.extend(outcome_unknown_jobs(&observation));
-                project(&observation, &mut records);
-            }
-            other => assert!(
-                !matches!(other, HostFrame::Response { id: 2, .. }),
-                "attach refused: {other:?}"
-            ),
+    client.retain_observations();
+    let attachment = client.attach(2, &row.node);
+    for frame in client.retained.take().unwrap_or_default() {
+        if let HostFrame::Event { observation, .. } = frame {
+            unknown.extend(outcome_unknown_jobs(&observation));
+            project(&observation, &mut records);
         }
-    };
+    }
     if prompt {
         assert_eq!(
             client.request(

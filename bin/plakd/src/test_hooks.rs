@@ -88,7 +88,7 @@ pub(crate) mod host_lifecycle;
 pub(crate) fn upgrade_state_key() -> Option<String> {
     std::env::var("PLAK_TEST_STATE_KEY")
         .ok()
-        .filter(|key| crate::carry::upgrade::state_key_valid(key))
+        .filter(|key| crate::carry::state_key_valid(key))
 }
 
 static STORE_REVISION_FIXTURE: AtomicBool = AtomicBool::new(false);
@@ -111,10 +111,6 @@ pub(crate) fn product_store_schema(base: Schema) -> Schema {
             .collect()
     });
     Schema { revisions, ..base }
-}
-
-pub(crate) fn upgrade_reexec_probe_omitted() -> bool {
-    hook_environment("PLAK_TEST_HOST_UPGRADE_OMIT_REEXEC").is_some()
 }
 
 /// Model a candidate's incompatible executable revision, never a stored verdict.
@@ -147,17 +143,6 @@ fn running_image(image: &std::ffi::OsStr) -> bool {
         .is_some_and(|current| canonical(Path::new(image)).is_some_and(|image| image == current))
 }
 
-#[cfg(feature = "web")]
-pub(crate) fn upgrade_backup_limit(limit: u64) -> u64 {
-    hook_environment("PLAK_TEST_HOST_UPGRADE_BACKUP_BYTES")
-        .and_then(|value| value.to_str()?.parse::<u64>().ok())
-        .map_or(limit, |test| test.min(limit))
-}
-
-pub(crate) fn force_host_upgrade() -> bool {
-    std::env::var("PLAK_TEST_FORCE_HOST_UPGRADE").as_deref() == Ok("1")
-}
-
 pub(crate) fn gate_upgrade_reopen(id: &str) -> Result<(), String> {
     let Some(directory) = std::env::var_os("PLAK_TEST_HOST_REOPEN_GATE").map(PathBuf::from) else {
         return Ok(());
@@ -182,20 +167,10 @@ pub(crate) fn gate_upgrade_reopen(id: &str) -> Result<(), String> {
 
 pub(crate) fn upgrade_crash_cut(name: &str) {
     if std::env::var("PLAK_TEST_HOST_UPGRADE_CUT").is_ok_and(|cut| cut == name) {
-        std::process::exit(86);
+        let pid = rustix::process::getpid();
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+        std::process::abort();
     }
-}
-
-pub(crate) fn upgrade_preparation_refused(name: &str) -> bool {
-    if name == "step-drain-gate" {
-        return std::env::var_os("PLAK_TEST_HOST_UPGRADE_DRAIN_GATE")
-            .is_some_and(|path| !Path::new(&path).exists());
-    }
-    std::env::var("PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE").is_ok_and(|cut| cut == name)
-}
-
-pub(crate) fn upgrade_key_environment(key: &str) -> impl Iterator<Item = (&'static str, String)> {
-    std::iter::once(("PLAK_TEST_STATE_KEY", key.to_owned()))
 }
 
 /// Extend the real catalog with only the credential-free scripted route.

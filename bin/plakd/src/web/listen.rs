@@ -4,7 +4,6 @@
 
 use std::fmt;
 use std::net::SocketAddr;
-use std::os::fd::{AsFd as _, BorrowedFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -75,23 +74,13 @@ impl Drop for Listener {
 }
 
 impl Listener {
-    pub(super) async fn bind(listen: Listen, inherited: Option<OwnedFd>) -> CliResult<Self> {
-        let (bound, file) = match inherited {
-            Some(fd) => adopt(&listen, fd)?,
-            None => bind(&listen).await?,
-        };
+    pub(super) async fn bind(listen: Listen) -> CliResult<Self> {
+        let (bound, file) = bind(&listen).await?;
         Ok(Self {
             listen,
             bound,
             file,
         })
-    }
-
-    pub(crate) fn as_fd(&self) -> BorrowedFd<'_> {
-        match &self.bound {
-            Bound::Unix(listener) => listener.as_fd(),
-            Bound::Loopback(listener) => listener.as_fd(),
-        }
     }
 
     pub(crate) fn remove(&self) {
@@ -100,46 +89,6 @@ impl Listener {
 
     pub(super) fn address(&self) -> &Listen {
         &self.listen
-    }
-}
-
-fn adopt(listen: &Listen, fd: OwnedFd) -> CliResult<(Bound, Option<SocketFile>)> {
-    use std::os::unix::fs::MetadataExt as _;
-    let failed = || CliFailure::new("plakd host --web: cannot adopt inherited listener");
-    crate::host::reexec::listener(&fd).map_err(|_| failed())?;
-    match listen {
-        Listen::Unix(path) => {
-            let listener = std::os::unix::net::UnixListener::from(fd);
-            private_directory(path.parent().ok_or_else(failed)?)?;
-            let metadata = std::fs::symlink_metadata(path).map_err(|_| failed())?;
-            if listener.local_addr().map_err(|_| failed())?.as_pathname() != Some(path)
-                || !is_socket(&metadata)
-                || metadata.uid() != rustix::process::geteuid().as_raw()
-            {
-                return Err(failed());
-            }
-            listener.set_nonblocking(true).map_err(|_| failed())?;
-            Ok((
-                Bound::Unix(tokio::net::UnixListener::from_std(listener).map_err(|_| failed())?),
-                Some(SocketFile {
-                    path: path.clone(),
-                    dev: metadata.dev(),
-                    ino: metadata.ino(),
-                }),
-            ))
-        }
-        Listen::Loopback(address) => {
-            let listener = std::net::TcpListener::from(fd);
-            let actual = listener.local_addr().map_err(|_| failed())?;
-            if actual.ip() != address.ip() || (address.port() != 0 && actual != *address) {
-                return Err(failed());
-            }
-            listener.set_nonblocking(true).map_err(|_| failed())?;
-            Ok((
-                Bound::Loopback(tokio::net::TcpListener::from_std(listener).map_err(|_| failed())?),
-                None,
-            ))
-        }
     }
 }
 

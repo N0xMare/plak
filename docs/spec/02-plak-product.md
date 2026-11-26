@@ -272,9 +272,9 @@ original daemons retain their
 own processes and expose only fixed job controls. Connection-bound services and operator terminals
 retain their existing rebuild/closure laws. A downgraded or reinstalled drainer
 never re-promotes its retention-only host/line; the remedy is to finish, consume
-or disown its jobs through a compatible retained build. Source foreground work
-must join before surrender; a joined Notice promotion is already a normal
-background allocation by then.
+or disown its jobs through a compatible retained build. A planned stop ends
+the source's unpromoted foreground work; only promoted background
+allocations carry.
 
 ### 2.1 The plakd home
 
@@ -1174,20 +1174,15 @@ at that build. The copy is for manual disaster recovery only: stop all users
 of the store, restore the pre-upgrade copy, then run the older build. Writes
 after the copy are lost; restoring just one store does not roll back changes
 in the other stores. No host restores a copy automatically. On startup the
-host removes abandoned copy staging and abandoned qualification copies; it
-skips scratch still held by a probe and never removes published copies.
+host removes abandoned copy staging and never removes published copies;
+`store rehearse` directories belong to the operator.
 `plakd doctor` reports retained copies in the current state directory.
 An operator may remove them after verifying the new host and deciding not
 to restore the earlier state.
 
-Before surrender in a same-key upgrade, source and destination run independent
-read-only binding inspections concurrently (§4.5). Neither inspection borrows
-the other build's verdict or substitutes for the destination's exact-reopen
-checks (§4.6). The source's own inspection is its only binding verdict: a
-source that qualifies child reopen restages it with the held checkpoint, and
-the requester inspects the source image itself only for a source that does
-not advertise child reopen qualification, whose report the legacy child
-audit also needs.
+Before the stop of a restart upgrade, source and candidate run independent
+read-only binding inspections (§4.5). Neither borrows the other build's
+verdict or substitutes for the candidate's exact-reopen probe (§4.6).
 
 Session commands, including `run --session`, recovery, inspection and
 export, use the same incompatible-build refusal for an id (or uniquely
@@ -1431,8 +1426,7 @@ verdict for the session workspace. Exact-reopen and carry-capacity probes
 perform bounded inspection without creating a session or dispatching inference.
 A known different key points to offline migration without probing the
 session's history. A timed-out probe does not trigger another probe. Host
-upgrade authority and preflight are specified in section 4.6, not delegated
-to a client.
+restart upgrades are specified in section 4.6, not delegated to a client.
 
 Import discovers the nearest project root from the document's workspace and
 validates its effective configuration before creating any successor; the
@@ -1673,14 +1667,15 @@ session deletion cleans them up, and `state prune-legacy
 --prune-orphaned-references` still explicitly removes orphaned files.
 
 Exact-reopen inspection asks the destination's hidden
-`version --reopen-probe <id>` for `opens`, `binding_changed`, `refused` or
+`version --reopen-probe <id>` (or, for a host restart, `session check-reopen
+<id>`) for `opens`, `binding_changed`, `refused` or
 `unknown`. It verifies the exact recorded head and construction inputs without
 acquiring session authority, registering a driver, publishing recovery or
 reattaching children. Tree tools compile over a detached in-memory copy; MCP
 tools rebuild from frozen records without starting a server. Unsettled work,
 unfrozen MCP tools or credentials needing refresh can produce `unknown`.
 Inspection writes no session, tree or credential state and never renews a
-credential. It is evidence for the host's upgrade decision, not permission for
+credential. It is evidence for an operator's restart decision, not permission for
 a client to execute a new runtime or replay an effect.
 
 **Offline migration at a declared format cut.** Settle the selected roots,
@@ -1717,7 +1712,7 @@ successor. To abort the cut while both hosts are stopped, restart the
 source with its own build and matching runner links. The imported copies
 do not merge back into that source.
 
-Host startup and destination service preflight refuse with
+Host startup and `store rehearse` refuse with
 `host_upgrade_legacy_receipt_pending` if a legacy ownership receipt is
 prepared or committed, or is acknowledged with an abandoned mapping. The
 check reads only the phase and abandonment flags; it does not act on
@@ -2915,7 +2910,7 @@ version. There is no top-level prompt positional or terminal resume command.
 | `host [--web <unix:path\|127.0.0.1:port>] [--ui <dir>]` | Serve the home's session directory; section 4.6 owns host and web options. |
 | `host connect --stdio [--auto-start]` | Discover the host and relay client wire frames; only explicit local `--auto-start` permits startup. |
 | `host install --web unix:<absolute socket> --ui <absolute dir> [--dry-run]` | Install a Linux user unit or macOS LaunchAgent without starting it. |
-| `host upgrade --expect-binary <id> [--drain <duration\|idle>]` | Explicit same-key host upgrade (section 4.6). |
+| `host wake --session <id> --text <text>` | Submit one prompt to a session through the running host (section 4.6). |
 | `wire schema` | Print the exact build's wire JSON Schema without opening a session. |
 | `accounts list`, `accounts rm <vertical>/<name> [--yes]` | Inspect or remove local named account selections without implicit remote logout. |
 | `login [<codex\|grok\|claude>] [--remote]` | `grok` and `supergrok` name the SuperGrok vertical; bare `xai` is refused as ambiguous; `--remote` is the device-code flow for `codex` and a pasted code for `grok` and `claude` (§8.3) |
@@ -2929,7 +2924,7 @@ version. There is no top-level prompt positional or terminal resume command.
 | `agent [--account\|--provider <id>] [--account <kind>=<ref>]... [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>]` | the long-lived JSONL host client |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
 | `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags; reports the gateway or its refusal |
-| `store backup <dir>` | online read-only snapshot of the three current stores and a SHA-256 manifest (§2.5); retry `store_backup_busy` (exit 8), investigate `store_backup_destination` or `store_backup_source` (exit 1) |
+| `store backup <dir> [--stopped] [--budget-secs <secs>]` | read-only snapshot of the three current stores and a SHA-256 manifest (§2.5); retry `store_backup_busy` (exit 8), investigate `store_backup_destination` or `store_backup_source` (exit 1) |
 | `gateway init [--tcp <ip:port>]` | writes `<home>/gateway.toml` and creates `<home>/gateway/`; does not open the credential store. The file names no key directory |
 | `gateway serve` | foreground service; exclusive holder lock, then listeners |
 | `gateway install [--dry-run]`, `gateway uninstall` | user service definition; install also seeds an absent dedicated command link; does not start or stop the service |
@@ -4306,35 +4301,24 @@ product advisory frame `host_lifecycle {host_generation, phase, reason,
 seconds_remaining, deadline_at?, target?, retry_after_ms?}`. `phase` is
 `starting`, `draining`, `restarting`, `stopping` or `running`; `reason` is
 `startup`, `paired_upgrade`, `cross_key_upgrade` or `shutdown`.
-`startup` and `cross_key_upgrade` remain wire variants but this host does not
-emit them.
+The non-shutdown reasons remain reserved wire variants.
 A target has exactly `binary_id` and `state_key`. An optional
 retry hint is a u32 bounded to 30000 ms. These DTOs belong to `plakd-wire-types`;
 the neutral envelope carries the product's lifecycle extension.
-The countdown uses the current phase's monotonic deadline, rounded up; zero
-means elapsed or absent. It does not extend the bridge's readiness budget.
+`seconds_remaining` is zero and `deadline_at` is omitted on frames this
+build emits. Both fields remain decodable.
 
-A source announces `draining` only after admission of a planned upgrade and
-its admission pause, `restarting` after preparation commits, and `running`
-when reversible preparation aborts and source admission reopens. That `running`
-notice omits both target and retry hint. A running host upgrade uses
-`paired_upgrade`. After Welcome a paired successor can report `starting`
-while its recovery inventory still pauses admission. The
-advisory countdown starts in the replacement image, without inheriting the
-source's drain deadline. It cannot stop inventory or extend the requester's
-readiness wait. The successor publishes `running` with reason `paired_upgrade` and
-no countdown once inventory reopens admission and host readiness is recorded.
-A planned stop
-(including SIGTERM handoff) announces `stopping` / `shutdown`. Socket and web
+This build announces only `stopping` / `shutdown`, for every planned stop
+including the stop of a restart upgrade; all other phases are reserved. Socket and web
 writers make a bounded final send attempt before closing. Connection joins and
 advisory delivery spend the same host-wide stop budget: handoff receives only
 the time remaining since stop was observed, less the existing stop margin; slow or lost peers
 can miss notices, and duplicate final notices are allowed. Notices never
 acknowledge a prompt, authorize replay, or alter admission. The native client
 keeps lifecycle in a separate latest-only slot (`try_host_lifecycle`), never in
-the bounded operator-stream queue; unread aborted-drain notices coalesce. New
+the bounded operator-stream queue; unread notices coalesce. New
 admitted connections are seeded with the current phase, including a directory
-connection arriving mid-drain; registration cannot race publication and miss it. Failure without a
+connection arriving during stop; registration cannot race publication and miss it. Failure without a
 notice remains possible. A destination serves ordinary Welcome; committed,
 ready carried-root aliases use the existing `RequestRefusal::Moved`, not a new
 successor field. The served product listeners match versions exactly, without
@@ -4345,16 +4329,6 @@ The unsupported standalone neutral diagnostic accepts only its reserved
 version, not any product version. The host protocol crate's neutral convenience
 clients are not product v13 clients; product clients use the exact contract in
 `plakd-wire-types::v13`.
-
-During an admission pause, the host continues to answer Ping, directory reads
-and watches, and authorized read-only console requests. A client may detach or
-attach to a resident session without opening a new runtime. A request that
-would open a dormant or still-loading session, start new work, or change
-product state is refused with `backpressure` before delivery, except for the
-exact Stop and Interrupt controls described in §4.6. Clients hold unsent
-drafts themselves. A pause discards blob parts and never queues them for the
-next generation. An identified `blob_refused` is definitive only for that
-blob and does not establish the draft's admission or grant replay permission.
 
 The public stdio bridge reads exactly one bounded newline-terminated Hello,
 within the same ten-second handshake deadline and maximum line bound, before
@@ -4376,9 +4350,7 @@ remote-shell and unit-managed startup policy refusals are `start_refused`, with 
 retry hint. Stopping is backed by a stopping
 diagnostic on a verified kernel-held private lock; stale file text grants no
 authority. The source marks its held locks as soon as stop is observed, before
-connection joins. A committed restart is marked `restarting`: the bridge waits
-within its existing ten-second discovery window for the successor, without
-starting another host during the gap. An operator stop is marked `stopping` and
+connection joins. A host stop is marked `stopping` and
 refuses a bridge even with `--auto-start`. Verification failures never become
 absence or auto-start permission.
 These are neutral transport handshake reasons; product lifecycle phase, reason
@@ -5915,8 +5887,8 @@ decoded and its actual verdict reported.
 Rows for children carry `child: true`; closed children also carry `closed: true`.
 Bindings of a decoded child are reported under `child_binding` and qualified
 by §4.6. Failures decoding a full child checkpoint remain in the general
-audit differential. Archived, superseded and closed rows do not gate upgrade.
-`--gating` is the upgrade scope. From listing and disposition metadata alone,
+audit differential. Archived, superseded and closed rows do not gate a
+restart upgrade. `--gating` is the restart preflight scope. From listing and disposition metadata alone,
 before any checkpoint is loaded, it selects the gating rows: retained heads
 whose runtime session and product row are not archived, that are the current
 head of their agent line and not superseded in the product, and that are not
@@ -5924,9 +5896,9 @@ closed children. A node of an archived root's tree counts as archived. It
 decodes only those heads, with the same decoder, and reports only those rows.
 They are exactly the rows `--all` marks neither archived, superseded nor
 closed, with the same verdicts, and `compatible` is the same in both scopes.
-Every same-key upgrade probe uses `--gating`: the source's own and
-destination inspections during qualification, the destination's health
-gate, and the requester's source baseline where it runs (§2.5). An image that refuses the option as an
+The candidate's binding probe uses
+`--gating`; `--store-probe <dir>` reads rehearsed product and tree copies
+(§4.6) with the live runtime store. An image that refuses the option as an
 unknown argument gets `--all` within the same bound.
 Inspection checks checkpoint/plan and presentation integrity, current
 release-owned executor bindings (including both
@@ -5941,13 +5913,9 @@ registrations, shipped as metadata even when an optional runtime is omitted;
 inspection does not maintain a separate prefix inventory. IDs with fewer than
 two dots use their exact pinned ID rather than a namespace prefix.
 
-Same-key host upgrade waits for both inspections before exact reopen and
-surrender. It refuses a live root binding or full child decode that the source
-verified and the destination no longer can, printing the offending rows while
-the source keeps running. A source without the command is explicitly reported as baseline
-unavailable; no source verdict is invented. In that first-upgrade case only
-real live binding refusals gate surrender, not external availability or an
-unknown executor alone. The existing exact-reopen probes still run. Inspection
+A restart upgrade refuses before the stop a live root binding or full child
+decode that the source verified and the candidate no longer can, while the
+source keeps running. Inspection
 is binding compatibility, not a promise of credential, runner or future
 catalog availability; ordinary reopen retains every live authority check.
 Live WAL reader coordination may update SQLite shared memory; no durable
@@ -5961,427 +5929,151 @@ are closed or retired. These trees use existing store records, so an older
 build would not be rejected by store admission and could route a child to
 its root's runner instead of the child's saved placement.
 
-`plakd host upgrade --expect-binary <id> [--drain <duration|idle>] [--backup-store]` is an
-explicit same-user operation, invoked using the destination executable and
-its binary ID. It discovers exactly one live source host across keys and
-echoes that host's key and instance on its private upgrade control socket.
-A changed key refuses as `host_upgrade_offline_migration_required` before
-admissions pause or sessions drain, naming the offline procedure (§2.5.1).
-Deploy returns the same refusal before drain. Private coordinator protocol 3
-is exact-version; older coordinators refuse without signalling or stopping
-anything. The source independently hashes the destination image and probes
-its key, host and runner capabilities, and configuration.
-The source retains resolved service arguments, not a working-directory-relative
-invocation. Destination service preflight parses those arguments and validates
-the home configuration and user templates that startup requires. For a web
-listener it also verifies web access settings, UI/CSP assets and any existing
-cookie key without binding a listener or creating a key. A known
-service-configuration or store-health failure refuses before draining sessions.
-The optional store backup is off by default. The requester takes private
-read-only SQLite copies of the existing product, runtime and tree stores,
-under one size and time budget, before requesting surrender. Each copy pins
-its own SQLite snapshot; this is not a cross-store transaction. It publishes
-the backup only after syncing the complete set, retains only a bounded
-number of completed sets, and sweeps interrupted staging directories on the
-next backup. A refusal or incomplete copy does not drain the source. Upgrade
-never restores these copies.
+**Restart upgrades.** A host upgrade is a planned stop of the serving build
+followed by a start of the new build on the same stores and the same state
+key. Nothing crosses between the two processes except the stores, the home
+and the daemon-owned jobs: there is no in-process handoff, upgrade control
+socket, coordinator protocol, inherited listener or upgrade verdict. A
+cold start, a crash restart and an upgrade use the same startup path. The old
+`upgrade-checkpoint-verdict` file is ignored; leave it for diagnosis with the
+original builds or remove it after the new host has started successfully.
+A changed state key is not a restart upgrade; it is the offline migration of
+§2.5.1, and operator tooling refuses it before stopping anything.
 
-The requester binds a bounded hash-only preservation baseline to the source
-instance and destination image. It survives requester loss during handoff
-without changing the coordinator frames or client wire version. A source
-that supports the checkpoint replaces the requester's baseline under its
-admission and step holds; it does not compare against the earlier snapshot.
-A definite failure to obtain the held evidence refuses surrender and the
-source withdraws its pause and resumes admission. The destination compares
-under stand-alone writer exclusion after stopped-store revisions and before
-serving. Under that one exclusion it runs the read-only store integrity
-checks (one per store), the preservation comparison and its binding
-inspection concurrently, each within its own bound. It first opens each
-store once, waiting for a busy store within the store-health bound, so no
-check races another opener's WAL-index rebuild. It joins all of them,
-then reports the first failure in the fixed order product, tree and runtime
-store health, preservation, bindings, so the failure stage does not depend
-on which check finished first. The held comparison checks store
-identities, every saved product
-session row (including non-head roots and children), retained branch and
-history ancestry, queue prefixes (a loss needs exact durable admission
-evidence), tree state and revisions, and durable job and retention evidence.
-Intentional child retirement must be disabled for this comparison.
+Before the stop, while the source keeps serving, the operator qualifies the
+candidate with plain read-only verbs of the candidate image. They open the
+stores for inspection only, take no custody or runtime lease, start no
+runner or evaluator, resolve no credential and dispatch no model request:
 
-A predecessor that cannot capture under the holds supplies the weaker
-`host_upgrade_baseline_predates_drain` evidence level. Its early snapshot is
-read-only, including on the immediately previous product store revision. The
-destination then checks store identities, retained ancestry and feed overlap,
-non-decreasing revisions and fences, and existing session and tree identities
-unless a recorded delete accounts for their absence. A queued draft must
-survive at the same content and revision, advance its revision, or have an
-owner-matching terminal queue binding or session delete. The early evidence
-does not assert queue order or exact admission of a removed draft. Tree
-nodes, attempts, commands, sealed candidates and durable operations must
-keep their recorded identities and owners unless the tree was deleted or
-the owner was retired since capture. Withdrawable followup openings and
-their unfacted attempts and commands, transient operation receipts, grants
-and mail projections are not part of that identity check. Live choices and
-consumable job receipts are not compared for this evidence level.
-Registered tree revisions still require the
-intact stopped-store backup of the prior revision. Destination binding
-health checks for regressions against the preflight source verdict, not for
-absence of issues the source already reported.
+- `plakd doctor --json` and `plakd gateway check --json` (§7.3, §4.7) report
+  the candidate's configuration, store and gateway verdicts as one object.
+- `plakd store rehearse --into <home>/<new dir>`, a new directory directly
+  under the product home, copies the product and tree stores
+  into `<dir>/stores` with consistent read-only snapshots and applies the
+  candidate's registered revision steps to the copies; a pending runtime
+  bootstrap is rehearsed on a copy under `<dir>/runtime`. It refuses an
+  existing directory, limits the combined snapshots and revision work, removes
+  partial copies on failure, and never writes the live stores. Its JSON reports
+  whether revisions or the bootstrap are pending and the `stores` path.
+- `plakd session check-binding --gating [--store-probe <stores>]` (§4.5)
+  reports the candidate's verdict for every gating head.
+- `plakd session check-reopen <id> [--store-probe <stores>]` reports the
+  candidate's exact-reopen verdict for one root and every open child branch
+  of its tree, under the reopen-probe rules of §2.5.1. On a paired placement
+  it connects read-only to an already running candidate daemon and refuses
+  if none answers. Advance the paired runner's dedicated link to the
+  candidate and start that candidate executable with `plakd runner serve`
+  on the runner machine, under its existing product home. Leave the source
+  daemon running for its existing connections and retained jobs. Without a source
+  baseline every build-attributable child fault refuses; a missing,
+  unreadable or byte-mismatched evaluator artifact under a matching
+  contract is reported as pre-existing and does not refuse.
 
-Before inherited startup can write, the destination records a durable
-pending verdict. An unresolved or failed verdict fences a cold start,
-including after a startup error: the stage name is not proof that startup
-made no writes. The bounded verdict has a version; the envelope and Ready
-tag remain readable across same-key rollback. An unfamiliar outcome never
-authorizes a start. The operator may inspect with
-`plakd host upgrade-verdict`, then acknowledge the exact verdict after
-repair. Acknowledgement requires the destination state key, no serving host
-for that home (including a predecessor), exclusion of stand-alone writers,
-successful read-only integrity checks, and matching product, runtime and
-tree store identities from the staged checkpoint for that verdict. An
-absent runtime store is allowed only if both the verdict and checkpoint
-recorded its absence. Acknowledgement durably clears the fence before
-discarding the checkpoint; it does not change store data, start a host, or
-assert preservation. An unreadable or non-private verdict refuses startup
-and acknowledgement. Repair the original verdict while the home is stopped
-or recover offline without bypassing the fence.
+`--store-probe` points both probes at rehearsed copies when the candidate
+needs a store revision; an exact-reopen probe of a live store does not
+rehearse a pending revision. The candidate never borrows the source's
+verdict: the operator compares the candidate's gating rows with the
+source's own `check-binding --all` audit, and a row the source verified
+that the candidate no longer can is a refusal. A typed `unsettled_work`
+verdict is not a refusal for a root whose tree has an identified
+interrupted child and no admitted root turn. The operator records a cheap
+head and revision stamp of the live stores with the verdicts and requires
+it unchanged immediately before the stop.
 
-The host exposes `resolve_paused_drafts(pause, deadline)` for an upgrade
-coordinator to call before planned surrender. The pause must belong to that
-host; the deadline is one absolute host-wide bound. The barrier withdraws only
-client-id inputs still owned by the mailbox, publishing an upgrading error and
-`DraftRejected` with the original intent and client id. It never cancels an
-already-claimed input on the strength of a lost wire reply: that input must
-reach its normal durable command, mail or queue admission and `DraftAccepted`,
-or a definite refusal. Mailbox acknowledgement is not durable admission.
-The barrier joins verdict write attempts before returning, or recognizes a
-lost attachment without inventing a verdict. Socket/WebSocket outboxes defer
-completion until their asynchronous transport send ends; moving bytes out of
-a service queue into an outbox is not a delivery attempt. Unknown service
-termination or an expired admission/delivery bound refuses preparation: the source must not
-surrender. No draft registry crosses generations, no accepted queue is reordered,
-and the existing durable handoff decision and continuation command ids are reused.
-This is the admission-verdict barrier seam; the step-drain coordinator owns
-when to call it, after closing ingress and before freezing runtime steps.
+The stop is the unit's planned SIGTERM (`systemctl --user stop` or
+`restart`, `launchctl kill SIGTERM`), bounded as **Stopping** describes:
+every resident session is released as a planned handoff and the process
+exits within 50 seconds. The host is never force-killed for an upgrade.
+Children of a handed-off tree are recorded handed off; children whose
+owner was lost continue under `[host] resume_after_loss`, which `plakd
+host` treats as `continue` when unset, so a restart is safe with live
+children and needs no per-child consent. Admitted root turns are a hard stop guard for operator tooling, not
+a host refusal.
 
-On every host stop, including same-key handoff and plain shutdown, the host
-closes its MCP pool and
-stops spawning source-owned SSH transports, runner launcher helpers, evaluator
-sidecars and Changes helpers. It tries to stop and reap the children it owns,
-including idle local stdio MCP servers, within one shared cleanup bound.
-It logs incomplete cleanup and continues shutdown or replacement, without
-waiting on unrelated children. A successor opens fresh transports and leases
-MCP servers as it opens sessions, following chapter 01 §8.5 and the frozen
-session bindings; idle pool entries and MCP connections do not carry.
-The runner daemon itself is not a launcher helper: detached and managed
-daemons, and the jobs they own, do not stop with the source.
+Between the stop and the start the operator proves writer vacancy: the
+home-wide and per-key host locks are free, the standalone writer lock
+`run/upgrade-admission.lock` is held exclusively, and no process holds a
+store file open for writing. `plakd store backup <dir> --stopped` holds both
+host locks and the writer lock while taking one synced, bounded SQLite
+snapshot of each of the three stores, including committed WAL contents
+(§2.5). This stopped backup is the
+recovery authority for the cut. Then the stable host link moves to the
+candidate and the unit starts.
 
-A same-key upgrade uses planned handoff of the same sessions, not export/import.
-The supported source floor is the v4 descriptor-handoff build
-`46ca03d0e15ec003294409890424dd09ddbac754`; the source must speak that handoff
-protocol, in addition to satisfying the other upgrade checks. The destination
-must answer the source's v4 capability probe. A same-key destination that does
-not answer it with support is refused as `missing_descriptor_handoff` before
-admissions pause or sessions drain. Use a supported intermediate that can
-hand off to the destination, or stop the source and cold-start the destination.
-This capability is not required for cold start.
+The candidate starts as any host does: stopped-store revisions under the
+writer lock with their synced pre-revision copies (§2.5), the runtime
+bootstrap, exact reopen of each session as it opens, ordinary recovery and
+the start scan. It does not compare its stores with a pre-stop baseline.
+Before the candidate process has been started, a failure restores the
+source links and starts the source build. Once the candidate may have
+opened the stores, including a start that failed or never answered Welcome,
+recovery is fix-forward: repair the cause and start the candidate or another
+build that supports the committed revisions. Restoring the stopped backup is
+manual disaster recovery: stop every user of the home, restore all three
+stores from one backup set, then start the source build. Writes after the
+backup are lost and restoring one store alone does not roll back the
+others. No host restores a backup by itself.
 
-The upgrade re-execs the source PID and retains the control and web listeners
-and the home-wide and per-key locks. The exec temporarily carries the control
-listener on stdout and the optional web listener on stderr. These listeners are
-inherited directly:
-on macOS a Unix listener transferred by `SCM_RIGHTS` can make newly accepted
-connections report a false EOF. Stdin carries the receiver of a private Unix
-socketpair message containing the ownership locks, the original standard
-streams, and an anonymous file with the metadata envelope. The new image
-takes close-on-exec copies of the listeners, receives the other descriptors
-using rustix, and restores all standard streams before spawning anything.
-Nothing travels through the environment inherited by child processes.
-Neither listener is unlinked or rebound. New connections can
-wait in the existing kernel backlogs; old client streams end rather than
-moving into the new generation. The private upgrade coordinator is rebound.
-The source rechecks the qualified image's filesystem identity before exec
-instead of hashing the image again. The handoff also passes the verified
-binary identity and captured tool PATH and HOME. If the last check or the exec
-fails, the source re-execs its own image with the retained listeners and locks.
-A successor that refuses inherited transport exits without keeping ownership;
-an ordinary start can then acquire the locks and replace stale socket paths.
-The destination checks gateway availability, store health, known retained
-binding incompatibilities, and preservation before serving. A working head
-whose binding inspection is unavailable still follows planned recovery.
-The requester requires both the destination's checkpoint verdict and its
-live, fresh same-PID coordinator identity.
-It answers Welcome and the in-memory directory while
-it finds and loads owed sessions; startup admission remains paused until the
-continuation inventory is captured.
-When its destination needs a higher store revision, pre-drain qualification
-takes consistent read-only copies of the existing product and tree stores in
-a private scratch directory and applies the registered steps there. It enables
-WAL on each copy before any binding or exact-reopen probe can open it.
-The probes open product and tree databases only for inspection and cannot
-open rehearsal copies for writing. They never upgrade the live stores.
-An exact-reopen probe against a live store does not rehearse a pending
-revision. A standalone precheck must use the prepared copies when the
-destination requires a revision, or leave qualification to the coordinator.
-Equal revisions retain the ordinary probe. The destination applies the
-live steps only after source drain and release and before announcing
-readiness; a failure after either commit is fixed forward under
-§2.5, not by restarting the source.
-The destination verifies exact reopen for each eligible root before admissions
-pause. Its read-only reopen probe also follows every child runtime branch
-named by that tree, whether live, parked, held, or dormant. It skips closed
-and retired nodes and archived runtime sessions. It inspects the branch's
-frozen construction data against the build, including the recorded evaluator
-contract and artifact and the release-owned executor and provider bindings.
-It reads only the binding objects, not conversation or operation history, and
-does not resolve child credentials, start runners or evaluators, or take
-custody. Qualification refuses before drain only for a build-attributable
-child reopen regression: the destination cannot reopen a child that the
-source can. The coordinator compares the same child head against the verified
-source image when available. If the source predates the comparison probe, a
-changed evaluator contract or engine, executor binding, or other release-owned
-binding is a refusal. An unreadable binding refuses unless the verified source
-audit already found a fault on the same session and branch. An unreadable or
-missing child head cannot prove a pre-existing fault and refuses.
-The evaluator contract is checked before the file: a missing file cannot
-mask a contract regression. A matching contract with a missing, unreadable,
-or byte-mismatched artifact does not refuse the cut.
-Qualification prints `host_upgrade_child_reopen_pre_existing` once per request,
-with the total affected child count and counts by kind:
-`evaluator_artifact_missing`, `evaluator_artifact_bytes_mismatch`,
-`evaluator_artifact_unavailable`, `binding_change`, and `binding_unreadable`.
-The operator may proceed; restore the exact recorded artifact or resolve the
-binding fault before reopening a child, or close the child if no longer needed.
-A child-only change never asks to carry the root. Other external availability
-remains a live-open check.
-A root probe also refuses known configuration and credential changes. Neither
-an unfinished turn nor an observed advance of the same runtime branch is a
-reusable pre-pause verdict. The coordinator records each root's product
-revision, locator, durable branch revision, and persisted agent-tree revision
-and custody (including an absent tree). Descendant changes can advance this
-tree without moving the root branch; a change to the child roster or any
-child branch locator invalidates the tree's verdict. The reuse stamp predates the probes or,
-for revision rehearsal, the scratch copies. After admission closes and the
-step drain joins, it rechecks new, changed, or unproven roots under the
-reversible holds. A child comparison still unproven under the holds refuses.
-A non-child refusal stops qualification without starting more
-root probes. A refusal under the holds rolls back preparation; no source
-surrenders on a stale verdict. A still-unfinished turn at that boundary keeps
-the existing planned-handoff recovery law. Revision qualification takes fresh
-scratch copies if a held-root recheck needs them.
-The host reads durable branch revisions from its own runtime store, including
-those of paired placements. A missing or unreadable branch has no reusable
-verdict. Local probes can run concurrently within a fixed bound; paired
-probes remain serial. A paired root with a reusable, unchanged verdict adds
-no SSH work to the admission pause. Each paired root that needs a held
-recheck adds one serial destination probe, including its SSH qualification,
-bounded by 30 seconds per probe.
-Verification restores process metadata only into detached, start-refusing
-bookkeeping from the durable job mirror. It never refreshes or watches runner
-jobs, adopts a line or takes process custody. Paired placements retain the
-binding-free qualification connection for workspace/configuration reads only,
-for both changed and unchanged triples. Terminal history and running
-promoted jobs do not block exact reopen. The source separately qualifies
-process custody as described below.
-The source closes ingress and resolves earlier draft verdicts before requesting
-runtime holds. `--drain` defaults to 60 seconds; integer `ms`, `s`, `m`, `h`
-suffixes and bare seconds accept 0 through one hour. Finite modes share one
-absolute host-wide natural-drain
-deadline across every agent. The earlier verdict barrier uses the later of that
-deadline and ten seconds after preparation began, including for `--drain 0`;
-that floor does not extend natural draining. `idle` uses a bounded 60-second
-verdict barrier followed by unbounded natural boundary draining. Model calls
-and paid compaction finish under their ordinary clocks; there is no absolute
-freeze deadline while they run. Neither mode waits for background jobs to exit.
-Before the admission barrier the requester prints each completed qualification
-phase as `qualification phase=<phase> elapsed_ms=<integer>` from a typed
-progress reply, without throttling these phase timings. The source reports
-the earlier admission-verdict barrier as `admission barrier: resolving
-earlier admission verdicts` when it starts and `admission barrier: resolved
-earlier admission verdicts elapsed_ms=<integer>`, the barrier's own
-duration, when it returns; neither is throttled. During the step drain the
-requester prints categorical waiting time, counted from the end of the
-barrier, and active driver identities to
-stderr at most once per second; no prompt, tool arguments or credentials are
-included. Ctrl-C or requester loss aborts reversible preparation.
-After surrender the destination logs `destination phase=<phase>
-elapsed_ms=<integer>` as each step completes: `stopped_revisions`, then
-`store_health_product`, `store_health_tree`, `store_health_runtime`,
-`preservation` and `bindings`, then `startup`, from the end of the gate to
-readiness or a startup failure. Its Ready or Failed verdict carries the
-timings of the steps that ran, in that order, and the requester prints each
-as the same line when it reads that verdict. The timings are optional
-diagnostics in the version-1 verdict: they never decide an outcome, and
-readers ignore an absent or unfamiliar field.
+Connections end at the stop; clients reconnect to the successor, which
+answers Welcome under a new generation. No ambiguously accepted submission
+is replayed. `plakd host wake --session <id> --text <text>` submits one
+prompt to a session through the running host as an ordinary client with a
+fresh submission id, for example to tell a waiting operator session the
+rollout finished. It never starts a host; a lost answer is reported as
+unknown and is not resent.
 
-A destination gate check that times out after surrender is a fix-forward
-outage, so the requester refuses before surrender when one is plausible.
-It projects the gate from checks it already runs against the live stores
-before the request: each store's integrity check, its preservation capture
-(standing for the destination's capture and comparison), and one
-destination `--gating` binding inspection, on rehearsed copies when product
-or tree revisions are pending. The stopped-store work is the measured
-runtime bootstrap rehearsal, when a bootstrap is pending, plus the revision
-backup bound when product or tree revisions are pending. It prints `gate
-projection <phase>=<ms>... stopped=<ms> projected_ms=<ms> budget_ms=<ms>`.
-The projected gate is the admission wait, plus the stopped-store work, plus
-every measured check run serially; the concurrent gate is bounded by that
-serial sum. The budget is the successor bound less its reserve for host
-startup after the gate. The requester refuses with
-`host_upgrade_gate_projection_refused`, while the source keeps serving and
-before any request, when a measured check takes more than half of its own
-post-surrender bound or the projected gate is more than half of the
-budget. A destination binding inspection that fails before surrender also
-refuses, except while a runtime bootstrap is pending, which only the
-destination's stopped startup applies; that projection omits bindings.
+A changed local-runner protocol still needs its jobs settled first: the
+candidate's startup reports older-protocol jobs `OutcomeUnknown` (see
+**Local process daemon**). A changed revision or flavor of the same runner
+protocol carries running and terminal promoted jobs through retention v1
+(chapter 01 §8.4). The old daemon keeps each process and its output and exit
+state without moving, pausing or restarting it. After the start the
+candidate uses its own native daemon for new commands. Its recovery sweep
+discovers the old line's original daemon instance and allocation identities
+through retention, takes the line's head lease, and transfers only control
+of the recorded allocations. The native job port uses the original endpoint
+for output, wait, stop, write and acknowledgement. The line terminal table
+and driver ledger govern consumption; a restart or repeated watch/snapshot
+does not duplicate a result or resend a process start or an ambiguous write.
+Confirmed original-daemon loss yields typed `outcome_unknown` for
+allocations without exact terminal evidence; a transient link failure does
+not assert that an original exited. The old daemon exits on its own when its
+retention obligations and idle grace end. Skip-upgrades beyond the
+candidate's current and immediately previous retention versions are not
+supported with live jobs: settle them using a compatible build or restart
+through compatible intermediate builds.
 
-The existing root owner freezes outer actions, the hub defers host-initiated
-wakes and recovery claims, and each admitted root/child driver
-parks before its next operation through the hidden host seam (chapter 01 §3.1).
-Startups from already-dispatched tool effects remain admitted and must join;
-refresh discovers and holds their new residents. Already-owned result projection,
-recovery and workspace effects must also join. The pause never becomes custody, a durable tree state, or another agent
-loop. Holds publish exact runtime progress, not a presentation-derived idle
-claim. A reserved child without an acknowledged turn or a terminal child still
-publishing its result prevents a completed freeze. Dormant-root trees with live
-children participate too. Each source runtime, tree and outer-owner gate is
-reopened on precommit error; tree admission reopens before driver holds. Caller
-EOF or hangup cancels preparation before surrender, including the verdict
-barrier. Source Ready is the surrender boundary, not destination readiness.
-After source Ready, requester loss cannot cancel the transfer. Before that
-boundary, definite failures reopen the source gates and reschedule owed work.
-They do not undo already-committed commands or native job promotion.
-The home and source leases never move on a hold.
-
-Both modes request a yield from observation and foreground process waits as
-soon as the drain sees the admitted effect. The finite natural-drain deadline
-still gives ordinary model generation its grace; idle never cancels a model
-call and starts surrender only after natural work reaches boundaries.
-
-| Work at the cutover | Finite drain | Idle drain |
-| --- | --- | --- |
-| Ordinary model generation | Existing planned interrupt at the bound; once-only continuation is a new call | Finish naturally under normal clocks |
-| Paid compaction | Join within the global freeze allowance, otherwise abort precommit; never cancel | Finish naturally under normal clocks; never cancel |
-| Child/mail/job observation waits | Immediate exact-turn Notice requests a result | Same |
-| Foreground process tools | Immediate exact-turn Notice requests promotion, then join the tool result | Same |
-| Other effectful tools, workspace/tree operations, result projection | Join within the freeze allowance or abort precommit | Join naturally; operator cancellation remains available |
-
-Notice acknowledgements are not joined results. Controls address
-only already-admitted dispatches and are retried without latching future calls.
-Failed/refused promotion must join naturally or preparation aborts; no promotion
-receipt is added. Upgrade yields use Notice, not Background: Background remains the manual
-process-only control and must not mask observation waits. No in-flight effect
-journal crosses surrender. A root or child stop/interrupt acts normally during
-reversible same-key preparation; it does not cancel the upgrade, and stopped
-work is not continued. The source seals control admission and joins
-already-admitted Stop receipts before Ready; a Stop that has not settled
-within that join bound prevents surrender.
-The held phase seals admission, joins Stop, rechecks held roots, inspects
-runner inventory when required, and rechecks the image before sending Ready.
-The drain joins in-flight child retirement before surrender. After Ready,
-the releasing host records planned continuation for joined children
-independently of each root owner's release (chapter 03 §§6.7, 14.1).
-Mandatory owner/placement rendezvous and planned-release
-acknowledgements keep bounded joins; finite modes share one natural deadline
-plus one freeze allowance, never multiplied by sessions. Idle's freeze
-rendezvous completes only when natural work has reached boundaries.
-A replacement acknowledgement requires a fresh source-instance identity even
-when a test forces the same image to restart. An already running exact target
-remains an ordinary no-op.
-
-A changed local-runner protocol still refuses before handoff. A changed
-revision or flavor on the same-key path carries running and terminal promoted
-jobs through retention v1 (chapter 01 §8.4). The source owns admission and
-native process control before surrender; qualification transfers nothing.
-Notice promotes foreground waits, and the held check refuses unpromoted
-work or incomplete inventory on a referenced placement. An aborted
-preparation restores source admission without stopping promoted jobs.
-A process that starts between the initial inspection and the hold participates
-in the same drain and carry; a mere Notice acknowledgement does not suffice.
-
-The old daemon keeps each process and its output and exit state without
-moving, pausing or restarting it. After surrender the target uses its own
-native daemon for new commands. Its recovery sweep discovers the old line's
-original daemon instance and allocation identities through retention, takes
-the line's head lease, and transfers only control of the recorded allocations.
-The native job port uses the original endpoint for output, wait, stop, write
-and acknowledgement. The line terminal table and driver ledger govern
-consumption; a restart or repeated watch/snapshot does not duplicate a result
-or resend a process start or an ambiguous write. Confirmed original-daemon
-loss yields typed `outcome_unknown` for allocations without exact terminal
-evidence; a transient link failure does not assert that an original exited.
-The old daemon exits on its own when its retention obligations and idle grace
-end. No job authority is added to the host handoff or state key.
-Live job carry requires a retention speaker for the original daemon's
-version. Skip-upgrades beyond the destination's current and immediately
-previous retention versions are not supported with live jobs: settle them
-using a compatible build or upgrade through compatible intermediate builds
-and settle them before leaving the supported retention versions.
-
-A reverse same-key handoff can preserve the PID, stores, and session history
-without restoring process authority. A root whose original native runner
-line was transferred through retention cannot reopen or wake on a build
-that uses that original namespace. This includes returning from exact-triple
-home-local runner directories to the earlier protocol-keyed layout. The
-original line's retention-only fence survives daemon restart and an empty
-job inventory; settling or consuming its jobs does not restore native
-authority. The older host can still list the root and run other roots, so a
-successful handoff and fresh prompts do not qualify this return path.
-Re-upgrade to the retained compatible exact-triple build with its matching
+A reverse restart to an older same-key build preserves stores and session
+history but not process authority. A root whose original native runner line
+was transferred through retention cannot reopen or wake on a build that uses
+that original namespace, including a return from exact-triple home-local
+runner directories to the earlier protocol-keyed layout. The original line's
+retention-only fence survives daemon restart and an empty job inventory.
+Restart again to the retained compatible exact-triple build with its matching
 sidecars and runner links on the same home, then reconnect to the affected
-root. This does not discard session history, committed results or runner
-records, and requires no export, import, or store restore. Keep the
-original and successor runner stores intact; do not clear the fence or
-substitute an older copy of either store.
+root. Keep the original and successor runner stores intact; do not clear the
+fence or substitute an older copy of either store.
 
-The paired runner's dedicated link advances to the destination before its
-binding-free qualification; its existing source connection continues to the
-incumbent daemon. If the source connection is missing for a referenced root or
-child placement, restore the source-compatible link if needed, reconnect a
-source root on that runner read-only and keep it attached, then advance the
-link again. A picker Ready row alone does not retain that source connection.
-An unreachable enrolled paired runner without a durable placement reference
-can be skipped with a typed `unreferenced_runner_unavailable` warning; that
-runner's dedicated link is left alone if the deploy client cannot reach it.
-Repair the skipped link to match the serving host before using that placement.
-Missing local inspection instead names the source local connection, while a
-timed-out inspection directs the operator to reachability/load and retry.
-Concurrent resident release retries definite busy lease releases and durability
-flushes under their original cleanup bounds; unresolved release still aborts
-before surrender.
+A paired runner's dedicated link advances to the candidate's snapshot before
+the host stop. The source's existing connection keeps talking to the
+incumbent daemon, which keeps its jobs; the candidate's start dials the
+advanced link. Operator tooling checks that the incumbent host can still
+list the runner through the advanced link and that the candidate qualifies
+it with its installed command, exact revision, flavor, protocol and pinned
+identity and roots. An unreachable enrolled runner without a durable
+placement reference may be skipped with a warning; repair its link before
+using that placement.
 
-Before pausing, the destination qualifies required paired runners using
-their installed command, exact revision/flavor/protocol and pinned identity
-and roots. This authenticated, binding-free connection permits only
-configuration build reads (chapter 01 §8.4); it cannot register an owner,
-lease or line, sweep, or dispatch work. It checks configuration using that
-placement, not a same-spelled host checkout. Advance the runner's dedicated
-link to the matching immutable snapshot first. A mismatch refuses before
-drain; installation does not advance the link.
-
-Reloading a client does not run this command, acquire custody or resend an
-ambiguously accepted submission. After exec, a definite destination startup,
-health or preservation refusal is `host_upgrade_fix_forward_required`;
-it neither reverses custody nor restores a backup. The inherited destination
-records a private durable pending verdict before verification, and publishes
-Ready only after health and preservation pass. A definite inherited refusal
-is a controlled service stop, not a failing service exit: a manager configured
-to restart failures must not relaunch a link still pointing at a predecessor
-that does not know about the verdict. The requester still reports the typed
-failure. A failed or unfinished gate also blocks ordinary startup of a host
-that understands the verdict.
-After investigating and repairing the cause, the operator clears the
-verdict while the home is stopped and restarts the destination on the same
-stores. Ready disarms the gate; a later normal lifecycle failure does not
-rewrite its verdict.
-
-If destination exec itself fails while the old image still owns the
-inherited locks and listeners, the existing exec fallback can restore the
-source; the requester reports `host_upgrade_source_restored` only after it
-observes the restored owner. A lost response or timeout without proof is
-`host_upgrade_outcome_unknown`. Inspect the live owner and logs before
-starting a destination; do not infer rollback from a missing readiness
-response.
+On every host stop the host closes its MCP pool and stops spawning
+source-owned SSH transports, runner launcher helpers, evaluator sidecars and
+Changes helpers. It tries to stop and reap the children it owns, including
+idle local stdio MCP servers, within one shared cleanup bound. It logs
+incomplete cleanup and continues shutdown, without waiting on unrelated
+children. A successor opens fresh transports and leases MCP servers as it
+opens sessions, following chapter 01 §8.5 and the frozen session bindings;
+idle pool entries and MCP connections do not carry. The runner daemon itself
+is not a launcher helper: detached and managed daemons, and the jobs they
+own, do not stop with the host.
 
 Native login, introduced in protocol 7 (current client protocol 13), runs in
 a dedicated account-service worker, never the
@@ -6502,9 +6194,8 @@ settles asynchronously after endpoint binding, before local admission.
   diagnosis; multiple keys are reported, never silently selected or stopped.
   A missing or stale socket does not prove absence. A held kernel lock is
   authoritative even if its pid text is stale; a free lock naming a live pid
-  is not a live host. Unverifiable files/directories fail closed. Only a
-  future explicit upgrade custody-transfer operation may cross this guard;
-  ordinary starts never do. Existing jobs must settle and the old host must
+  is not a live host. Unverifiable files/directories fail closed. No
+  start crosses this guard, including the start of a restart upgrade. Existing jobs must settle and the old host must
   stop before a manual state-key transition.
 - **Identity.** It binds its custody identity at start (chapter 03 §14): the
   home's `host-id` and this process's instance, which its start line names.
@@ -6834,16 +6525,12 @@ PATH (`$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin`), the systemd runtime
 directory and user-bus address, the manager's SHELL, USER, LOGNAME and
 INVOCATION_ID, and the fixed assignment `MALLOC_ARENA_MAX=2` reach the host.
 The assignment limits glibc allocator arenas and is ignored by musl.
-A same-key exec upgrade inherits the running environment, so the assignment
-takes effect only after the unit is rewritten and the service actually restarts;
-until reinstall, `plakd deploy plan` refuses the old unit as template drift
-with “not the generated stable-link unit” (NORMALIZE). After the cutover, use
-a separately rehearsed procedure: back up and remove the old host unit, run
-the new build's `plakd host install` with the same arguments and `PLAK_HOME`,
-then verify the generated `FragmentPath`, empty `DropInPaths` and
-`NeedDaemonReload=no` before the planned `systemctl --user restart
-plakd-host.service`; after restart, verify `MALLOC_ARENA_MAX=2` in
-`/proc/<MainPID>/environ`.
+A unit written by an older build takes the assignment only after it is
+rewritten: back up and remove the old host unit, run the new build's
+`plakd host install` with the same arguments and `PLAK_HOME`, then verify the
+generated `FragmentPath`, empty `DropInPaths` and `NeedDaemonReload=no`
+before the planned `systemctl --user restart plakd-host.service`; after the
+restart, verify `MALLOC_ARENA_MAX=2` in `/proc/<MainPID>/environ`.
 SHELL lets the host capture the login shell's
 PATH for session tools; the curated PATH is the fallback, not a replacement
 for that capture. Paths and systemd expansions are quoted separately. No API keys,
@@ -6930,207 +6617,13 @@ UMask=0077
 # WorkingDirectory is unset: the systemd user default is HOME.
 ```
 
-#### Operator deployment
+#### Operator rollout
 
-`plakd deploy plan|apply|status --inventory PATH --stage staging|production`
-is hidden, maintainer tooling, not a supported CLI or an extension protocol.
-Run it from an independent operator machine with a private inventory. It
-does not run in the target service, start a deployment daemon, or edit
-service, pairing or credential configuration. Strict schema-2 TOML declares
-one revision, platform-pinned artifacts, and stage-scoped machine logins
-carrying host, gateway, paired-runner and client roles. A stage has one
-host executing the generated stable-link service, one unchanged gateway
-in that login, optionally paired runners, and optionally exact-wire clients.
-Linux x86_64 targets use systemd user services; Apple Silicon macOS targets
-use LaunchAgents in the enrolled user's GUI domain. Stage data and evidence
-are disjoint except for the staging receipt. Only on macOS may staging and
-production use the same machine, with distinct logins, UIDs and homes.
-Matching SSH host strings across stages are an early inventory check, not
-proof of physical separation. Before staging effects, deploy compares the
-observed digests of all staging Linux machines against local production
-evidence and any production receipt at the enrolled operator paths; an
-alias does not bypass the comparison. Production records all role account
-identities before its first target mutation. This check does not contact
-production.
-Plan and status are JSON and never dispatch a model request. Plan is
-observational; status may finish withdrawal of a recorded pre-surrender
-attempt. OpenSSH uses a minimal configuration,
-strict host keys, batch mode and no shared connections or agent forwarding.
-Fixed remote loaders read request data on stdin; native target operations
-use closed JSON requests and replies and verified payload lengths and hashes.
-The operator starts those operations with a verified transfer of the candidate
-image and uses the verified installed candidate after staging. Host and
-runner candidates can be shipping releases or tested maintainer snapshots
-as described in chapter 06 §6.6. Before bootstrapping a GNU Linux candidate,
-the operator compares its pinned GLIBC ceiling for all three executables
-with the target's read-only libc report; unavailable or too-old libc
-refuses. The target refuses an operator whose deploy protocol number
-differs (currently v5).
-Neither deployment endpoint needs Python. A pinned systemd ExecStart drop-in refuses:
-verify that the stable link resolves to the running snapshot, move the
-pinned drop-in aside, then run `systemctl --user daemon-reload` without restarting.
-On macOS the loaded LaunchAgent path, arguments and exposed service settings
-must agree with the plist on disk, and the service PID must prove its
-executable vnode. Deploy compares launchd's effective GUI-domain exit timeout
-(the plist value capped at 60 seconds) and verifies `KeepAlive.SuccessfulExit`
-in the reported semaphores. The host plist must match the product renderer.
-Unloaded, edited or stale services need manual enrollment. Deploy does not
-bootstrap services; it starts an already enrolled gateway after clean drain.
-
-Plan compares the service process image, upgrade coordinator instance, state
-key, exact wire schema, local runner protocol, gateway image and holder, and
-enrolled command links. A candidate must descend from the serving revision.
-The incumbent gateway must admit the minimum of every active family (v2
-for Codex and Grok). A changing gateway uses the same pinned product
-artifact as the host. Its served versions must negotiate that minimum
-with both the old and new host and retain the incumbent's recorded negotiated
-version, which a serving host may already have cached. Plan proves the loaded gateway command is
-the dedicated `~/.local/bin/plakd-gateway` link to an owned immutable image,
-that its target matches the process executable, and that the enrolled Unix
-socket answers for the credential-store holder. Unknown images, service
-drift and custody changes refuse. A state-key change returns
-`host_upgrade_offline_migration_required` before draining the source and
-names the offline migration procedure (§2.5.1). Paired runner IDs, literal `login@host`
-destinations and dedicated command paths must match the serving host's
-configured placements. Legacy versions use
-the existing host upgrade, state-key, export-version and wire-schema probes;
-missing facts do not become defaults. Only absence of the incumbent's
-`deploy-canary --capabilities` reply identifies a pre-S2 bootstrap;
-transport or malformed replies do not. `bootstrap_required` means upgrade
-the pre-S2 incumbent using the
-existing manual same-key procedure, wait for Ready before linking, and
-re-plan with an S2 incumbent. Stage with the candidate's installer before
-using its link command, which cannot relink pre-port snapshots.
-Ordinary `run --max-turns 1` is not a substitute.
-
-When replacing a host with paired placements, plan asks the exact source
-coordinator to inspect the incumbent runner connections. Running and unknown
-promoted-job outcomes are not blockers for same-key retention. A missing
-source connection to a referenced placement blocks with the reconnect
-remedy in §2.5. An unreachable target may be omitted only when the source
-proves it unreferenced; the report carries a typed warning and no link or
-rollback operation is issued for that target. A runner already recorded in
-a deployment cohort is not omitted during recovery.
-
-The same-user preflight has no admission or connection lifetime effects.
-Apply renews the proof before runner links move. The requester proves
-inspection support on the exact source instance before sending the enrolled
-placement aliases; the source resolves them to pinned runner identities and
-rechecks under the handoff hold. Requests without enrolled aliases keep the
-ordinary host-upgrade encoding. A read-only attachment on a settled root
-using the source-compatible link can restore missing inspection; a picker
-Ready row is not enough. If a referenced attachment disappears and
-inspection becomes unavailable, the source refuses rather than relying on
-the earlier proof. A source without this inspection request must be upgraded
-by the manual procedure first. Runner links must be dedicated links to owned,
-immutable snapshots. Install does not move them.
-
-Plan refuses any in-use account missing from inventory, and reports signed-out
-accounts as `not_enrolled`. Named logins of the same kind remain distinct.
-Apply re-plans and runs BASELINE before staging: doctor, credential status,
-`session check-binding --all --summary` (compatibility and count), and one
-CLI canary per account in use.
-All canaries use the exact enrolled gateway account and inventory model, a
-fixed short prompt, no tools, a single physical inference with no retry
-admission, and a 90-second deadline with bounded cleanup. They emit no assistant
-text. The archived product audit row is written before inference; neither
-path creates a recoverable runtime. Claude OAuth and SuperGrok use the
-existing ephemeral Plakous admission and agent loop, with no compaction or
-topology and a provider-side 16-output-token cap. OpenAI API, Anthropic API,
-xAI API and OpenRouter use a fixed, tool-free request through the existing
-single-exchange gateway relay, with the same 16-token provider cap. They
-do not create a durable API configuration or enter ordinary API retry
-admission. Their archived row is a marker with no saved target, account or
-model configuration; the deploy and gateway evidence identify the selection.
-OpenRouter binds Chat with required parameters and no fallback.
-An HTTP refusal identifies only the status and never redispatches.
-
-Codex OAuth does not accept a request output-token cap. Its native canary
-uses the exact authenticated model's lowest admitted effort, checked against
-the inventory pin, and cancels and joins the stream at the first terminal
-result or after observing 64 text or reasoning bytes. Loss of observation
-refuses. This is a local observation threshold, not a provider generation
-or billing cap; an in-flight delta can cross it. Its evidence class is
-`locally_bounded` and has a 45-second deadline before bounded shutdown.
-API-key canaries record `provider_capped_api_v1` and require completed
-assistant output within the cap. Compare the
-gateway's OAuth generation before and after each canary and across BASELINE
-and verification; an increase is normal and a decrease refuses.
-
-Routes unable to prove the appropriate bounds refuse. BASELINE uses the
-incumbent's adapter, not a destination adapter run against an old gateway.
-When the incumbent lacks any in-use adapter, move to the first fully capable
-build by the manual same-key procedure before enrolling that fleet. There is
-no deploy source-capability bootstrap or omission exception.
-
-The staged destination binary runs the handoff operations. Stage the
-immutable host and runner snapshots without linking with the chapter 06
-installer, and stage client blobs before switching anything. Verify the candidate's rendered
-unit against the unit bytes on disk before recording surrender intent;
-template drift requires the manual procedure. Atomically advance paired
-runner links to the destination snapshot for their platform before requesting
-host upgrade. After the runner links and before the host request, a changed
-gateway drains the recorded credential holder once, waits for a clean service
-exit and release of its holder lock, atomically advances its dedicated link,
-then starts the inactive service with `systemctl --user start` or
-`launchctl kickstart` without `-k`. It never stops or restarts the service
-with dependents. Linux's generated host unit has `Wants=`, so this does not
-stop the host. The incumbent CLI proves the new holder and negotiates against
-it before host handoff; service and configuration custody, socket path,
-state root and account roster must not change. A gateway-only transition
-does not request a host upgrade. Recheck the candidate's
-state key immediately before invoking the staged destination's
-`host upgrade --expect-binary <id> --drain <duration>` and verify its Ready
-instance before moving the host command link. Then check the clients against
-the new exact wire and switch their dedicated links, and verify them in place
-with `--check-connection`. Verify the serving image, state key, instance and
-unchanged dependencies and repeat BASELINE health and canary checks. An exact
-healthy no-op performs only read-only verification and does not mint a
-promotion receipt.
-
-Apply appends and syncs an intent before each mutating cohort (runner links →
-gateway → host → client links), halts on error, and emits the exact status command. A missing
-acknowledgement is reconciled by observing exact links and service/process
-identity, not by reissuing surrender or repeating a completed link change.
-Gateway reconciliation never resends a recorded drain. It cancels an
-unattempted request when the old holder still serves, or resumes forward
-from a proven clean drain exit on the source link. If activation fails and the
-candidate link is inactive (clean exit or a confirmed manager failure), or
-reconciliation observes that state after the recorded drain, deploy records
-restore direction, holds a shared vacancy guard on the credential-store lock,
-and atomically restores the pinned source link. It resets systemd's failure
-state only if start-limited, then starts the source service. It cancels the
-target fence and withdraws only after proving that the source image holds
-custody with the recorded protocol. Reconciliation finishes a recorded
-restore instead of trying the candidate again. A running successor, held
-credential lock, unknown drain, or ambiguous manager state prevents link
-restoration. The gateway successor
-generation is separately recorded before any host intent; later
-observations must match it. A pre-host refusal restores runner links using
-source image/link evidence even when the gateway is unavailable. An
-unresolved gateway intent remains open; a proven gateway successor is
-retained across a pre-surrender host withdrawal.
-An error before recording and sending the host request, or a pending
-runner-only cohort on re-entry, withdraws the runner cohort if the recorded
-source image and stable link are still serving, even if that source
-restarted. Sync the withdrawal intent before restoring links. It never
-continues to handoff in the same invocation. Once a host request can have
-been sent, an unknown outcome leaves the runner links in place. If the exact
-predecessor's serialized coordinator proves idle with no pending receipt,
-apply or status fences the withdrawn host request before recording runner
-withdrawal and restoring links. Target-local, per-operation cancellation
-fences under the login's installation root prevent a delayed request from
-undoing withdrawal. The host requester inherits its target wrapper's fence
-until it exits. There is no service rollback after surrender, unit
-rewrite, timed restart or CAS journal. Do not race another deploy or manual
-handoff against an open intent. A Ready replacement must be the exact new
-image under a new instance with unchanged non-transitioning dependencies.
-Evidence and receipts identify accounts by platform, machine digest, UID
-and home, and record the host product home. A production history marker in
-each mutated target login's installation root fences staging.
-The green schema-5 staging JSON report records whether the host and
-gateway transitioned and qualifies the same transition classes in
-production. It is not a store or custody authority.
+Fleet rollout is operator tooling outside this repository. It drives the
+restart-upgrade rules above with the plain verbs they name, from a process
+that detaches from the host unit's cgroup (for example `systemd-run --user
+--collect`) so the planned stop cannot end it. plakd ships no deployment
+command, deployment protocol or inventory format.
 
 ### 4.7 `plakd gateway`
 
@@ -7357,7 +6850,7 @@ read. So do unchanged configuration inputs between full reloads, which run at
 least every three minutes; I/O failures are not cached. This authority does not
 depend on an attached application client.
 Build identity/reopen/carry probes remain product services; client reload is
-not host upgrade. The host upgrade coordinator is §4.6's authority.
+not host upgrade. Host restart upgrades are §4.6's.
 A session export remains the only cross-build history carrier.
 
 Images remain admitted through explicit CLI files or wire inputs under the

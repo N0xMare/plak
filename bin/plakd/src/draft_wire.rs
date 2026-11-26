@@ -5,7 +5,6 @@ pub use usage::{accounts_usage, usage_limits};
 
 use plakd_wire_types::{console, v13};
 use plakous_host_protocol::wire::{BlobRejection, BlobRejectionReason, RequestId};
-use plakous_hosted::host_service::wire::LifecycleState;
 
 mod lifecycle;
 pub use lifecycle::write_lifecycle;

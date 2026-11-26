@@ -176,6 +176,14 @@ pub(in super::super) fn child_dispatches(fixture: &Fixture) -> usize {
 /// Otherwise a background image hash may race the reconnect welcome.
 pub(super) fn cold_script(fixture: &Fixture, child: bool) {
     script(fixture, child);
+    // The cuts prove that recovery dispatches nothing without consent, so
+    // they hold losses instead of the host's default continue.
+    let config = fixture.home().join("config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    write_private(
+        &config,
+        &format!("{text}\n[host]\nresume_after_loss = \"hold\"\n"),
+    );
     let mut document: serde_json::Value =
         serde_json::from_slice(&std::fs::read(fixture.script()).unwrap()).unwrap();
     document["identity_hash_delay_ms"] = json!(300_000);

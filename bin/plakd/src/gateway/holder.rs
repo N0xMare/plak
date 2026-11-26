@@ -124,23 +124,6 @@ pub(crate) fn advertised_socket(path: &Path) -> io::Result<Option<PathBuf>> {
     Ok(Some(path))
 }
 
-/// Prevents a gateway from acquiring custody across a deploy link change.
-pub(super) fn guard_vacant(path: &Path) -> io::Result<File> {
-    let file = File::from(open(
-        path,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-        Mode::empty(),
-    )?);
-    if !file.metadata()?.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid gateway holder file",
-        ));
-    }
-    flock(&file, FlockOperation::NonBlockingLockShared)?;
-    Ok(file)
-}
-
 pub(crate) fn lock_path(state_root: &Path) -> PathBuf {
     state_root.join("plak/subscriptions/.custody-holder.lock")
 }

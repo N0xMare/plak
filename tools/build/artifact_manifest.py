@@ -67,7 +67,7 @@ def versions(values, field):
 
 
 def validate_build_info(info):
-    names = "export flavor gateway host_upgrade omitted_features product_version revision runner state_key test_hooks wire"
+    names = "export flavor gateway omitted_features product_version revision runner state_key test_hooks wire"
     if isinstance(info, dict) and "binary_id" in info:
         names += " binary_id"
         matches(info["binary_id"], rf"{HEX}{{12}}", "binary id")
@@ -82,9 +82,6 @@ def validate_build_info(info):
     versions(info["export"]["read"], "export read")
     positive(info["export"]["write"], "export write")
     require(info["export"]["write"] in info["export"]["read"], "written export is not readable")
-    fields(info["host_upgrade"], "coordinator receipt")
-    for key, value in info["host_upgrade"].items():
-        positive(value, key)
     fields(info["wire"], "number schema_pin")
     positive(info["wire"]["number"], "wire number")
     matches(info["wire"]["schema_pin"], SHA256, "wire schema pin")

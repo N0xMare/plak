@@ -17,7 +17,6 @@ use super::{
 
 const LOCK_WAIT: Duration = Duration::from_secs(1);
 const LOCK_RETRY: Duration = Duration::from_millis(25);
-const REHEARSAL_BYTES: i64 = 16 * 1024 * 1024 * 1024;
 
 impl SqliteSessionStore {
     /// Read-only preflight for the stopped-store transition.
@@ -41,28 +40,13 @@ impl SqliteSessionStore {
         Ok(pending)
     }
 
-    /// Qualify the stopped-store transition on a detached copy of a live source.
-    ///
-    /// # Errors
-    /// Returns typed shape, integrity, or storage refusals.
+    /// Apply bootstrap to a private copy, bounded by the supplied deadline.
     #[doc(hidden)]
-    pub fn rehearse_bootstrap(source: &Path, scratch: &Path) -> Result<(), SessionStoreError> {
-        let reader = Self::open_inspection(source)?.ok_or(SessionStoreError::NotFound)?;
-        let snapshot = reader.unchecked_transaction().map_err(map_sqlite)?;
-        let bytes: i64 = snapshot
-            .query_row(
-                "SELECT page_count * page_size FROM pragma_page_count, pragma_page_size",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(map_sqlite)?;
-        if bytes > REHEARSAL_BYTES {
-            return Err(SessionStoreError::BootstrapRehearsalTooLarge);
-        }
-        copy_into(&snapshot, scratch)?;
-        drop(snapshot);
-        drop(reader);
-        run(scratch, false, |_| {})
+    pub fn rehearse_copied_bootstrap(
+        path: &Path,
+        deadline: Instant,
+    ) -> Result<(), SessionStoreError> {
+        run_with_deadline(path, false, |_| {}, deadline, Some(deadline))
     }
 
     /// Activate the exact new shape, if pending, while the host is stopped.
@@ -79,7 +63,7 @@ impl SqliteSessionStore {
                 Err(SessionStoreError::BackendBusy) => {
                     return Err(SessionStoreError::BootstrapBusy);
                 }
-                Ok(true) => return run_with_deadline(path, true, cut, deadline),
+                Ok(true) => return run_with_deadline(path, true, cut, deadline, None),
                 Ok(false) => return Ok(()),
                 Err(error) => return Err(error),
             }
@@ -87,24 +71,25 @@ impl SqliteSessionStore {
     }
 }
 
-fn run(path: &Path, live: bool, cut: impl Fn(&str)) -> Result<(), SessionStoreError> {
-    run_with_deadline(path, live, cut, Instant::now() + LOCK_WAIT)
-}
-
 fn run_with_deadline(
     path: &Path,
     live: bool,
     cut: impl Fn(&str),
     deadline: Instant,
+    work_deadline: Option<Instant>,
 ) -> Result<(), SessionStoreError> {
     loop {
-        match retain_exclusive(path) {
+        match retain_exclusive(path, live) {
             Err(SessionStoreError::BootstrapBusy) if Instant::now() < deadline => {
                 std::thread::sleep(LOCK_RETRY);
             }
             Ok(Some(mut writer)) => {
                 if live {
                     backup(&writer, path)?;
+                } else if let Some(deadline) = work_deadline {
+                    writer
+                        .progress_handler(4096, Some(move || Instant::now() >= deadline))
+                        .map_err(map_sqlite)?;
                 }
                 return rebuild(&mut writer, !live, cut);
             }
@@ -114,8 +99,14 @@ fn run_with_deadline(
     }
 }
 
-fn retain_exclusive(path: &Path) -> Result<Option<Connection>, SessionStoreError> {
+fn retain_exclusive(path: &Path, live: bool) -> Result<Option<Connection>, SessionStoreError> {
     let mut writer = open_writer(path)?;
+    if !live {
+        // A detached SQLite backup may not inherit the source's journal mode.
+        writer
+            .pragma_update(None, "journal_mode", "WAL")
+            .map_err(bootstrap_lock_error)?;
+    }
     // BEGIN EXCLUSIVE alone is equivalent to IMMEDIATE in WAL. Exclusive
     // locking mode also acquires the main file lock and retains it across the
     // the backup and rebuild, excluding already-open legacy handles.

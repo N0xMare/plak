@@ -97,6 +97,13 @@ fn continuation_retry_rechecks_loss_policy_archive_and_deletion() {
             }),
         )
         .unwrap();
+    // Unset continues by default.
+    assert!(continuation_owed(&services, &record.id).unwrap());
+    std::fs::write(
+        paths.home().join("config.toml"),
+        "[host]\nresume_after_loss = \"hold\"\n",
+    )
+    .unwrap();
     assert!(!continuation_owed(&services, &record.id).unwrap());
     std::fs::write(
         paths.home().join("config.toml"),

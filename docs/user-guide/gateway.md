@@ -90,16 +90,13 @@ through the gateway migration. Remove any conflicting custom listener socket
 or host `[gateway] address` before the later co-located `host install`.
 Gateway-only systems keep their intended listener settings and stop here.
 
-On Linux, **before** running `plakd host upgrade`, change the existing host
-drop-in's `ExecStart` to point at the destination snapshot, preserving the
-existing environment and flags. Run `systemctl --user daemon-reload` without
-restarting the host.
-This keeps a crash during the upgrade window from relaunching the old build.
-Run `plakd host upgrade` while the old definition is still in place. A
-same-key handoff keeps the running host PID. For a changed key, stop the
-legacy host and follow [offline migration](host-service.md#offline-migration-at-a-format-cut)
-instead of invoking host upgrade.
-After the upgrade commits, run `systemctl --user disable --now plak-host.service`
+On Linux, change the existing host drop-in's `ExecStart` to point at the
+destination snapshot, preserving the existing environment and flags, then
+run `systemctl --user daemon-reload` and restart the host
+([upgrade](host-service.md#upgrade-reload-and-logs)). For a changed key,
+stop the legacy host and follow
+[offline migration](host-service.md#offline-migration-at-a-format-cut) instead.
+After the new host serves, run `systemctl --user disable --now plak-host.service`
 for the legacy unit. Confirm it is inactive with `Result=success` and
 `MainPID=0`, then back up and remove its file and `plak-host.service.d/`
 drop-ins. If it already used the
@@ -135,12 +132,12 @@ dedicated links. Upgrade the gateway **before** importing sessions:
    the drain and start. No service-definition reload is needed, and the
    running host stays up.
 
-The new gateway serves v1 to the old host and v2 to the new host. Then run
-the destination's `plakd host upgrade --expect-binary <id>` and re-pin clients
-to that build's exact host wire version. Other versions receive a typed
-`version_mismatch` refusal.
-Once the carry commits, recovery is fix-forward only.
-If the host was carried first, upgrade the gateway, then restart the host.
+The new gateway serves v1 to the old host and v2 to the new host. Then
+restart the host onto the new build ([upgrade](host-service.md#upgrade-reload-and-logs))
+and re-pin clients to that build's exact host wire version. Other versions
+receive a typed `version_mismatch` refusal. Once the new host has opened the
+stores, recovery is fix-forward only.
+If the host was restarted first, upgrade the gateway, then restart the host.
 The running host keeps its negotiated protocol; Codex and SuperGrok refuse
 until it negotiates v2.
 

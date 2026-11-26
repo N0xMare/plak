@@ -30,8 +30,8 @@ The probe seeds a stopped fixture with 74 roots, a heavy tree with 60 retained
 children, and two large histories. Every window restores the exact same
 fixture at the same private path. Windows run A/B/B/A. A serves the source;
 each B starts the source from that fixture, advances the settled gateway and
-local runner, and uses the candidate's `host upgrade --expect-binary` for the
-host. B must retain the host PID, advance the wire generation, and map the
+local runner, then restarts the host onto the candidate (a planned stop and a
+start on the same stores). B must advance the wire generation and map the
 candidate image for all three roles. The probe checks the executable mappings
 and digests before and after measurement.
 

@@ -381,6 +381,39 @@ impl ProductStore {
             _ => Err("the tree's root line has more than one head".to_owned()),
         }
     }
+
+    #[cfg(feature = "web")]
+    pub(crate) fn inspect_wake_node(
+        paths: &crate::home::paths::PlakPaths,
+        session: &str,
+    ) -> Result<plakous_host_protocol::wire::NodeAddress, ProductStoreOpenError> {
+        Self::read_only_snapshot(paths, |snapshot| {
+            let mut statement = snapshot
+                .prepare(
+                    "SELECT node_tree_id FROM sessions WHERE id=?1 AND archived=0 \
+                     AND node_tree_id=node_agent_id",
+                )
+                .map_err(|_| "could not inspect the session".to_owned())?;
+            let tree: String = statement
+                .query_row([session], |row| row.get(0))
+                .map_err(|_| "no unarchived root for that session".to_owned())?;
+            let heads = snapshot
+                .prepare(ROOT_LINE_HEAD_SQL)
+                .and_then(|mut statement| {
+                    statement
+                        .query_map([&tree], |row| row.get::<_, String>(0))?
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .map_err(|_| "could not inspect the root line".to_owned())?;
+            if !matches!(heads.as_slice(), [head] if head == session) {
+                return Err("the session is not the current root line head".to_owned());
+            }
+            Ok(plakous_host_protocol::wire::NodeAddress {
+                tree_id: tree.clone(),
+                agent_id: tree,
+            })
+        })
+    }
 }
 
 /// The heads of a tree's root line: root-node sessions no root-node session

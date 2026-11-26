@@ -1291,45 +1291,34 @@ git pull && just install release
 
 Either installs a new snapshot and moves the symlinks from §6.1 to it, so
 new launches use the new binary once the install succeeds. Existing processes
-retain their immutable image until an explicit restart or host upgrade. There is no in-product updater.
+retain their immutable image until they restart. There is no in-product updater.
 Installation removes an obsolete `monty` launch symlink only when it points
 into the plakd sidecar or snapshot roots; independent files and links remain.
 
-Host upgrade uses the invoked destination image's binary identity, not the
-workspace revision or a stable link's name. Running host upgrade and deploy
-are same-key and refuse a changed key before any drain as
-`host_upgrade_offline_migration_required`. Declare format cuts for incompatible
-changes to stored formats, not for routine releases. At the cut, settle work
-and stop the source, export with the retained source image, import with the
-destination, and then start it (chapter 02 §2.5.1). Keep both immutable
-snapshots and their matching sidecars through verification. Installation
-alone does not migrate or remove old snapshots or state.
+A host upgrade is a restart: a planned stop of the serving host, then a
+start of the new snapshot on the same stores and state key (chapter 02
+§4.6). It is same-key only; a changed key is an offline migration.
+Declare format cuts for incompatible changes to stored formats, not for
+routine releases. At the cut, settle work and stop the source, export with
+the retained source image, import with the destination, and then start it
+(chapter 02 §2.5.1). Keep both immutable snapshots and their matching
+sidecars through verification. Installation alone does not migrate or
+remove old snapshots or state.
 
-Before requesting a same-key drain for a runtime store with legacy DDL,
-the destination requester reports progress and rehearses the one-time
-bootstrap on a size-bounded, detached snapshot. It runs the same structural
-transition and verifies all retained content without making a second backup
-of scratch. Failure leaves the source serving. Rehearsal runs separately
-from the timed capability probe; the initial and held probes inspect the
-live runtime read-only and do not repeat the rehearsal. At startup after
-drain, the destination takes exclusive SQLite ownership, syncs a pre-change
-backup, and performs the verified structural transaction (chapter 01 §5.2).
-
-The private `version --host-upgrade-probe` reports host availability, state
-key, local-runner capabilities and configuration. The coordinator adds
-`--host-upgrade-service <file>` to validate resolved service arguments, web
-assets and required paired placements without binding the service or adopting
-lines. Its `--host-upgrade-reopen --reopen-probe <id>` uses remote
-qualification only for host upgrade; ordinary `--reopen-probe` inspection
-does not acquire this runner dependency. Required placements use authenticated
-read-only exact-triple qualification, including configuration reads. These
-probes dispatch no turn and do not open a foreign state key as session authority.
+Before the stop, qualify the candidate snapshot against the serving home
+with its read-only verbs: `doctor --json`, `gateway check --json`,
+`store rehearse --into <dir>` when it needs a store revision or the runtime
+bootstrap, `session check-binding --gating` and `session check-reopen <id>`
+(both with `--store-probe <dir>/stores` after a rehearsal). They dispatch no
+turn, start no runner and do not open a foreign state key as session
+authority. At startup after the stop the candidate applies stopped-store
+revisions and the runtime bootstrap with their synced pre-change copies
+(chapter 01 §5.2, chapter 02 §2.5).
 
 Use a tested maintainer snapshot for product host changes; report both binary
 IDs. For a remote placement, advance its dedicated command link to the
-matching immutable snapshot before invoking same-key host upgrade. Normal
-maintainer installation does not move that link; a mismatch refuses before
-drain.
+matching immutable snapshot before the host stop. Normal maintainer
+installation does not move that link.
 
 ### 6.4 Linkers
 
@@ -1409,7 +1398,7 @@ each with `length` in bytes, full lowercase `sha256` and 12-hex `display_id`.
 `plakd version --build-info` probe, which conflicts with the other hidden
 version flags and neither opens a store nor contacts a service. It reports
 `flavor`, `revision`, `product_version`, `state_key`, `export` read/write
-versions, `host_upgrade` coordinator/receipt versions, `runner` protocol
+versions, `runner` protocol
 and retention served/spoken versions, `gateway` served/spoken versions,
 the exact `wire` number and schema pin (chapter 02 §4.4), whether `test_hooks`
 are compiled in, and `omitted_features`, which is always empty in the
@@ -1521,59 +1510,14 @@ its link command cannot relink pre-port snapshots. Neither local step
 starts or changes a service or moves a dedicated paired-runner or gateway
 command link.
 
-The hidden `plakd deploy` operator tool (chapter 02 §4.6) is not a supported
-product surface and does not widen the shipping or supported platform policy.
-The same-key host upgrade owns the local preservation and health gates and
-any explicitly requested store backup. Fleet coordination must wait for that
-host's destination readiness before publishing it, not infer readiness from
-source surrender. A weaker pre-drain verdict does not claim a held
-comparison. After surrender, a definite destination refusal is fixed
-forward; fleet tooling neither bypasses the host's restart fence nor
-restores a store backup. Fleet route and fresh-session canaries remain
-deployment policy, not host upgrade gates.
-It requires Git, OpenSSH and a read-capable source checkout of the origin
-on the operator, and native target operations from the artifact binary on
-the target. It accepts a full revision on the advertised
-`origin/main` first-parent history, never accepts a branch name or builds
-bits itself, and stages through the artifact's native snapshot installer.
-Supply a directory and full pinned manifest digest per enrolled target
-platform. Shipping releases use `manifest.json` on
-`x86_64-unknown-linux-musl` or `aarch64-apple-darwin`. For a maintainer
-artifact, use `just build maintainer` followed by that binary's
-`snapshot install --flavor maintainer` source-build recipe and pin the
-immutable snapshot's `deploy-manifest.json`. Include the installer-published
-content-addressed sidecars that the snapshot names. Its manifest binds the
-binary and both sidecar digests, state key, and exact native triple, including
-`x86_64-unknown-linux-gnu` for GNU maintainer builds. The target revalidates
-the candidate's `version --build-info` facts, including full revision,
-`maintainer release` flavor, the current product version, no omitted
-features, disabled test hooks and state key. Linux GNU
-installer runs require `readelf` to measure the three images' maximum
-numeric GLIBC requirement (non-version `GLIBC_ABI_*` markers are not
-version numbers); deploy checks it against target
-`getconf GNU_LIBC_VERSION` before transferring a bootstrap, and the
-target remeasures it before installation. Each manifest names the same exact
-source revision; each SSH target executes the candidate for its own platform.
-Rehash the manifest and exact files at ingest, during transfer and on the
-target; the installer checks target build-info and publishes without linking.
-Client inputs are a separate pinned manifest and one blob, hashed at all three
-boundaries. Production requires a green staging transition less than 24 hours
-old for identical platform, serving-host and client manifest digests, source
-wire, coordinator, local runner protocol and gateway versions. It also
-requires an equivalent paired-runner transition multiset by platform
-(`unchanged`, `same_triple`, `changed_triple`), measured from each runner
-link's own image build info against its native destination, independent of runner
-names, and equivalent canary model and effort coverage, including account
-counts and the exact route-bound canary class (chapter 02 §4.6).
-Staging and production receipts must identify disjoint target
-logins; a shared physical machine is allowed only on macOS under different
-UIDs and homes. An already converged read-only check
-neither needs nor renews the receipt. Resuming a recorded production
-intent relies on its passed baseline and does not re-check receipt expiry.
-A rehearsal of different bytes, including a fresh rebuild with different
-digests, is not promotion evidence.
+Fleet rollout is operator tooling outside this repository (chapter 02
+§4.6). It stages snapshots with this installer and `--no-link`, advances
+links itself, and owns its canaries; none of that widens the shipping or
+supported platform policy or adds a host upgrade gate. The host never
+restores a store backup; restoring the stopped backup after the candidate
+may have opened the stores is the manual procedure of chapter 02 §4.6.
 
-A successful reverse same-key handoff does not prove that the prior snapshot
+A successful reverse same-key restart does not prove that the prior snapshot
 can reopen existing roots. A changed runner triple can leave a durable
 retention-only fence in the original native runner namespace; a downgrade to
 an image using that namespace cannot run the affected roots, even after their
@@ -1583,7 +1527,7 @@ qualify a transition as reversible, reopen and run a pre-existing root that
 ran on the new build, on each affected placement; a preserved PID, intact
 history and fresh-root canaries are not sufficient. Keep the compatible
 exact-triple snapshot and sidecars. If a return strands a fenced root,
-re-upgrade on the same intact home with the matching runner links. This
+restart again to that snapshot on the same intact home with the matching runner links. This
 does not discard committed state; do not restore older runner files to
 make the reverse appear to work.
 

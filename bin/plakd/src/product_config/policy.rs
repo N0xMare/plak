@@ -53,7 +53,7 @@ pub struct SessionPolicy {
     pub topology_enabled: bool,
     /// Wake idle interactive roots on unread child results or questions.
     pub auto_continue: bool,
-    /// `[host] resume_after_loss`: hold (the default when unset) or continue.
+    /// `[host] resume_after_loss`: hold or continue (unset continues under the host and holds in embedded faces).
     pub resume_after_loss: plakous_hosted::runtime::ResumeAfterLoss,
     /// `[orchestration] max_concurrent_requests_per_account`.
     pub requests_per_account: u16,

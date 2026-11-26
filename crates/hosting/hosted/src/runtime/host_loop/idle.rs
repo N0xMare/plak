@@ -98,13 +98,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .idle_release
             .as_ref()
             .map(|release| release.attachments.changed());
-        let step = &self.role.events.step_control;
-        let mut step_changed = Box::pin(step.changed.notified());
-        step_changed.as_mut().enable();
         loop {
-            if step.requested() {
-                return Ok(None);
-            }
             match self.role.actions.try_recv() {
                 Ok(delivery) => return Ok(Some(delivery)),
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -115,9 +109,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             tokio::select! {
                 biased;
                 () = self.role.actions.ready() => {}
-                () = &mut step_changed => {
-                    return if step.requested() { Ok(None) } else { Err(RecvTimeoutError::Timeout) };
-                }
                 () = async {
                     match residency {
                         Some(change) => change.notified().await,

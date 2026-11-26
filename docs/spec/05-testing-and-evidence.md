@@ -30,28 +30,26 @@ parses or a route that renders is not a support or correctness promise.
   preflight separates new live regressions from old failures, inactive rows and
   external availability. Exact reopen cannot substitute for the export carrier
   across state keys.
-- **Planned handoff.** Same-key real-binary fixtures exercise bounded drain,
-  cancellation and continuation, PID-preserving promotion, pre-surrender
-  rollback and once-only terminal publication. Exceeding a drain bound with a
-  foreground call or paid compaction must not silently cancel, redispatch or
-  surrender it; Stop cannot continue work it stopped. Progress polling joins
-  the same computation and deadline. Holds revoke stale ingress, extend
-  approval expiry only by parked time and remain outside model-operation
-  deadlines; a crash before durable surrender is owner loss, not a handoff.
-  Client delivery at the verdict barrier is an attempted write, not receipt.
-  Deadline tests belong to the owner of each clock: L0 holds, provider watchdogs
-  and process executors are separate evidence.
-- **Offline migration.** Install fixtures prove pre-drain refusal on a changed
-  key and stopped-host export/import into a fresh successor. The fixture
+- **Restart upgrade.** Same-key real-binary fixtures stop a host with
+  SIGTERM and start the same or a replacement image on the same stores. A
+  running root turn and a running child are handed off and continue once with
+  no client attached; promoted jobs on the home-local and paired daemons,
+  including across a changed runner triple, keep their process and report
+  their terminal once; an unpromoted foreground call ends with the stop and
+  is not replayed. The read-only pre-stop probes give the same verdicts on
+  live and rehearsed stores and change no store revision.
+- **Offline migration.** Install fixtures prove stopped-host export/import
+  into a fresh successor. The fixture
   preserves portable history, named state and paused queue text, and reconnects
   using the successor's ID. The state-key override exercises both keys without
   bypassing custody checks. Use literal producer and destination builds at
   format cuts; a test-only key override is not cross-revision evidence.
 - **Production predecessor.** Install gates on both supported platforms must
-  run the production upgrade command against separately built images of the
-  deployed revision and the candidate, with real daemons, isolated homes and
-  offline dependencies. Same-key qualification must exercise work already
-  admitted by the old host; a changed key must refuse before drain. The
+  run a restart upgrade from a separately built image of the deployed
+  revision to the candidate, with real daemons, isolated homes and offline
+  dependencies: a planned stop of the predecessor, a stopped backup by the
+  candidate and a start of the candidate on the same stores. It must
+  exercise work already admitted by the old host. The
   exception surfaces (chapter 00) must see data and requests from their actual
   producer and consumer builds. This bounded fixture does not replace staging
   evidence under production-shaped load (chapter 02 §4.6).
@@ -1576,7 +1574,7 @@ busy-root absence test reserve `ceil(N/4)` slots at priority 90.
 
 | Install family | Evidence |
 | --- | --- |
-| Upgrade | `host_skeleton::upgrade::`: planned handoff and recovery, compatibility preflight, stopped residents and lifecycle notices |
+| Restart | `host_skeleton::restart::`: planned stop and start of the same or a replacement image, retained and changed-triple jobs, child continuation, read-only pre-stop probes and lifecycle notices |
 | Ledger retirement | Four bounded retirement campaigns, including twin pilots and first-product-publication relaunches |
 | Indexed durability | `crash_sweep::durability_subset` cuts every indexed commit in four shapes; `crash_sweep::durability_twin_pilots` checks equal per-store commit sequences for the other shapes without cutting |
 | Image residency | Indexed image-residency recovery cuts |
@@ -1650,16 +1648,13 @@ macOS; ignored full-tier retirement soaks in both profiles still run alone.
 | Real JSONL face SIGKILL | `jsonl_face_cut_before_the_turn_reopens_exactly`, `jsonl_face_cut_inside_the_model_request_is_abandoned_with_the_billing_note`, `jsonl_face_cut_inside_a_running_tool_is_abandoned_with_the_workspace_note`, `jsonl_face_cut_after_the_answer_reopens_exactly`; `jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen` is explicitly ignored under `JSONL-APPROVAL-RESUME` |
 | GC after a compaction cut | `gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head`, `sigkill_gc_cuts_preserve_queue_counters_and_oracle` |
 | Runtime commit cuts | `every_runtime_commit_cut_reopens_without_redispatch` |
-| In-place store revisions | `host_skeleton::revision_cuts::` cuts the real host immediately before and after each store's commit; an older host leaves every database untouched, and the destination completes a mixed-revision directory without rerunning committed steps. The same-key upgrade lane exercises scratch-only qualification and planned handoff over a real root. |
+| In-place store revisions | `host_skeleton::revision_cuts::` cuts the real host immediately before and after each store's commit; an older host leaves every database untouched, and the destination completes a mixed-revision directory without rerunning committed steps. The restart lane exercises rehearsal on private copies and a restart over a real root. |
 | Crash-matrix completion control | `complete_run_is_one_exact_new_state_and_probe_is_inert` — the same harness child and evidence probe, without SIGKILL; the bounded child lifetime is the load sensitivity |
 | SQLite paid-compaction SIGKILL | `sqlite_paid_compaction_sigkill_reopens_exactly_once`, `sqlite_no_locator_paid_compaction_sigkill_is_never_redispatched` |
 | SQLite SIGKILL commit campaign | `bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit` |
 | Runner link faults and line ownership | `runner_killed_mid_job_restarts_with_its_owner_floor`, `host_killed_mid_call_is_recovered_and_readopted_by_its_host_id`, `host_crash_with_a_sibling_connected_orphans_only_its_lines` (a sibling process of the home stays bound while a holder is killed: it cannot stop the line's job with the owner it can read, and the line is orphaned at the dead holder's lease), `runner_restart_sibling_races_floor_owner` (a sibling binding first after a runner restart cannot take the floor owner; the floor's holder can), `crash_after_takeover_before_transfer` (a successor's durable newer owner never reached the runner; the next successor's newer owner takes the line and nothing wedges) — a runner daemon and a host in separate processes, each killed in turn (chapter 01 §8.4) |
 | Cross-runner fork stages | `cross_runner_fork_stages` — over two loopback runners, the process ends once each mint and seal-back stage (chapter 03 §14) is published and again once each has run before its answer is recorded; the reopened tree settles without a fault and the rerun converges. It is in process rather than a crash-sweep shape because the sweep drives one product process, whose port reaches only its selected runner |
 
-The paired terminal-history upgrade probes wait until the source checkpoint
-records both the terminal job state and the completed tool result; disappearance
-of the process alone does not imply durable publication.
 The retained-job stop probes observe the runner's joined user-stop result
 before asking the host to shut down. They then join the host and check the
 durable terminal in the checkpoint rather than treating the wire event as
@@ -4317,7 +4312,7 @@ unrelated work just to re-establish an existing state.
 | Retention-only ownership | Frozen v1 fixtures and v2 policy independently check exact verbs, encodings and refusals, including discovery of the previous protocol and rejection outside the supported window. A foreign/stale tuple, insecure parent, peer mismatch or inode change is not authority. Transfer never adopts unsettled foreground work. Multi-build serial fixtures exercise direct delegation, one-time input and terminal consumption, old-controller fencing and no shadow capacity charges. |
 | Retention loss | Durability cuts kill the actual original or receiving daemon and lose an acknowledged transfer reply. Preserve exact receipts without input replay, distinguish missing/unreachable old authority from proved death, and never adopt or kill a surviving child using vanished authority. Expiry uses the original lifetime and terminal time, not the first observer's, and never stops a running child. |
 
-Install owns the host upgrade family. Publication SIGKILL cuts belong to
+Install owns the host restart family. Publication SIGKILL cuts belong to
 durability; injected parent-sync failures run offline. Wall-clock discovery
 bounds belong to serial with matching offline exclusions. See §2.2 and
 §2.3 for the complete lane rules.

@@ -8,9 +8,6 @@ use plakous_agent::internal::CheckpointRecoveryVerdict;
 use {plakous_store::SqliteSessionStore, std::path::Path};
 
 #[doc(hidden)]
-pub use plakous_store::PreservationReader;
-
-#[doc(hidden)]
 pub use crate::EvaluatorArtifactFault;
 
 /// A per-child qualification failure, separating environment from binding.
@@ -66,8 +63,11 @@ pub fn runtime_bootstrap_pending(database: &Path) -> Result<bool, AgentSessionsE
 ///
 /// # Errors
 /// Returns typed shape, integrity and storage refusals.
-pub fn rehearse_runtime_bootstrap(source: &Path, scratch: &Path) -> Result<(), AgentSessionsError> {
-    SqliteSessionStore::rehearse_bootstrap(source, scratch).map_err(store_error)
+pub fn rehearse_runtime_bootstrap(
+    scratch: &Path,
+    deadline: std::time::Instant,
+) -> Result<(), AgentSessionsError> {
+    SqliteSessionStore::rehearse_copied_bootstrap(scratch, deadline).map_err(store_error)
 }
 
 /// Commit the pending bootstrap under exclusive SQLite locking.

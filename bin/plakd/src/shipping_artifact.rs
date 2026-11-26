@@ -68,7 +68,6 @@ pub(crate) struct BuildInfo {
     pub(crate) export: Export,
     pub(crate) flavor: String,
     pub(crate) gateway: Versions,
-    pub(crate) host_upgrade: Upgrade,
     pub(crate) omitted_features: Vec<String>,
     pub(crate) product_version: String,
     pub(crate) revision: String,
@@ -90,13 +89,6 @@ pub(crate) struct Export {
 pub(crate) struct Versions {
     pub(crate) served: Vec<u32>,
     pub(crate) spoken: Vec<u32>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Upgrade {
-    pub(crate) coordinator: u32,
-    pub(crate) receipt: u32,
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -168,13 +160,6 @@ impl Manifest {
             "snapshot id differs",
         )
     }
-
-    pub(crate) fn verify_dir(&self, root: &Path) -> CliResult<()> {
-        for (name, expected) in &self.files {
-            expected.verify(&root.join(name))?;
-        }
-        Ok(())
-    }
 }
 
 impl Toolchain {
@@ -194,7 +179,7 @@ impl Toolchain {
 impl BuildInfo {
     pub(crate) fn validate(&self) -> CliResult<()> {
         check(
-            crate::carry::upgrade::state_key_valid(&self.state_key),
+            crate::carry::state_key_valid(&self.state_key),
             "invalid state key",
         )?;
         check(
@@ -202,8 +187,6 @@ impl BuildInfo {
                 && self.export.write > 0
                 && sorted_positive(&self.export.read)
                 && self.export.read.contains(&self.export.write)
-                && self.host_upgrade.coordinator > 0
-                && self.host_upgrade.receipt > 0
                 && self.runner.protocol > 0
                 && self.wire.number > 0
                 && hex(&self.wire.schema_pin, 64)
@@ -329,10 +312,6 @@ pub(crate) fn canonical(input: &impl Serialize) -> CliResult<Vec<u8>> {
     let mut raw = serde_json::to_vec(&data).map_err(|_| fail("cannot encode artifact facts"))?;
     raw.push(b'\n');
     Ok(raw)
-}
-
-pub(crate) fn digest(bytes: &[u8]) -> String {
-    hex_digest(&Sha256::digest(bytes))
 }
 
 pub(crate) fn hex_digest(bytes: &[u8]) -> String {

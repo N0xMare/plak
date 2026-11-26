@@ -237,7 +237,7 @@ impl Holder {
 /// Whether the start scan opens a session whose root stands so: a planned
 /// handoff's continuation runs by itself, a decided continuation a crash
 /// left pending is resubmitted at the open, and a held loss continues by
-/// itself only under `resume_after_loss = "continue"`.
+/// itself unless `resume_after_loss = "hold"`.
 const fn owes_open(standing: RootStanding, continue_losses: bool) -> bool {
     match standing {
         RootStanding::Continuing { handoff: true, .. }
@@ -278,7 +278,7 @@ impl ProductSessions {
             crate::product_config::ProductConfig::load_user(self.services.paths()?)
                 .map_err(CliFailure::new)?
                 .resume_after_loss
-                == Some(crate::product_config::ResumeAfterLoss::Continue);
+                != Some(crate::product_config::ResumeAfterLoss::Hold);
         let store = self.services.session_records()?;
         let mut entries = self
             .with_product(|product| product.continuation_candidates())
@@ -342,7 +342,7 @@ pub(super) fn continuation_owed(services: &Services, id: &str) -> CliResult<bool
     let continue_losses = crate::product_config::ProductConfig::load(paths)
         .map_err(CliFailure::new)?
         .resume_after_loss
-        == Some(crate::product_config::ResumeAfterLoss::Continue);
+        != Some(crate::product_config::ResumeAfterLoss::Hold);
     let store = services.session_records()?;
     let standing = plakous_hosted::runtime::root_standing(store.as_ref(), id)?;
     Ok(owes_open(standing, continue_losses)
@@ -444,26 +444,6 @@ impl HostSessions<PlakExtension> for ProductSessions {
         super::protocol_13::prepare(paths, session, generation, root, retained).map(Some)
     }
 
-    fn host_request_during_pause(&self, request: &plakd_wire_types::console::HostRequest) -> bool {
-        use plakd_wire_types::console::HostRequest as R;
-        matches!(
-            request,
-            R::TerminalList { .. }
-                | R::FilesList { .. }
-                | R::FilesRead { .. }
-                | R::FilesSearch { .. }
-                | R::ChangesStatus { .. }
-                | R::ChangesDiff { .. }
-                | R::ProfilesList { .. }
-                | R::ProfilesGet { .. }
-                | R::TemplatesList { .. }
-                | R::TemplatesGet { .. }
-                | R::ConfigGet { .. }
-                | R::ConsoleMetadataGet { .. }
-                | R::AccountsStatus { .. }
-                | R::AccountsUsage { .. }
-        )
-    }
     fn state_key(&self) -> String {
         crate::home::state::state_key()
     }

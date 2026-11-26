@@ -15,128 +15,37 @@ fn bare_invocation_is_help_and_terminal_launch_grammar_is_absent() {
 }
 
 #[test]
-fn host_step_drain_accepts_bounded_and_idle_without_settlement_or_abandon_flags() {
-    for (value, expected) in [
-        ("0", crate::command::HostDrain::Bounded { milliseconds: 0 }),
-        (
-            "5m",
-            crate::command::HostDrain::Bounded {
-                milliseconds: 300_000,
-            },
-        ),
-        (
-            "250ms",
-            crate::command::HostDrain::Bounded { milliseconds: 250 },
-        ),
-        ("idle", crate::command::HostDrain::Idle),
-    ] {
-        assert!(
-            matches!(parse(args(&["host", "upgrade", "--expect-binary", "0123456789ab", "--drain", value])).unwrap(), Command::HostUpgrade { drain: Some(actual), .. } if actual == expected)
-        );
-    }
-    for value in [
-        "-1",
-        "1.5s",
-        "2h",
-        "infinity",
-        "1m30s",
-        "18446744073709551615h",
-    ] {
-        assert!(
-            parse(args(&[
-                "host",
-                "upgrade",
-                "--expect-binary",
-                "0123456789ab",
-                "--drain",
-                value
-            ]))
-            .is_err(),
-            "{value}"
-        );
-    }
-    for extra in ["--wait", "--abandon"] {
-        assert!(
-            parse(args(&[
-                "host",
-                "upgrade",
-                "--expect-binary",
-                "0123456789ab",
-                "--drain",
-                "0",
-                extra,
-                "1"
-            ]))
-            .is_err()
-        );
-    }
-}
-
-#[test]
-fn host_upgrade_runner_inspection_requires_both_flags() {
-    let source = "100-0000000000000001";
-    let ordinary = ["host", "upgrade", "--expect-binary", "0123456789ab"];
+fn restart_upgrade_verbs_parse_and_the_handoff_verbs_are_gone() {
     assert!(matches!(
-        parse(args(&ordinary)),
-        Ok(Command::HostUpgrade {
-            inspection: None,
-            ..
-        })
+        parse(args(&["host", "wake", "--session", "s", "--text", "go on"])).unwrap(),
+        Command::HostWake { session, text } if session == "s" && text == "go on"
     ));
-    let paired = [
-        "--inspect-source",
-        source,
-        "--inspect-runner",
-        "desk",
-        "--inspect-runner",
-        "lab",
-    ];
     assert!(matches!(
-        parse(args(&[ordinary.as_slice(), &paired].concat())),
-        Ok(Command::HostUpgrade { inspection: Some(proof), .. })
-            if proof.source_instance == source && proof.deploy_inspect_runners == ["desk", "lab"]
+        parse(args(&["doctor", "--json"])).unwrap(),
+        Command::Doctor { json: true }
     ));
-    for incomplete in [["--inspect-runner", "desk"], ["--inspect-source", source]] {
-        assert!(parse(args(&[ordinary.as_slice(), &incomplete].concat())).is_err());
-    }
-}
-
-#[test]
-fn legacy_host_upgrade_flags_name_the_offline_procedure() {
-    for (flag, command) in [
-        ("--abandon", &["host", "upgrade", "--abandon", "desk"][..]),
-        ("--wait", &["host", "upgrade", "--wait", "0"][..]),
-        (
-            "--wait",
-            &[
-                "host",
-                "upgrade",
-                "--expect-binary",
-                "0123456789ab",
-                "--drain",
-                "0",
-                "--wait",
-                "60",
-            ][..],
-        ),
+    assert!(matches!(
+        parse(args(&["gateway", "check", "--json"])).unwrap(),
+        Command::Gateway(crate::command::GatewayCommand::Check { json: true })
+    ));
+    assert!(matches!(
+        parse(args(&["store", "rehearse", "--into", "/tmp/r"])).unwrap(),
+        Command::StoreRehearse { into } if into == std::path::Path::new("/tmp/r")
+    ));
+    assert!(matches!(
+        parse(args(&["session", "check-reopen", "s", "--store-probe", "/tmp/r/stores"])).unwrap(),
+        Command::SessionCheckReopen { session, store_probe: Some(_) } if session == "s"
+    ));
+    for removed in [
+        &["host", "upgrade", "--expect-binary", "0123456789ab"][..],
+        &["host", "upgrade-verdict"],
+        &["version", "--host-upgrade-probe"],
+        &["version", "--reopen-probe", "s", "--host-upgrade-reopen"],
+        &["deploy", "plan"],
+        &["deploy-target"],
     ] {
-        assert_eq!(
-            parse(args(command)).unwrap_err(),
-            format!(
-                "flag removed: {flag}; {}",
-                crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED
-            )
-        );
+        assert!(parse(args(removed)).is_err(), "{removed:?}");
     }
-    assert_eq!(
-        parse(args(&[
-            "version",
-            "--host-upgrade-capacity",
-            "missing.json"
-        ]))
-        .unwrap_err(),
-        crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED
-    );
 }
 
 #[test]
@@ -933,16 +842,25 @@ fn product_command_argv_matrix() {
         (&["-V"], |c| matches!(c, Command::Version)),
         (&["--version"], |c| matches!(c, Command::Version)),
         (&["-h"], |c| matches!(c, Command::Help)),
-        (&["doctor"], |c| matches!(c, Command::Doctor)),
+        (&["doctor"], |c| {
+            matches!(c, Command::Doctor { json: false })
+        }),
         (&["status", "--json"], |c| matches!(c, Command::StatusJson)),
         (&["store", "backup", "./backup"], |c| {
-            matches!(c, Command::StoreBackup { directory, budget_secs: None }
+            matches!(c, Command::StoreBackup { directory, stopped: false, budget_secs: None }
             if directory == std::path::Path::new("./backup"))
         }),
         (
-            &["store", "backup", "./backup", "--budget-secs", "900"],
+            &[
+                "store",
+                "backup",
+                "./backup",
+                "--stopped",
+                "--budget-secs",
+                "900",
+            ],
             |c| {
-                matches!(c, Command::StoreBackup { directory, budget_secs: Some(900) }
+                matches!(c, Command::StoreBackup { directory, stopped: true, budget_secs: Some(900) }
             if directory == std::path::Path::new("./backup"))
             },
         ),
@@ -1171,12 +1089,15 @@ fn product_command_argv_matrix() {
         (&["runner", "connect", "--stdio"], |c| {
             matches!(
                 c,
-                Command::Runner(crate::commands::runner::RunnerCommand::Connect { binary: None })
+                Command::Runner(crate::commands::runner::RunnerCommand::Connect {
+                    binary: None,
+                    no_start: false
+                })
             )
         }),
         (
             &["runner", "connect", "--stdio", "--binary", "abcdef012345"],
-            |c| matches!(c, Command::Runner(crate::commands::runner::RunnerCommand::Connect { binary: Some(binary) }) if binary == "abcdef012345"),
+            |c| matches!(c, Command::Runner(crate::commands::runner::RunnerCommand::Connect { binary: Some(binary), no_start: false }) if binary == "abcdef012345"),
         ),
         (
             &["runner", "connect"],

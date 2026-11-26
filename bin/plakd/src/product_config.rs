@@ -19,7 +19,6 @@ mod toml_file;
 mod tool_sections;
 pub(crate) mod web;
 
-pub(crate) use tool_sections::runners::is_runner_command;
 pub use tool_sections::runners::{LOCAL_RUNNER_NAME, RunnerConfig, validate_runner_name};
 pub use tool_sections::{
     DEFAULT_FETCH_URL_MAX_BYTES, DEFAULT_FETCH_URL_TIMEOUT_SECONDS, DEFAULT_MCP_CALL_SECONDS,
@@ -47,6 +46,7 @@ pub use load::{
     no_native_protocol_accounts, template_accounts,
 };
 
+pub(crate) use keys::continue_hosted_losses;
 pub use keys::{
     CONFIG_KEYS, CONFIG_SECTION_DOCS, ConfigField, ConfigKey, ConfigScope, ResumeAfterLoss,
     config_key,

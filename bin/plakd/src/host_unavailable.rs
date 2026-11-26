@@ -6,12 +6,6 @@ use crate::shell::services::Services;
 
 pub(crate) const AVAILABLE: bool = false;
 
-pub(crate) fn legacy_child_audit(
-    _paths: &crate::product_paths::PlakPaths,
-) -> CliResult<Option<crate::carry::child_reopen::LegacyChildBaseline>> {
-    Ok(None)
-}
-
 pub(crate) fn abort_child_retirement(
     _paths: &crate::product_paths::PlakPaths,
     _tree: &str,
@@ -23,20 +17,6 @@ pub(crate) fn abort_child_retirement(
     ))
 }
 
-pub(crate) fn receive_reexec() -> CliResult<(String, std::convert::Infallible)> {
-    Err(plakous_hosted::error::CliFailure::new(
-        "host transport handoff is unavailable",
-    ))
-}
-
-pub(crate) fn preflight_upgrade_service(
-    services: &Services,
-    command: &crate::command::HostCommand,
-    _probe: &std::path::Path,
-) -> CliResult<()> {
-    run_host_command(services, command, None).map(|_| ())
-}
-
 /// Refuses: this build has no host.
 ///
 /// # Errors
@@ -45,7 +25,6 @@ pub(crate) fn preflight_upgrade_service(
 pub(crate) fn run_host_command(
     _services: &Services,
     _command: &crate::command::HostCommand,
-    _reexec: Option<std::convert::Infallible>,
 ) -> CliResult<ProcessOutcome> {
     Err(plakous_hosted::capabilities::CapabilityUnavailable {
         id: "host",
@@ -56,23 +35,17 @@ pub(crate) fn run_host_command(
 }
 
 pub(crate) fn connect_stdio(services: &Services, _auto_start: bool) -> CliResult<ProcessOutcome> {
-    run_host_command(services, &crate::command::HostCommand::default(), None)
+    run_host_command(services, &crate::command::HostCommand::default())
 }
 
-pub(crate) fn upgrade(
-    services: &Services,
-    _expect_binary: &str,
-    _drain: crate::command::HostDrain,
-    _backup_store: bool,
-    _inspection: Option<crate::deploy::DeployRunnerInspection>,
-) -> CliResult<ProcessOutcome> {
-    run_host_command(services, &crate::command::HostCommand::default(), None)
+pub(crate) fn wake(services: &Services, _session: &str, _text: &str) -> CliResult<ProcessOutcome> {
+    run_host_command(services, &crate::command::HostCommand::default())
 }
 
-pub(crate) fn upgrade_verdict(
+pub(crate) fn rehearse_stores(
     services: &Services,
-    _acknowledge: Option<uuid::Uuid>,
-    _output: &mut dyn std::io::Write,
+    _into: &std::path::Path,
+    _stdout: &mut dyn std::io::Write,
 ) -> CliResult<ProcessOutcome> {
-    run_host_command(services, &crate::command::HostCommand::default(), None)
+    run_host_command(services, &crate::command::HostCommand::default())
 }

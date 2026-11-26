@@ -12,7 +12,6 @@ struct BuildInfo<'a> {
     export: Export,
     flavor: String,
     gateway: Versions<&'static [u16]>,
-    host_upgrade: HostUpgrade,
     omitted_features: &'static [&'static str],
     product_version: &'static str,
     revision: String,
@@ -32,12 +31,6 @@ struct Export {
 struct Versions<T> {
     served: T,
     spoken: T,
-}
-
-#[derive(Serialize)]
-struct HostUpgrade {
-    coordinator: u32,
-    receipt: u32,
 }
 
 #[derive(Serialize)]
@@ -66,10 +59,6 @@ pub(crate) fn print(out: &mut dyn Write) -> CliResult<ProcessOutcome> {
         gateway: Versions {
             served: SUPPORTED_VERSIONS,
             spoken: SUPPORTED_VERSIONS,
-        },
-        host_upgrade: HostUpgrade {
-            coordinator: carry::upgrade::PROTOCOL,
-            receipt: carry::upgrade::RECEIPT_VERSION,
         },
         omitted_features: &[],
         product_version: plakous::VERSION,

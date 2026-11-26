@@ -120,8 +120,27 @@ fn legacy_bootstrap_refuses_an_idle_writer_then_rebuilds_after_it_closes() -> Te
     );
     assert!(!path.with_extension("pre-codec-bootstrap.sqlite3").exists());
     let scratch = dir.path().join("copy.sqlite3");
-    SqliteSessionStore::rehearse_bootstrap(&path, &scratch)?;
-    assert!(!SqliteSessionStore::bootstrap_pending(&scratch)?);
+    {
+        use rusqlite::backup::{Backup, StepResult};
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&scratch)?;
+        let mut copy = Connection::open(&scratch)?;
+        assert!(matches!(
+            Backup::new(&incumbent, &mut copy)?.step(-1)?,
+            StepResult::Done
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    SqliteSessionStore::rehearse_copied_bootstrap(&scratch, deadline)
+        .map_err(|error| format!("private copy rehearsal: {error}"))?;
+    let pending = SqliteSessionStore::bootstrap_pending(&scratch)
+        .map_err(|error| format!("rehearsed copy inspection: {error}"))?;
+    assert!(!pending);
     assert!(
         !scratch
             .with_extension("pre-codec-bootstrap.sqlite3")

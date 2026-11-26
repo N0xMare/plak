@@ -39,7 +39,6 @@ impl QuitReceipt {
 pub struct HostWorkerHandle {
     thread: thread::JoinHandle<CliResult<()>>,
     receipt: QuitReceipt,
-    pub(crate) steps: Arc<super::step_hold::StepControl>,
     completion: Arc<WorkerCompletion>,
     pub(crate) root_transcript: Option<super::RootTranscript>,
 }
@@ -69,29 +68,22 @@ impl Drop for FinishWork {
 impl HostWorkerHandle {
     /// Spawns a host whose ordinary completion does not escalate a quit.
     pub fn spawn(work: impl FnOnce() -> CliResult<()> + Send + 'static) -> Self {
-        Self::spawn_with_receipt(move |_, _| work())
+        Self::spawn_with_receipt(move |_| work())
     }
 
     pub(super) fn spawn_with_receipt(
-        work: impl FnOnce(QuitReceipt, Arc<super::step_hold::StepControl>) -> CliResult<()>
-        + Send
-        + 'static,
+        work: impl FnOnce(QuitReceipt) -> CliResult<()> + Send + 'static,
     ) -> Self {
         let receipt = QuitReceipt::default();
         let owned = receipt.clone();
-        let steps = Arc::new(super::step_hold::StepControl::default());
-        let lifetime = super::step_hold::StepOwner(Arc::clone(&steps));
-        let control = Arc::clone(&steps);
         let completion = Arc::new(WorkerCompletion::default());
         let finishing = FinishWork(Arc::clone(&completion));
         Self {
             thread: thread::spawn(move || {
                 let _finishing = finishing;
-                let _lifetime = lifetime;
-                work(owned, control)
+                work(owned)
             }),
             receipt,
-            steps,
             completion,
             root_transcript: None,
         }

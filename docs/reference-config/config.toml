@@ -165,13 +165,13 @@ max_age_days = 90
 # The per-user host: how it treats work a lost host left.
 [host]
 
-# Permit this user's own processes to request a hosted-session reload (plakd session reload <session> --expect-binary <id>). The serving host records the outcome and names the explicit host upgrade workflow; replacing a client does not upgrade its sessions.
+# Permit this user's own processes to request a hosted-session reload (plakd session reload <session> --expect-binary <id>). The serving host records the outcome and points to the operator-managed host restart; replacing a client does not upgrade its sessions.
 # type: bool · default: false · true or false; home-scoped
 reload_requests = false
 
 # Whether the root and sub-agents that lost their owner (a crash or a proven lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). A loss that interrupted a continuation itself holds under either policy. Read when the root attaches and opens, and by plakd host's start scan, which opens eligible held roots under continue.
-# type: enum · default: (unset) · hold|continue; unset holds; home-scoped
-# resume_after_loss = "continue"
+# type: enum · default: (unset) · hold|continue; unset continues under plakd host and holds in embedded faces; home-scoped
+# resume_after_loss = "hold"
 
 # The maintainer web endpoint (plakd host --web): who it admits and where it is served.
 # [web]

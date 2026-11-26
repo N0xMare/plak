@@ -1,8 +1,8 @@
 # Install-profile membership. tools/gate/nextest_layout.py renders the two
 # derived filter blocks in nextest.toml from these families.
 
-[upgrade]
-filter = "test(host_skeleton::upgrade::) - test(host_skeleton::upgrade::retained_jobs::changed::durability::)"
+[restart]
+filter = "test(host_skeleton::restart::)"
 
 [predecessor]
 filter = "test(host_skeleton::predecessor::)"
@@ -44,7 +44,7 @@ isolated = true
 filter = '''
 test(an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists)
 | test(a_log_lock_without_a_host_retries_past_the_discovery_window)
-| test(bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed)
+| test(bridge_refusal_startup_timeout_and_stopping_are_distinct)
 '''
 
 [operator-pins-rate]

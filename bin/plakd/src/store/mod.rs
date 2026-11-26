@@ -279,53 +279,6 @@ impl ProductStore {
         })
     }
 
-    #[cfg(feature = "web")]
-    pub(crate) fn inspect_upgrade_roots(
-        paths: &PlakPaths,
-    ) -> Result<Vec<SessionRecord>, ProductStoreOpenError> {
-        if !paths
-            .product_database()
-            .try_exists()
-            .map_err(|error| ProductStoreOpenError::unavailable(error.to_string()))?
-        {
-            return Ok(Vec::new());
-        }
-        Self::read_only_snapshot(paths, |snapshot| {
-            let trees = snapshot
-                .prepare("SELECT DISTINCT node_tree_id FROM sessions ORDER BY node_tree_id")
-                .and_then(|mut statement| {
-                    statement
-                        .query_map([], |row| row.get::<_, String>(0))?
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .map_err(|error| error.to_string())?;
-            let ids = trees
-                .iter()
-                .map(|tree| directory::head_of_tree_on(snapshot, tree))
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-            let ids = ids
-                .into_iter()
-                .map(|id| {
-                    snapshot
-                        .query_row("SELECT archived FROM sessions WHERE id=?1", [&id], |row| {
-                            row.get::<_, bool>(0)
-                        })
-                        .map(|archived| (!archived).then_some(id))
-                        .map_err(|error| error.to_string())
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-            ids.iter()
-                .map(|id| load_record(snapshot, &mut views::VerifiedSubmissions::default(), id))
-                .collect()
-        })
-    }
-
     /// Lists the ids of one workspace's sessions under the same read-only
     /// snapshot discipline as [`Self::inspect_session_read_only`], so a short
     /// id resolves without opening a writable store.

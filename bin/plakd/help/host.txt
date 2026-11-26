@@ -4,8 +4,7 @@ USAGE:
   plakd host [--web <unix:path|127.0.0.1:port>] [--ui <dir>]
   plakd host install --web unix:<absolute socket> --ui <absolute dir> [--dry-run]
   plakd host connect --stdio [--auto-start]
-  plakd host upgrade --expect-binary <id> [--drain <duration|idle>] [--backup-store]
-  plakd host upgrade-verdict [--acknowledge <id>]
+  plakd host wake --session <id> --text <text>
   plakd host --help
 
 The supported default build includes the host and web endpoint. A private
@@ -26,34 +25,22 @@ starting a host or session.
 
 --web adds the web endpoint; loopback development also requires --dev-login.
 
-Upgrade is invoked using the destination build and its exact binary id.
-Same-key upgrades use planned handoff with a host-wide step drain (default
-60 seconds). --drain accepts 0, integer ms/s/m/h, bare seconds, or idle;
-finite durations are at most one hour. 0 skips natural model-call drain;
-idle waits naturally without a bound; Ctrl-C cancels preparation.
-Finite drain uses one absolute natural-drain deadline for all agents, not a
-fresh allowance per session. The draft-verdict barrier gets at least 10 seconds,
-including for 0. Effects and paid compaction must join;
-an unsuccessful preparation reopens the source's gates. Notice requests
-joined tool results, never permission to cancel paid compaction. Progress shows
-what remains running and waiting time on stderr. Mandatory freeze and
-planned-release acknowledgements retain their ordinary bounded joins.
---backup-store optionally saves private, size-bounded SQLite copies before
-surrender. It is off by default; host upgrade never restores a backup.
-The destination verifies health and preservation before reporting ready.
-upgrade-verdict shows the current inherited verdict without changing it.
-After stopping the host and checking the destination stores, acknowledge an
-exact fenced verdict to permit a deliberate cold start.
-Same-key upgrade can retain promoted jobs across runner revision or flavor
-changes, but not a native runner protocol change. For paired roots, advance
-the runner's dedicated link to the matching snapshot before upgrading.
-A changed state key refuses before drain. Settle work and stop the source,
-export selected sessions with its build, import with the destination build,
-then start the destination host. Keep both snapshots through verification.
+An upgrade is a restart: stop the host through its service and start the new
+build on the same stores. The stop hands every resident session off within
+50 seconds; running roots and children continue once on the next host, and
+promoted runner jobs keep running. Check the new build first with its
+read-only doctor --json, gateway check --json, store rehearse, session
+check-binding --gating and session check-reopen, and take a store backup
+while the host is stopped. A changed state key is not a restart upgrade:
+settle work and stop the source, export selected sessions with its build,
+import with the destination build, then start the destination host.
+
+wake submits one prompt to a session through the running host as an
+ordinary client. It never starts a host; a lost answer is not resent.
 
 --ui serves a validated static build with csp.json. SIGUSR1 reloads that build
 atomically; invalid replacements keep the old build. SIGHUP and SIGTERM mean
-planned handoff, not UI reload. A control-only host needs no --web.
+a planned stop with handoff, not UI reload. A control-only host needs no --web.
 
 The host requires a reachable credential gateway. Service installation supports
 Linux systemd user units and macOS per-user LaunchAgents. Both web paths are

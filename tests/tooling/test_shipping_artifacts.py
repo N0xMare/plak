@@ -324,7 +324,7 @@ class BuildInfoProbe(unittest.TestCase):
             else:
                 self.assertNotIn("; features ", version)
             self.assertNotIn("--build-info", run("version", "--help").stdout)
-            for flag in ("state-key", "export-version", "host-upgrade-probe", "reload-probe"):
+            for flag in ("state-key", "export-version", "reload-probe"):
                 self.assertEqual(
                     run("version", "--build-info", f"--{flag}", check=False).returncode, 2
                 )
@@ -332,15 +332,7 @@ class BuildInfoProbe(unittest.TestCase):
             self.assertEqual(
                 probe["export"]["write"], int(run("version", "--export-version").stdout)
             )
-            upgrade = json.loads(run("version", "--host-upgrade-probe").stdout)
-            self.assertEqual(probe["export"]["read"], upgrade["export_versions"])
-            self.assertEqual(
-                probe["host_upgrade"],
-                {"coordinator": upgrade["protocol"], "receipt": upgrade["receipt_version"]},
-            )
-            self.assertEqual(probe["runner"]["protocol"], upgrade["runner_protocol"])
-            for key, field in (("revision", "source_revision"), ("flavor", "flavor")):
-                self.assertEqual(probe[key], upgrade["runner_version"][field])
+            self.assertNotIn("host_upgrade", probe)
             wire = json.loads(run("wire", "schema").stdout)
             self.assertEqual(wire.pop("binary_id"), probe["binary_id"])
             pin = hashlib.sha256(manifests.canonical(wire).removesuffix(b"\n")).hexdigest()

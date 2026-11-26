@@ -23,7 +23,6 @@ pub(super) struct Housekeeping {
     projection_retry_at: Option<Deadline>,
     notice_retry_at: Option<Deadline>,
     pub(super) usage_not_before: Instant,
-    pub(super) mailbox_closed: bool,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -52,7 +51,6 @@ impl Housekeeping {
             projection_retry_at: None,
             notice_retry_at: None,
             usage_not_before: Instant::now(),
-            mailbox_closed: false,
         }
     }
 
@@ -199,7 +197,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
             }
             RootWake::Notice
             | RootWake::Jobs
-            | RootWake::StepControl
             | RootWake::Cancel
             | RootWake::AccountRead
             | RootWake::Retry => {}

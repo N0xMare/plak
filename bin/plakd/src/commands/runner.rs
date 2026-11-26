@@ -75,6 +75,7 @@ pub(crate) enum RunnerCommand {
     ServeLocal,
     Connect {
         binary: Option<String>,
+        no_start: bool,
     },
     Allow {
         host_id: String,
@@ -113,15 +114,20 @@ pub(crate) fn run(
     match command {
         RunnerCommand::Serve => runtime.block_on(serve(paths)),
         RunnerCommand::ServeLocal => runtime.block_on(serve_local(paths)),
-        RunnerCommand::Connect { binary: None } => {
-            let bridged = runtime.block_on(connect(paths));
+        RunnerCommand::Connect {
+            binary: None,
+            no_start,
+        } => {
+            let bridged = runtime.block_on(connect(paths, no_start));
             // The bridge's stdin copy may still sit in a blocking read of
             // the host's input; waiting for it would keep stdout open after
             // the daemon closed, so the host would not see the link end.
             runtime.shutdown_background();
             return bridged.map(|()| ProcessOutcome::Success);
         }
-        RunnerCommand::Connect { binary: Some(_) } => {
+        RunnerCommand::Connect {
+            binary: Some(_), ..
+        } => {
             unreachable!("binary selection execs before runner runtime construction")
         }
         RunnerCommand::Allow { host_id } => allow(paths, &host_id, stdout),
@@ -448,12 +454,17 @@ fn runner_secret(
 }
 
 /// `plakd runner connect --stdio`: bridges stdin and stdout to the daemon,
-/// starting it detached when none answers.
-async fn connect(paths: &PlakPaths) -> CliResult<()> {
+/// starting it detached when none answers unless the caller forbids startup.
+async fn connect(paths: &PlakPaths, no_start: bool) -> CliResult<()> {
     let home = RunnerHome::of(paths);
     let socket = checked_socket(&home)?;
     let config = home.config()?;
-    let start = || start_daemon(paths, &home, &config);
+    let start = || {
+        if no_start {
+            return Err(std::io::Error::other("the runner must already be serving"));
+        }
+        start_daemon(paths, &home, &config)
+    };
     daemon::bridge_stdio(&socket, start, START_WAIT)
         .await
         .map_err(|error| CliFailure::new(format!("the runner link failed: {error}")))

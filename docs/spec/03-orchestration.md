@@ -1338,7 +1338,7 @@ cleanup). A matching call is
 runs on the host executor without holding the tree mutex across the lease
 wait. The hub tracks that task with the tree's other `recover_node` runs.
 Shutdown waits up to `HOST_SHUTDOWN_RELEASE_TIMEOUT`, then aborts it, before
-any lease is released. Session close or host upgrade uses that same shutdown.
+any lease is released. Session close or a host stop uses that same shutdown.
 
 The operator's retry is the one trigger that waits on a lease: it waits up to 35
 seconds for a lapsed owner's lease and then refuses. It polls: each try holds
@@ -3896,7 +3896,8 @@ and owner-loss laws, with no paid recovery or in-place suffix replay. An
 unavailable node's recovery/open is deferred without blocking other runners;
 release retries the existing obligations, not a model command. Ready is not
 continuation consent: paid owner-loss continuation still requires its durable
-decision and `resume_after_loss` policy (default hold), plus current placement
+decision and `resume_after_loss` policy (unset: continue under `plakd host`,
+hold in embedded faces), plus current placement
 admission. Recorded Stop suppresses continuation regardless of old hold chrome.
 Root loss-resume producers wait for placement before posting consent and
 enqueueing their continuation. A delivery already prepared when placement
@@ -4200,11 +4201,13 @@ actions. For owner loss it records a caution about uncertain tool effects in
 the conversation; it never replays the lost turn, carries the child's unread mail, and
 counts against `max_turns` like any turn.
 
-Under `[host] resume_after_loss = "hold"` (the default) a held continuation
+Under `[host] resume_after_loss = "hold"` a held continuation
 waits for the operator's explicit resume intent through an attached client
 or JSONL `resume` (chapter 02). Resume with no agent resumes every held
-child. Under `"continue"` the `recover_node` run the root's open starts
-resumes each held child once by itself. A live waiter whose exact recovery
+child. Under `"continue"`, the default under `plakd host`, the
+`recover_node` run the root's open starts resumes each held child once by
+itself, so a host restart is safe with live children. Embedded faces hold
+when the key is unset. A live waiter whose exact recovery
 settles a proven lease fence uses that same consent and start path.
 If a continuation turn itself loses its owner, its new loss holds even under
 `"continue"`; only operator Resume or another explicitly authorized turn
@@ -4339,7 +4342,7 @@ The operator's one Resume (`ResumeLossContinuation` with no agent: JSONL
 `recover` on an attached face while the root holds one; `plakd session recover`
 only recovers) resumes every held child, records the
 root's consent and runs its continuation, and lets the restored queue drain.
-Under `[host] resume_after_loss = "continue"` the root's open does the same
+Under `[host] resume_after_loss = "continue"` (the `plakd host` default) the root's open does the same
 for the root by itself unless the loss interrupted a continuation: an
 eligible held continuation runs once and its restored queue drains; a
 decision a crash left pending runs at the next open
@@ -4347,30 +4350,8 @@ under either policy. The attached root sets the policy on its tree's hub
 wherever the custody-take scan runs (every root attach) and again when it
 opens.
 
-A host-owned same-key upgrade first closes client ingress and joins prior
-draft verdict attempts, then requests reversible step holds. The root owner
-rendezvous is separate from the L0 driver: it parks outer host actions while
-ordinary active-turn result/control processing continues. A hub pause does not
-refuse startup from an already-dispatched spawn, mail or follow-up effect:
-that effect must join, and refresh holds its newly published resident. Only
-host-initiated wakes and fresh recovery claims defer on the pause-release
-notification within their caller deadlines. A surfaced `StepHeld` means
-retry/park, never durable retirement, `RecoveryRequired` or slot failure.
-Existing startup and recovery owners are joined, never mistaken for dormancy;
-a claim counts even before its task is registered. Tree effect scopes and the
-writer rendezvous, not the lifetime of the retained-owner task set, establish
-joined work: held child actors and terminal waiters remain owned without being
-in-flight effects. Effect scopes follow owed work through caller loss and
-held-effect cleanup. Owed result/workspace settlement continues. A terminal driver whose
-outer attempt/result projection has not finished is still a transition.
-Dropping an aborted coordinator reopens tree admission before runtime gates,
-then outer-owner admission. Deferred recovery work is retained for retry. None of those process-local guards retires a line,
-changes a runner owner, writes a handoff decision or authorizes continuation.
-Only the committed planned release below does so. A host crash before
-that decision remains ordinary owner loss, with its existing hold/consent law.
-
-**A planned handoff.** A reload, host restart or admitted host upgrade
-releases its session as a planned handoff: the face requests the
+**A planned handoff.** A reload or a host stop, including the stop of a
+restart upgrade, releases its session as a planned handoff: the face requests the
 release with the handoff armed (`request_handoff_and_release`), and the
 release takes the flag first, so a refused or failed release leaves none
 armed and a later plain release never inherits it. The release's cancel of
@@ -4382,19 +4363,10 @@ quit's. An unsettled root cancel disarms that root's planned release. It
 writes no root handoff, abandons the turn by lease with a warning, and
 leaves it to the ordinary owner-loss law.
 
-A committed same-key upgrade has two record points. After Ready and
-before releasing session owners, the source records child handoffs for
-every joined tree, including trees with no resident root. This step
-reserves the root cancel and release allowance; it reports unrecorded
-trees by identity. Each root's own planned release then records its
-handoff. A crash between these record points leaves the recorded children
-handed off and the unreleased roots held under the owner-loss policy.
-A late settlement of the planned release's own cancel does not cascade over
-an exact recorded child handoff. An operator Interrupt admitted before the
-seal still cascades if it settles after those records; an explicit Stop
-still ends the hold.
-Outside a committed same-key upgrade, only the root's own planned
-release records child handoffs.
+Only the root's own planned release records child handoffs. A child of a
+tree whose root is not resident at the stop reads as an owner loss at the
+next open and continues once under the default `resume_after_loss =
+"continue"` policy.
 
 Before writing its child records, the releasing host applies each running
 child's feed to its tail. It records an interrupt with cause `handoff` on
@@ -4422,21 +4394,14 @@ reload's orchestration carry would then drop it as finished; a retirement that
 did finish inside the bound with an error still records its fault. The
 retirement's own owner keeps its 65-second deadline (the cancel bound plus the
 session release bound), past which it records the fault itself; a host that
-exits or execs before then (session close, a planned upgrade) leaves nothing. The next owner
+exits before then (session close, a planned stop) leaves nothing. The next owner
 reads the unsettled turn as its own loss, or as the handoff it was. For a
 planned handoff such a release is no failure: the release says which children
 it handed off with their turn still running (a live warning, `handed off c1
 with its turn still running; the next host continues it once`) and exits
 cleanly. A plain quit that cuts a child short reports the release as failed.
-The next open follows any durable child handoff already recorded at the
-same-key upgrade point; otherwise it reads that child as a loss.
-During a committed same-key release, a joined child's old waiter that receives
-`RecoveryRequired` leaves recovery to the next owner. The source does not
-recycle the child or stop its promoted jobs as attempt-end work, whether or
-not its handoff row was saved. Ordinary child recovery outside the committed
-release still stops attempt-owned jobs.
-If no successor runs, the next open's handoff or loss law governs the child,
-and its promoted jobs stay with the attempt.
+The next open follows any durable child handoff already recorded;
+otherwise it reads that child as a loss.
 Only the releasing host writes handoff records; the face never touches
 the stores. The next host continues each handed-off node once by itself,
 under either policy: a child through the continuation pass of its first
@@ -4450,22 +4415,10 @@ continues by itself without a durable handoff row. *Durable before and
 after:* before the record the rows hold the working nodes; after it, one
 `handoff` interrupt per node and nothing else, then the release. A crash
 after the record reads as the handoff it was meant to be; a crash before it
-reads as a loss. Planned host upgrade hands off running root turns and
-running or parked sub-agents under the server upgrade policy. Runner job
+reads as a loss. A restart upgrade hands off running root turns and
+running or parked sub-agents through this same planned stop. Runner job
 retention is coordinated separately; replacing a client does not surrender
 host ownership (chapter 02 §4.6).
-
-Before an upgrade coordinator surrenders these sessions, the paused-host draft
-verdict barrier (chapter 02 §4.6) distinguishes queue-owned input from input
-already claimed by an actor. Only queue-owned reservations can be withdrawn
-with upgrading `DraftRejected`; claimed work must yield its normal durable
-admission or definite refusal. A lost attachment settles delivery only, not
-admission. A global deadline or unknown admission aborts before surrender.
-This barrier writes no handoff decision or runtime command of its own, carries
-no registry, and does not replace the existing once-only continuation ids or
-reorder already accepted queue facts. Restart cuts around the existing decision,
-admission and terminal publications retain those identities; a lost admitted
-turn remains governed by the ordinary loss law, not automatic draft replay.
 
 At a state-key cut, migrate settled roots offline (chapter 02 §2.5.1).
 Imports start fresh lines. Old children are inert references, not resumable
@@ -4844,7 +4797,7 @@ Settlement has three triggers:
   held for its own recovery; it never waits on a lease (a held lease is
   `recovery_lease_held` at once) and has no deadline. The host loop never
   waits on it. Runs may overlap: a run skips a child another holds, and that
-  run reports it. The hub tracks every run; session close and host upgrade wait briefly
+  run reports it. The hub tracks every run; session close and a host stop wait briefly
   for running ones at hub shutdown and then abort them, before any lease is
   released (below). Release-triggered runs publish the recovered tree view and
   log their report. An explicit `/recover` says so, and one that starts a run

@@ -19,7 +19,6 @@ enum Wake {
     Mail,
     JobTerminal,
     NoticeIntent,
-    StepPause,
     CancelSettlement,
     NoticeWriteRetry,
     TreeNoticeRetry,
@@ -144,7 +143,6 @@ fn independent_sources_wake_a_root_waiting_on_a_child() {
         Wake::Mail,
         Wake::JobTerminal,
         Wake::NoticeIntent,
-        Wake::StepPause,
         Wake::CancelSettlement,
         Wake::NoticeWriteRetry,
         Wake::TreeNoticeRetry,
@@ -295,10 +293,6 @@ fn run_case(case: Wake) {
                             tokio::time::advance(Duration::from_millis(2)).await;
                         }
                         until(case, drive.as_mut(), || notice_present(store.as_ref(), &id)).await;
-                    }
-                    Wake::StepPause => {
-                        let pause = events.step_control.pause().unwrap();
-                        until(case, drive.as_mut(), || pause.boundary().unwrap().is_some_and(|boundary| boundary.turn.is_some())).await;
                     }
                     Wake::CancelSettlement => {
                         let control = engine.borrow().control.clone().unwrap();

@@ -31,12 +31,6 @@ impl ChildReopenRefusal {
     pub(crate) fn is_empty(&self) -> bool {
         self.affected_children == 0
     }
-
-    pub(crate) fn merge(&mut self, other: Self) {
-        self.affected_children += other.affected_children;
-        self.binding_change = self.binding_change.take().or(other.binding_change);
-        self.unavailable = self.unavailable.take().or(other.unavailable);
-    }
 }
 
 impl fmt::Display for ChildReopenRefusal {
@@ -112,24 +106,6 @@ pub(crate) struct ChildReopenInspection {
     faults: Vec<(Option<String>, Fault)>,
 }
 
-/// Verified source audit failures for the same session and branch.
-pub(crate) type LegacyChildBaseline = BTreeSet<String>;
-
-pub(crate) fn branch_key(session: &str, branch: &str) -> String {
-    use sha2::{Digest as _, Sha256};
-    let mut digest = Sha256::new();
-    for field in [session, branch] {
-        digest.update((field.len() as u64).to_be_bytes());
-        digest.update(field.as_bytes());
-    }
-    crate::shipping_artifact::hex_digest(&digest.finalize())
-}
-
-pub(crate) enum ChildBaseline<'a> {
-    Exact(&'a ChildReopenInspection),
-    Legacy(Option<&'a LegacyChildBaseline>),
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum FaultKind {
@@ -156,8 +132,6 @@ impl FaultKind {
 pub(crate) struct ChildReopenQualification {
     pub(crate) regressions: ChildReopenRefusal,
     pub(crate) pre_existing: PreExistingChildFaults,
-    #[serde(skip)]
-    pub(crate) unproven: bool,
 }
 
 #[derive(Default, Serialize)]
@@ -170,17 +144,6 @@ impl PreExistingChildFaults {
     fn record(&mut self, kind: FaultKind) {
         self.affected_children += 1;
         *self.by_kind.entry(kind).or_default() += 1;
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.affected_children == 0
-    }
-
-    pub(crate) fn merge(&mut self, other: Self) {
-        self.affected_children += other.affected_children;
-        for (kind, count) in other.by_kind {
-            *self.by_kind.entry(kind).or_default() += count;
-        }
     }
 }
 
@@ -204,55 +167,12 @@ impl ChildReopenInspection {
         (!self.faults.is_empty()).then_some(self)
     }
 
-    pub(crate) fn needs_source(&self) -> bool {
-        self.faults
-            .iter()
-            .any(|(head, fault)| head.is_some() && !fault.environmental())
-    }
-
-    pub(super) fn needs_legacy_audit(&self) -> bool {
-        self.faults
-            .iter()
-            .any(|(head, fault)| head.is_some() && matches!(fault, Fault::Unreadable { .. }))
-    }
-
-    pub(crate) fn qualify(&self, source: ChildBaseline<'_>) -> ChildReopenQualification {
+    /// Without a source baseline every build-attributable fault refuses;
+    /// environmental artifact faults are reported as pre-existing.
+    pub(crate) fn qualify(&self) -> ChildReopenQualification {
         let mut report = ChildReopenQualification::default();
         for (head, fault) in &self.faults {
-            let Some(head) = head else {
-                fault.record_refusal(&mut report.regressions);
-                continue;
-            };
-            let regression = if fault.environmental() {
-                false
-            } else {
-                match source {
-                    ChildBaseline::Exact(source) if source.opened.contains(head) => true,
-                    ChildBaseline::Exact(source) => {
-                        let Some((_, prior)) = source
-                            .faults
-                            .iter()
-                            .find(|(other, _)| other.as_ref() == Some(head))
-                        else {
-                            report.unproven = true;
-                            continue;
-                        };
-                        matches!(fault, Fault::EvaluatorContract { .. }) && prior.environmental()
-                    }
-                    ChildBaseline::Legacy(audit) => {
-                        !matches!(fault, Fault::Unreadable { .. })
-                            || !audit.is_some_and(|audit| {
-                                head.parse::<SessionLocator>().is_ok_and(|locator| {
-                                    audit.contains(&branch_key(
-                                        &locator.session_id().to_string(),
-                                        &locator.branch_id().to_string(),
-                                    ))
-                                })
-                            })
-                    }
-                }
-            };
-            if regression {
+            if head.is_none() || !fault.environmental() {
                 fault.record_refusal(&mut report.regressions);
             } else {
                 report.pre_existing.record(fault.pre_existing_kind());

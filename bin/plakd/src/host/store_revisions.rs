@@ -1,17 +1,19 @@
-//! Revision work runs on scratch during qualification and on stopped stores
-//! after handoff, never on a live source.
+//! Revision work runs on private copies before a restart and on stopped
+//! stores at startup, never on a live store.
 
 mod cleanup;
 #[cfg(test)]
 mod tests;
 
-use std::fs::File;
 use std::path::Path;
+use std::time::{Duration, Instant};
+
+use std::os::unix::fs::DirBuilderExt as _;
 
 use plakous::sessions::rehearsal::{
     bootstrap_stopped_runtime, rehearse_runtime_bootstrap, runtime_bootstrap_pending,
 };
-use plakous_recursive_subagents_store::admission::LockedUpgrade;
+use plakous_recursive_subagents_store::admission::{LockedUpgrade, copy_snapshot_bounded};
 
 use crate::home::paths::PlakPaths;
 use crate::store::revisions::{
@@ -25,10 +27,6 @@ pub(super) fn pending(paths: &PlakPaths) -> CliResult<bool> {
     Ok(revisions_pending(paths)? || runtime)
 }
 
-pub(super) fn runtime_pending(paths: &PlakPaths) -> CliResult<bool> {
-    Ok(runtime_bootstrap_pending(&paths.runtime_database())?)
-}
-
 pub(super) fn upgrade_stopped(
     paths: &PlakPaths,
     needs_upgrade: bool,
@@ -39,7 +37,7 @@ pub(super) fn upgrade_stopped(
         return Ok(());
     }
     // Exclude pre-existing embedded writers before taking either SQLite lock.
-    let _admission = crate::carry::upgrade::admission(paths, true)?;
+    let _admission = crate::writers::admission(paths, true)?;
     let databases = databases(paths);
     let locks = databases
         .iter()
@@ -62,81 +60,106 @@ pub(super) fn upgrade_stopped(
     Ok(())
 }
 
-const REQUEST: &str = "scratch-request";
-
-pub(super) fn request_rehearsal(directory: &Path) -> CliResult<File> {
-    let marker = File::create_new(directory.join(REQUEST))
-        .map_err(|error| CliFailure::new(error.to_string()))?;
-    marker
-        .lock_shared()
-        .map_err(|error| CliFailure::new(error.to_string()))?;
-    Ok(marker)
+#[derive(serde::Serialize)]
+pub(super) struct Rehearsal {
+    /// Whether the product or tree store needs a revision this build applies.
+    revisions_pending: bool,
+    /// Whether the runtime store needs this build's codec bootstrap.
+    runtime_bootstrap_pending: bool,
+    /// The directory to pass to `--store-probe`.
+    stores: std::path::PathBuf,
+    elapsed_ms: u128,
 }
 
-pub(super) fn rehearse_for_service(paths: &PlakPaths, service: &Path) -> CliResult<()> {
-    let marker = service.with_file_name(REQUEST);
-    if marker.is_file() {
-        let _probe = cleanup::lock_marker(&marker, false)
-            .ok_or_else(|| CliFailure::new("store qualification scratch request is unavailable"))?;
-        return rehearse(paths, &service.with_file_name("stores"));
-    }
-    // Older coordinators can't route their later probes to the copies.
-    // Equal-revision cutovers stay compatible in either direction.
-    let runtime = runtime_bootstrap_pending(&paths.runtime_database())?;
-    if (runtime
-        || databases(paths)
-            .iter()
-            .any(|(schema, _)| schema.version() > schema.generation))
-        && crate::wire_transport::hosts::live(paths)?
-            .iter()
-            .any(|host| host.key == crate::home::state::state_key())
-        && pending(paths)?
-    {
+const REHEARSAL_TIME: Duration = Duration::from_secs(120);
+const REHEARSAL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+
+/// Copies the product and tree stores into `into/stores` and applies this
+/// build's pending revisions there; rehearses a pending runtime bootstrap on
+/// a copy too. The live stores are only read. The directory must not exist
+/// and must sit directly under the product home, where `--store-probe` reads.
+pub(super) fn rehearse_into(paths: &PlakPaths, into: &Path) -> CliResult<Rehearsal> {
+    rehearse_with_budget(paths, into, REHEARSAL_TIME, REHEARSAL_BYTES)
+}
+
+fn rehearse_with_budget(
+    paths: &PlakPaths,
+    into: &Path,
+    time: Duration,
+    bytes: u64,
+) -> CliResult<Rehearsal> {
+    let start = Instant::now();
+    let home = paths
+        .home()
+        .canonicalize()
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    let parent = into
+        .parent()
+        .and_then(|parent| parent.canonicalize().ok())
+        .ok_or_else(|| CliFailure::new("store rehearse needs an absolute --into path"))?;
+    if parent != home {
         return Err(CliFailure::new(
-            "host_upgrade_destination_refused: the source cannot qualify store revisions; stop it and start the destination build",
+            "store rehearse --into must name a new directory directly under the product home",
         ));
     }
-    Ok(())
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(into)
+        .map_err(|error| CliFailure::new(format!("cannot create {}: {error}", into.display())))?;
+    let result = rehearse_copies(paths, into, start, start + time, bytes);
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(into);
+    }
+    result
 }
 
-/// The destination requester runs this before sending a request, even when
-/// the live coordinator predates the runtime shape change.
-/// Returns how long the rehearsal took, if one was needed.
-pub(super) fn rehearse_runtime(paths: &PlakPaths) -> CliResult<Option<std::time::Duration>> {
-    let runtime = paths.runtime_database();
-    if !runtime_bootstrap_pending(&runtime)? {
-        return Ok(None);
+fn rehearse_copies(
+    paths: &PlakPaths,
+    into: &Path,
+    start: Instant,
+    deadline: Instant,
+    mut remaining: u64,
+) -> CliResult<Rehearsal> {
+    if Instant::now() >= deadline {
+        return Err(CliFailure::new("store rehearse: exceeded its time bound"));
     }
-    eprintln!("host upgrade: qualifying runtime store bootstrap on a detached copy");
-    let directory =
-        tempfile::tempdir_in(paths.home()).map_err(|error| CliFailure::new(error.to_string()))?;
-    let _marker = request_rehearsal(directory.path())?;
-    let stores = directory.path().join("stores");
+    let stores = into.join("stores");
     crate::commands::runner::private_directory(&stores)?;
-    let start = std::time::Instant::now();
-    rehearse_runtime_bootstrap(&runtime, &stores.join("runtime.sqlite3"))?;
-    let elapsed = start.elapsed();
-    eprintln!(
-        "host upgrade: runtime store bootstrap qualification completed in {} ms",
-        elapsed.as_millis()
-    );
-    Ok(Some(elapsed))
-}
-
-/// Product or tree revisions, which the stopped startup applies after a backup.
-pub(super) fn store_revisions_pending(paths: &PlakPaths) -> CliResult<bool> {
-    revisions_pending(paths)
-}
-
-pub(super) fn rehearse(paths: &PlakPaths, scratch: &Path) -> CliResult<()> {
-    if !revisions_pending(paths)? {
-        return Ok(());
-    }
-    crate::commands::runner::private_directory(scratch)?;
-    let copies = paths.clone().with_probe_stores(scratch.to_path_buf());
+    let revisions_pending = revisions_pending(paths)?;
+    let copies = paths.clone().with_probe_stores(stores.clone());
     for ((schema, source), (_, destination)) in databases(paths).into_iter().zip(databases(&copies))
     {
-        schema.rehearse(&source, &destination).map_err(failure)?;
+        let used = copy_snapshot_bounded(&source, &destination, remaining, deadline)
+            .map_err(snapshot_failure)?;
+        remaining -= used;
+        if used != 0 {
+            schema
+                .rehearse_copy(&destination, deadline)
+                .map_err(failure)?;
+        }
     }
-    Ok(())
+    let runtime = paths.runtime_database();
+    let runtime_bootstrap_pending = runtime_bootstrap_pending(&runtime)?;
+    if runtime_bootstrap_pending {
+        let scratch = into.join("runtime");
+        crate::commands::runner::private_directory(&scratch)?;
+        let copy = scratch.join("runtime.sqlite3");
+        copy_snapshot_bounded(&runtime, &copy, remaining, deadline).map_err(snapshot_failure)?;
+        rehearse_runtime_bootstrap(&copy, deadline)?;
+    }
+    if Instant::now() >= deadline {
+        return Err(CliFailure::new("store rehearse: exceeded its time bound"));
+    }
+    Ok(Rehearsal {
+        revisions_pending,
+        runtime_bootstrap_pending,
+        stores,
+        elapsed_ms: start.elapsed().as_millis(),
+    })
+}
+
+fn snapshot_failure(
+    error: plakous_recursive_subagents_store::admission::AdmissionError,
+) -> CliFailure {
+    CliFailure::new(format!("store rehearse: {error}"))
 }

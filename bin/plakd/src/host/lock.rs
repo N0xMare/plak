@@ -4,8 +4,7 @@
 //! second host can say who serves; the lock, not the text, proves it.
 
 use std::fs::File;
-use std::io::{Read as _, Write as _};
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::io::Read as _;
 use std::path::Path;
 
 use plakous_hosted::error::{CliFailure, CliResult};
@@ -25,52 +24,31 @@ impl Drop for HostLock {
     }
 }
 
+#[cfg(feature = "web")]
 impl HostLock {
-    pub(super) fn adopt(fd: OwnedFd, path: &Path, binary: &str) -> CliResult<Self> {
-        use std::os::unix::fs::MetadataExt as _;
-        let file = File::from(fd);
-        let failed = || CliFailure::new("cannot adopt the inherited host lock");
-        let metadata = file.metadata().map_err(|_| failed())?;
-        let named = std::fs::symlink_metadata(path).map_err(|_| failed())?;
-        if !metadata.is_file()
-            || metadata.uid() != rustix::process::geteuid().as_raw()
-            || metadata.mode() & 0o077 != 0
-            || (metadata.dev(), metadata.ino()) != (named.dev(), named.ino())
-        {
-            return Err(failed());
-        }
-        file.try_lock().map_err(|_| failed())?;
-        Ok(Self {
-            file,
-            diagnostic: format!("{} {binary}", std::process::id()),
-        })
-    }
-
-    pub(super) fn as_fd(&self) -> BorrowedFd<'_> {
-        self.file.as_fd()
-    }
-
     pub(super) fn running(&self) -> CliResult<()> {
-        self.publish("")
+        self.lifecycle("")
     }
 
     /// A private, kernel-lock-backed discovery hint during planned transport closure.
-    pub(super) fn stopping(&self, restarting: bool) -> CliResult<()> {
+    pub(super) fn stopping(&self) -> CliResult<()> {
         // A planned stop must never wait for a cold image hash.
-        self.publish(if restarting {
-            " restarting"
-        } else {
-            " stopping"
-        })
+        self.lifecycle(" stopping")
     }
 
-    fn publish(&self, suffix: &str) -> CliResult<()> {
+    fn lifecycle(&self, suffix: &str) -> CliResult<()> {
+        self.publish(suffix)
+            .map_err(|_| CliFailure::new("cannot update the host lock diagnostic"))
+    }
+}
+
+impl HostLock {
+    fn publish(&self, suffix: &str) -> std::io::Result<()> {
         use std::os::unix::fs::FileExt as _;
         let bytes = format!("{}{suffix}\n", self.diagnostic);
         self.file
             .write_all_at(bytes.as_bytes(), 0)
             .and_then(|()| self.file.set_len(bytes.len() as u64))
-            .map_err(|_| CliFailure::new("cannot update the host lock diagnostic"))
     }
     /// Serializes all current-key starts and refuses any already-live state key.
     pub(super) fn take_home(
@@ -155,11 +133,11 @@ impl HostLock {
             }
             Err(std::fs::TryLockError::Error(error)) => return Err(failed(error)),
         }
-        file.set_len(0).map_err(failed)?;
         let diagnostic = format!("{} {binary}", std::process::id());
-        writeln!(file, "{diagnostic}").map_err(failed)?;
-        file.sync_all().map_err(failed)?;
-        Ok(Self { file, diagnostic })
+        let lock = Self { file, diagnostic };
+        lock.publish("").map_err(failed)?;
+        lock.file.sync_all().map_err(failed)?;
+        Ok(lock)
     }
 }
 

@@ -9,6 +9,8 @@ use std::io::Write;
 use std::path::Path;
 
 mod dispositions;
+#[cfg(test)]
+mod tests;
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct Report {
@@ -183,7 +185,7 @@ fn inspect_runtime(
 /// Inspects a runtime store under given product and tree dispositions, keyed
 /// `<session>/<branch>`, with the keys of the heads selected for decoding.
 #[cfg(test)]
-pub(crate) fn inspect_with_dispositions(
+fn inspect_with_dispositions(
     runtime: &Path,
     rows: std::collections::HashMap<String, (bool, bool)>,
     children_closed: std::collections::HashMap<String, bool>,

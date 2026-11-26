@@ -33,7 +33,7 @@ impl GatewayAction {
             Self::Enable { account, caller } => GatewayCommand::Enable { account, caller },
             Self::Drain => GatewayCommand::Drain,
             Self::Audit { since, caller } => GatewayCommand::Audit { since, caller },
-            Self::Check => GatewayCommand::Check,
+            Self::Check { json } => GatewayCommand::Check { json },
         };
         Command::Gateway(command)
     }
@@ -65,13 +65,7 @@ impl GatewayCallerAction {
 impl TopCommand {
     pub(super) fn into_command(self) -> Result<Command, String> {
         match self {
-            Self::Deploy { action } => Ok(Command::Deploy(action)),
             Self::Snapshot { action } => Ok(Command::Snapshot(action)),
-            Self::DeployCanary(options) => Ok(Command::DeployCanary(options)),
-            Self::DeployTarget => Ok(Command::DeployTarget),
-            Self::DeployCredentialGeneration { account } => {
-                Ok(Command::DeployCredentialGeneration(account))
-            }
             Self::Accounts { action } => match action {
                 super::AccountAction::List => Ok(Command::AccountsList),
                 super::AccountAction::Rm { account, confirmed } => Ok(Command::AccountsRemove {
@@ -338,7 +332,7 @@ impl TopCommand {
             Self::Gateway {
                 action: Some(action),
             } => Ok(action.into_command()),
-            Self::Doctor => Ok(Command::Doctor),
+            Self::Doctor { json } => Ok(Command::Doctor { json }),
             Self::Store { action: None } => Ok(Command::CommandHelp {
                 command: "store".to_owned(),
             }),
@@ -347,11 +341,16 @@ impl TopCommand {
                     Some(super::StoreAction::Backup {
                         directory,
                         budget_secs,
+                        stopped,
                     }),
             } => Ok(Command::StoreBackup {
                 directory,
                 budget_secs,
+                stopped,
             }),
+            Self::Store {
+                action: Some(super::StoreAction::Rehearse { into }),
+            } => Ok(Command::StoreRehearse { into }),
             Self::State { action: None } => Ok(Command::CommandHelp {
                 command: "state".to_owned(),
             }),
@@ -455,45 +454,9 @@ impl TopCommand {
                 ..crate::command::HostCommand::default()
             })),
             Self::Host {
-                action:
-                    Some(HostAction::Upgrade {
-                        expect_binary,
-                        drain,
-                        backup_store,
-                        inspect_runner,
-                        inspect_source,
-                        wait,
-                        abandon,
-                    }),
+                action: Some(HostAction::Wake { session, text }),
                 ..
-            } => {
-                if let Some(flag) = abandon
-                    .as_ref()
-                    .map(|_| "--abandon")
-                    .or(wait.as_ref().map(|_| "--wait"))
-                {
-                    return Err(format!(
-                        "flag removed: {flag}; {}",
-                        crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED
-                    ));
-                }
-                Ok(Command::HostUpgrade {
-                    expect_binary: expect_binary
-                        .ok_or_else(|| "expected binary is required".to_owned())?,
-                    drain,
-                    backup_store,
-                    inspection: inspect_source.map(|source_instance| {
-                        crate::deploy::DeployRunnerInspection {
-                            source_instance,
-                            deploy_inspect_runners: inspect_runner,
-                        }
-                    }),
-                })
-            }
-            Self::Host {
-                action: Some(HostAction::UpgradeVerdict { acknowledge }),
-                ..
-            } => Ok(Command::HostUpgradeVerdict { acknowledge }),
+            } => Ok(Command::HostWake { session, text }),
             Self::Host {
                 action: None,
                 web,
@@ -519,17 +482,6 @@ impl TopCommand {
                 build_info: true, ..
             } => Ok(Command::BuildInfo),
             Self::Version {
-                host_upgrade_probe: true,
-                host_upgrade_service,
-                ..
-            } => Ok(Command::HostUpgradeProbe {
-                service: host_upgrade_service,
-            }),
-            Self::Version {
-                host_upgrade_capacity: Some(_),
-                ..
-            } => Err(crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED.to_owned()),
-            Self::Version {
                 write_binary_manifest: Some(directory),
                 ..
             } => Ok(Command::WriteBinaryManifest { directory }),
@@ -539,13 +491,11 @@ impl TopCommand {
             } => Ok(Command::CarryProbe { path }),
             Self::Version {
                 reopen_probe: Some(session),
-                host_upgrade_reopen,
                 child_binding_probe,
                 store_probe,
                 ..
             } => Ok(Command::ReopenProbe {
                 session,
-                host_upgrade_reopen,
                 child_binding_probe,
                 store_probe,
             }),

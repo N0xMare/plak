@@ -2461,9 +2461,9 @@ request; it does not grant client authority to restart the host.
   The hidden single-session stdio transport is locally stamped by its acceptor.
   Client authentication cannot mint that stamp.
 
-An explicit `plakd host upgrade --expect-binary <id>` remains the separate host
-upgrade authority. Client reload, disconnect or reconnect cannot run it or
-claim an upgrade succeeded.
+A host upgrade is an operator's restart of the host service (chapter 02
+§4.6). Client reload, disconnect or reconnect cannot perform one or claim an
+upgrade succeeded.
 
 ### 4.7 The host socket is a same-user local channel
 
@@ -2484,51 +2484,18 @@ authority; a notice cannot change storage, open a driver, or answer a client
 request by itself. Senders do not block or retry on a full queue; the
 directory reconciles lost notices from durable facts on its 15-second check.
 
-An explicit `plakd host upgrade --expect-binary <id>` is operator authority,
-not a frontend reload request or a browser capability. Its separate control
-socket is `host/upgrade.sock`, mode 0600 under the owned private host directory;
-the serving process holds the home guard and rejects other-user peers before
-reading a bounded control frame. Requests echo the source instance and key.
-The source hashes the absolute destination executable independently, and the
-destination's probes must agree on its exact binary and key. A changed key
-refuses before the admission pause.
-Nothing is selected through a client role, relative executable, shell string
-or arbitrary source-store path.
-
-Same-key step holds are process-local coordination, not custody or a grant to
-raise a fence. The caller must own this host's active admission pause; a foreign
-pause refuses before any runtime is held. Root owners publish weak driver
-capabilities themselves, and a separate joined-owner rendezvous is required:
-client views, cached directory activity and socket disconnects do not prove a
-boundary. Requester EOF or hangup revokes preparation, including its verdict
-barrier, while source authority is still held; after Ready it cannot revoke a
-transfer. Tree pauses defer host wakes/recovery without refusing effects already
-dispatched under that authority. Rollback reopens trees before driver gates.
-During reversible preparation, the admission gate admits only an existing-session
-StopSession or an interrupt on this connection's exact live attachment. Both
-follow the ordinary control path without withdrawing the upgrade. Neither
-reopens ingress or admits a prompt. Surrender serializes with that gate:
-once committed, a source control is refused and must reconnect to the destination.
-Private coordinator protocol 3 progress reports are bounded observations, never
-custody, admission or effect authority. Upgrade Notice can yield observation waits
-and promote foreground processes, but acknowledgements do not prove joined work
-and cannot authorize cancellation of paid compaction. Until cross-build retention
-is available, one changed-triple process gate inspects the source's existing bound
-clients before drain and before surrender; unknown state fails closed. It never
-creates a second bind under the serving instance or weakens runner admission.
-Generation-scoped guard revocation works with full command ingress.
-Paid compaction and unjoined effects block planned surrender rather than being
-cancelled by the upgrade hold. Neither the draft registry nor step-control
-memory is a cross-build carrier. The existing home guard, exact native runner
-triple and normal handoff remain the execution authorities.
-
-The host pause and an exclusive home admission guard exclude new client
-and embedded/headless writes during preparation; standalone writers hold
-that guard shared before construction. Runner qualification uses the
-binding-free exact-triple mode of §2.9, which admits configuration reads,
-not custody or effects. There is no cross-key custody transfer. At a
-declared format cut, settle and stop the source and use the portable
-export/import procedure in chapter 02 §2.5.1.
+A restart upgrade has no control socket or cross-process protocol: the
+operator stops the host through its service manager and starts another
+image on the same stores. Its pre-stop probes (`session check-binding`,
+`session check-reopen`, `store rehearse`) open the stores read-only, write
+only a new private directory directly under the home, take no custody and
+start no runner; `--store-probe` accepts only such a directory.
+Standalone writers hold the home's writer admission lock shared; an
+operator holds it exclusively, with both host locks free, while it takes
+the stopped backup. `plakd host wake` is an ordinary same-user client of
+the control socket. There is no cross-key custody transfer. At a declared
+format cut, settle and stop the source and use the portable export/import
+procedure in chapter 02 §2.5.1.
 
 Protocol-7 console writes trust transport-verified same-user socket peers by
 default, independently of `web.*`; they still enforce consent, exact targets,

@@ -13,19 +13,19 @@ impl Schema {
         (self.generation..).zip(self.revisions)
     }
 
-    /// Copy a live source using a read-only SQLite connection, then exercise
-    /// upgrades and prepare WAL on the scratch file only. Absent stores stay absent.
-    pub fn rehearse(&self, source: &Path, scratch: &Path) -> Result<(), AdmissionError> {
-        if let Some(connection) = self.open_reader(source)? {
-            self.copy(&connection, scratch)?;
-            if let Some(upgrade) = self.lock_upgrade(scratch)? {
-                upgrade.commit_with(|_, _| {})?;
-            }
-            // VACUUM INTO leaves the copy in rollback-journal mode. Once
-            // probes share it, even a read snapshot can block WAL promotion.
-            self.configure_writer(&self.writer(scratch, false)?)?;
+    /// Exercise revisions and enable WAL on a private copy, not the live store.
+    pub fn rehearse_copy(&self, scratch: &Path, deadline: Instant) -> Result<(), AdmissionError> {
+        if Instant::now() >= deadline {
+            return Err(self.unavailable("rehearsal exceeded its time bound"));
         }
-        Ok(())
+        if let Some(mut upgrade) = self.lock_upgrade(scratch)? {
+            upgrade
+                .connection
+                .progress_handler(4096, Some(move || Instant::now() >= deadline))
+                .map_err(|error| self.sql_error(&error, "could not set rehearsal deadline"))?;
+            upgrade.commit_with(|_, _| {})?;
+        }
+        self.configure_writer(&self.writer(scratch, false)?)
     }
 
     /// Inspect and, if needed, lock a stopped store's pending revisions.
@@ -188,61 +188,63 @@ pub fn copy_snapshot_bounded(
     match source.symlink_metadata() {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
         Ok(meta) if meta.is_file() => {}
-        _ => return Err(unavailable("backup source is not a regular file")),
+        _ => return Err(unavailable("snapshot source is not a regular file")),
     }
     let reader = Connection::open_with_flags(
         source,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )
-    .map_err(|_| unavailable("could not open backup source"))?;
+    .map_err(|_| unavailable("could not open snapshot source"))?;
     let snapshot = reader
         .unchecked_transaction()
-        .map_err(|_| unavailable("could not start backup snapshot"))?;
+        .map_err(|_| unavailable("could not start snapshot"))?;
     let bytes: i64 = snapshot
         .query_row(
             "SELECT page_count * page_size FROM pragma_page_count, pragma_page_size",
             [],
             |row| row.get(0),
         )
-        .map_err(|_| unavailable("could not read backup source size"))?;
-    let bytes = u64::try_from(bytes).map_err(|_| unavailable("invalid backup source size"))?;
+        .map_err(|_| unavailable("could not read snapshot source size"))?;
+    let bytes = u64::try_from(bytes).map_err(|_| unavailable("invalid snapshot source size"))?;
     if bytes == 0 {
         return Ok(0);
     }
     if bytes > remaining {
-        return Err(unavailable("combined SQLite backup exceeds its byte bound"));
+        return Err(unavailable(
+            "combined SQLite snapshots exceed the byte bound",
+        ));
     }
     let file = OpenOptions::new()
         .create_new(true)
         .write(true)
         .mode(0o600)
         .open(destination)
-        .map_err(|_| unavailable("could not create backup file"))?;
+        .map_err(|_| unavailable("could not create snapshot file"))?;
     let mut writer =
-        Connection::open(destination).map_err(|_| unavailable("could not open backup file"))?;
+        Connection::open(destination).map_err(|_| unavailable("could not open snapshot file"))?;
     {
         let backup = Backup::new(&snapshot, &mut writer)
-            .map_err(|_| unavailable("could not start SQLite backup"))?;
+            .map_err(|_| unavailable("could not start SQLite snapshot"))?;
         loop {
             if Instant::now() >= deadline {
-                return Err(unavailable("SQLite backup exceeded its time bound"));
+                return Err(unavailable("SQLite snapshot exceeded its time bound"));
             }
             match backup.step(256) {
                 Ok(StepResult::Done) => break,
                 Ok(StepResult::More) => {}
-                _ => return Err(unavailable("could not copy SQLite backup snapshot")),
+                _ => return Err(unavailable("could not copy SQLite snapshot")),
             }
         }
     }
     writer
         .close()
-        .map_err(|_| unavailable("could not close backup file"))?;
+        .map_err(|_| unavailable("could not close snapshot file"))?;
     if file.metadata().map(|meta| meta.len()).ok() != Some(bytes) {
         return Err(unavailable(
-            "SQLite backup size differs from its pinned source",
+            "SQLite snapshot size differs from its pinned source",
         ));
     }
-    sync_copy(&file).map_err(|_| unavailable("could not sync backup file"))?;
+    sync_copy(&file).map_err(|_| unavailable("could not sync snapshot file"))?;
     Ok(bytes)
 }
 

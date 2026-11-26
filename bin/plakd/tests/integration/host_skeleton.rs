@@ -1669,12 +1669,19 @@ fn a_released_session_is_dormant_but_keeps_its_daemon_line() {
 /// running is killed during its handoff, once at once and once after the
 /// handoff is durable. A session whose handoff was recorded is continued
 /// once by the next host's start scan; one whose handoff was not is not
-/// continued by itself, and its next open records the loss and holds it.
+/// continued by itself under the explicit hold policy, and its next open
+/// records the loss and holds it.
 /// No session is continued twice.
 #[test]
 fn host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once() {
     for after_handoff in [false, true] {
         let Some(fixture) = fixture() else { return };
+        let config = fixture.home().join("config.toml");
+        let text = std::fs::read_to_string(&config).unwrap();
+        write_private(
+            &config,
+            &format!("{text}\n[host]\nresume_after_loss = \"hold\"\n"),
+        );
         fixture.write_script(&json!({
             "version": 1,
             "steps": [{"stream": [{"text": PREFIX}, {"stall": 30000}]}]
@@ -2051,10 +2058,17 @@ fn a_broken_tree_row_degrades_the_directory_but_does_not_admit_an_open() {
 }
 
 /// A root turn its host lost and an open held is continued by the next
-/// host's start scan only under `resume_after_loss = "continue"`.
+/// host's start scan only under `resume_after_loss = "continue"`, the
+/// default, and never under an explicit `hold`.
 #[test]
 fn a_held_loss_continues_at_the_next_start_only_under_continue() {
     let Some(fixture) = fixture() else { return };
+    let config = fixture.home().join("config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    write_private(
+        &config,
+        &format!("{text}\n[host]\nresume_after_loss = \"hold\"\n"),
+    );
     fixture.write_script(&json!({
         "version": 1,
         "steps": [{"stream": [{"text": PREFIX}, {"stall": 30000}]}]
@@ -2093,7 +2107,7 @@ fn a_held_loss_continues_at_the_next_start_only_under_continue() {
     drop(client);
     stop(&mut host);
     let continuing = format!("plakd host: continuing session {session}");
-    // Under the default hold, the next host leaves it held.
+    // Under hold, the next host leaves it held.
     let mut host = start(&fixture);
     Client::connect(&host).rows(1);
     std::thread::sleep(std::time::Duration::from_millis(300));
@@ -2103,13 +2117,9 @@ fn a_held_loss_continues_at_the_next_start_only_under_continue() {
     );
     stop(&mut host);
     assert_eq!(root_record(&fixture, &session).1, 0);
-    // Under continue, the next host's scan continues it by itself.
-    let config = fixture.home().join("config.toml");
-    let text = std::fs::read_to_string(&config).unwrap();
-    write_private(
-        &config,
-        &format!("{text}\n[host]\nresume_after_loss = \"continue\"\n"),
-    );
+    // Without the setting, the default continue lets the next host's scan
+    // continue it by itself.
+    write_private(&config, &text);
     let mut host = start(&fixture);
     assert!(
         std::iter::from_fn(|| host.lines.recv_timeout(WAIT).ok()).any(|line| line == continuing),
@@ -2176,10 +2186,10 @@ mod directory;
 mod profiles;
 mod reload;
 mod requests;
+mod restart;
 mod retirement;
 mod revision_cuts;
 mod root_wake;
 mod runner;
 mod singleton;
 pub(crate) mod sweep;
-mod upgrade;

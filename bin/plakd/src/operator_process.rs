@@ -1,4 +1,4 @@
-//! Bounded subprocess capture for the private install and deployment commands.
+//! Bounded subprocess capture for the private install commands.
 
 use std::ffi::OsStr;
 use std::fs::File;
@@ -17,7 +17,6 @@ pub(crate) fn command(program: &OsStr) -> Command {
 pub(crate) struct Output {
     pub(crate) status: ExitStatus,
     pub(crate) stdout: Vec<u8>,
-    pub(crate) stderr: Vec<u8>,
 }
 
 pub(crate) fn capture(
@@ -26,16 +25,7 @@ pub(crate) fn capture(
     timeout: Duration,
     limit: u64,
 ) -> CliResult<Output> {
-    capture_bounded(command, input, timeout, limit, 4096)
-}
-
-pub(crate) fn capture_with_stderr(
-    command: Command,
-    input: Option<File>,
-    timeout: Duration,
-    limit: u64,
-) -> CliResult<Output> {
-    capture_bounded(command, input, timeout, limit, 64 * 1024)
+    capture_bounded(command, input, timeout, limit)
 }
 
 fn capture_bounded(
@@ -43,10 +33,9 @@ fn capture_bounded(
     input: Option<File>,
     timeout: Duration,
     limit: u64,
-    stderr_limit: u64,
 ) -> CliResult<Output> {
     let mut output = tempfile::tempfile().map_err(io)?;
-    let mut errors = tempfile::tempfile().map_err(io)?;
+    let errors = tempfile::tempfile().map_err(io)?;
     let status = run(
         command
             .stdin(input.map_or_else(Stdio::null, Stdio::from))
@@ -62,26 +51,16 @@ fn capture_bounded(
         },
     )?;
     output.rewind().map_err(io)?;
-    errors.rewind().map_err(io)?;
     let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
     output
         .take(limit + 1)
         .read_to_end(&mut stdout)
-        .map_err(io)?;
-    errors
-        .take(stderr_limit)
-        .read_to_end(&mut stderr)
         .map_err(io)?;
     check(
         stdout.len() as u64 <= limit,
         "command exceeded its output bound",
     )?;
-    Ok(Output {
-        status,
-        stdout,
-        stderr,
-    })
+    Ok(Output { status, stdout })
 }
 
 pub(crate) fn run(

@@ -281,19 +281,6 @@ enum TopCommand {
         #[command(subcommand)]
         action: crate::snapshot_install::Action,
     },
-    #[command(hide = true)]
-    Deploy {
-        #[command(subcommand)]
-        action: crate::deploy::Action,
-    },
-    #[command(hide = true)]
-    DeployCanary(crate::deploy::canary::Options),
-    #[command(hide = true)]
-    DeployTarget,
-    #[command(hide = true)]
-    DeployCredentialGeneration {
-        account: String,
-    },
     /// List or remove local account selections.
     Accounts {
         #[command(subcommand)]
@@ -460,7 +447,11 @@ enum TopCommand {
         #[command(subcommand)]
         action: Option<GatewayAction>,
     },
-    Doctor,
+    Doctor {
+        /// Print the report as one JSON object.
+        #[arg(long)]
+        json: bool,
+    },
     /// Back up the current runtime, product and agent-tree stores.
     Store {
         #[command(subcommand)]
@@ -489,14 +480,8 @@ enum TopCommand {
         action: Option<TelemetryAction>,
     },
     Version {
-        #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe", "host_upgrade_reopen", "host_upgrade_probe", "host_upgrade_capacity", "host_upgrade_service"])]
-        build_info: bool,
-        #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe", "host_upgrade_capacity"])]
-        host_upgrade_probe: bool,
-        #[arg(long, hide = true, requires = "host_upgrade_probe")]
-        host_upgrade_service: Option<std::path::PathBuf>,
         #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe"])]
-        host_upgrade_capacity: Option<std::path::PathBuf>,
+        build_info: bool,
         /// Hidden: print only this build's state key (`/reload` asks it).
         #[arg(long = "state-key", action = ArgAction::SetTrue, hide = true)]
         state_key: bool,
@@ -511,10 +496,8 @@ enum TopCommand {
         #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe"])]
         reopen_probe: Option<String>,
         #[arg(long, hide = true, requires = "reopen_probe")]
-        host_upgrade_reopen: bool,
-        #[arg(long, hide = true, requires = "host_upgrade_reopen")]
         child_binding_probe: bool,
-        #[arg(long, hide = true, requires = "host_upgrade_reopen")]
+        #[arg(long, hide = true, requires = "reopen_probe")]
         store_probe: Option<std::path::PathBuf>,
         #[arg(long, action = ArgAction::SetTrue, hide = true, conflicts_with = "state_key")]
         export_version: bool,
@@ -585,7 +568,11 @@ enum GatewayAction {
         caller: Option<String>,
     },
     /// Negotiate a version and list accounts.
-    Check,
+    Check {
+        /// Print the result as one JSON object.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -610,30 +597,12 @@ enum GatewayCallerAction {
 
 #[derive(Debug, clap::Subcommand)]
 enum HostAction {
-    /// Upgrade the running host within its current state key.
-    Upgrade {
-        #[arg(long, required_unless_present_any = ["abandon", "wait"])]
-        expect_binary: Option<String>,
-        #[arg(long, hide = true)]
-        abandon: Option<String>,
-        #[arg(long, hide = true)]
-        wait: Option<String>,
-        /// Same-key boundary drain: default 60s; 0, integer ms/s/m/h, or idle.
+    /// Submit one prompt to a session through the running host.
+    Wake {
         #[arg(long)]
-        drain: Option<crate::command::HostDrain>,
-        /// Save a private, size-bounded SQLite backup before requesting handoff.
+        session: String,
         #[arg(long)]
-        backup_store: bool,
-        #[arg(long, hide = true, requires = "inspect_source")]
-        inspect_runner: Vec<String>,
-        #[arg(long, hide = true, requires = "inspect_runner")]
-        inspect_source: Option<String>,
-    },
-    /// Inspect an inherited upgrade verdict or clear a checked recovery fence.
-    UpgradeVerdict {
-        /// Clear this exact fenced verdict after stopping the host and checking the stores.
-        #[arg(long, value_name = "ID")]
-        acknowledge: Option<uuid::Uuid>,
+        text: String,
     },
     /// Relay wire bytes to this home's host without consuming its handshake.
     Connect {
@@ -754,6 +723,8 @@ enum RunnerAction {
         /// Select an already installed immutable runner binary before connecting.
         #[arg(long, requires = "stdio")]
         binary: Option<String>,
+        #[arg(long, hide = true, requires = "stdio", conflicts_with = "binary")]
+        no_start: bool,
     },
     Allow {
         host_id: Option<String>,
@@ -798,7 +769,8 @@ impl RunnerAction {
             Self::Connect {
                 stdio: true,
                 binary,
-            } => RunnerCommand::Connect { binary },
+                no_start,
+            } => RunnerCommand::Connect { binary, no_start },
             // A bare leaf routes to the parent group's help.
             Self::Connect { stdio: false, .. }
             | Self::Allow { host_id: None }
@@ -973,9 +945,18 @@ enum StoreAction {
     /// Copy one consistent SQLite snapshot into a new private directory.
     Backup {
         directory: std::path::PathBuf,
+        /// Refuse unless the home is stopped and standalone writers are excluded.
+        #[arg(long)]
+        stopped: bool,
         /// Maximum seconds to spend copying the SQLite snapshots (default: 600).
         #[arg(long, value_name = "SECONDS")]
         budget_secs: Option<u64>,
+    },
+    /// Copy the product and tree stores into a new private directory and
+    /// apply this build's pending revisions there; the live stores are only read.
+    Rehearse {
+        #[arg(long)]
+        into: std::path::PathBuf,
     },
 }
 
@@ -1052,6 +1033,13 @@ impl TraceReceiptAction {
 
 #[derive(Debug, Subcommand)]
 enum SessionAction {
+    /// Read-only exact-reopen verdict for a root and its open children.
+    #[command(hide = true)]
+    CheckReopen {
+        session: String,
+        #[arg(long)]
+        store_probe: Option<std::path::PathBuf>,
+    },
     #[command(hide = true)]
     CheckBinding {
         #[arg(long)]
@@ -1184,6 +1172,13 @@ impl SessionAction {
                     BindingScope::All
                 },
                 summary,
+                store_probe,
+            }),
+            Self::CheckReopen {
+                session,
+                store_probe,
+            } => Ok(Command::SessionCheckReopen {
+                session,
                 store_probe,
             }),
             Self::CheckBinding { .. } => Ok(Command::CommandHelp {

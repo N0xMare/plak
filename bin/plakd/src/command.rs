@@ -1,8 +1,6 @@
 //! The parsed `plakd` command and the classifiers the dispatcher reads.
 
 use std::path::PathBuf;
-mod drain;
-pub(crate) use drain::HostDrain;
 
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::{NativeLoginMode, NativeProvider};
@@ -90,8 +88,13 @@ impl Command {
                 directory: at(directory),
             },
             Self::CarryProbe { path } => Self::CarryProbe { path: at(path) },
-            Self::HostUpgradeProbe { service } => Self::HostUpgradeProbe {
-                service: service.map(at),
+            Self::StoreRehearse { into } => Self::StoreRehearse { into: at(into) },
+            Self::SessionCheckReopen {
+                session,
+                store_probe,
+            } => Self::SessionCheckReopen {
+                session,
+                store_probe: store_probe.map(at),
             },
             Self::Host(mut host) => {
                 if let Some(web) = &mut host.web {
@@ -156,7 +159,9 @@ pub(crate) enum GatewayCommand {
         since: Option<String>,
         caller: Option<String>,
     },
-    Check,
+    Check {
+        json: bool,
+    },
 }
 
 /// Which retained heads `session check-binding` decodes (spec 02 §4.5).
@@ -183,10 +188,6 @@ pub(crate) const NATIVE_RUN_MAX_PROMPT_BYTES: usize = 64 * 1024;
 )]
 pub(crate) enum Command {
     Snapshot(crate::snapshot_install::Action),
-    Deploy(crate::deploy::Action),
-    DeployCanary(crate::deploy::canary::Options),
-    DeployTarget,
-    DeployCredentialGeneration(String),
     Help,
     CommandHelp {
         command: String,
@@ -200,10 +201,18 @@ pub(crate) enum Command {
         session_id: String,
         confirmed: bool,
     },
-    Doctor,
+    Doctor {
+        json: bool,
+    },
     StoreBackup {
         directory: PathBuf,
         budget_secs: Option<u64>,
+        stopped: bool,
+    },
+    /// `plakd store rehearse --into <dir>`: read-only copies of the product and
+    /// tree stores at this build's revisions, for the binding and reopen probes.
+    StoreRehearse {
+        into: PathBuf,
     },
     Gateway(GatewayCommand),
     StatusAll,
@@ -319,14 +328,16 @@ pub(crate) enum Command {
         directory: PathBuf,
     },
     ReloadProbe,
-    HostUpgradeProbe {
-        service: Option<PathBuf>,
-    },
     /// Hidden `plakd version --reopen-probe <id>`.
     ReopenProbe {
         session: String,
-        host_upgrade_reopen: bool,
         child_binding_probe: bool,
+        store_probe: Option<PathBuf>,
+    },
+    /// `plakd session check-reopen <id>`: this build's read-only exact-reopen
+    /// verdict for a root and every open child branch of its tree.
+    SessionCheckReopen {
+        session: String,
         store_probe: Option<PathBuf>,
     },
     CarryProbe {
@@ -444,14 +455,11 @@ pub(crate) enum Command {
     /// `plakd host`: the per-user host process.
     Host(HostCommand),
     HostInstall(HostInstall),
-    HostUpgrade {
-        expect_binary: String,
-        drain: Option<HostDrain>,
-        backup_store: bool,
-        inspection: Option<crate::deploy::DeployRunnerInspection>,
-    },
-    HostUpgradeVerdict {
-        acknowledge: Option<uuid::Uuid>,
+    /// `plakd host wake --session <id> --text <text>`: submit one prompt to a
+    /// session through the running host.
+    HostWake {
+        session: String,
+        text: String,
     },
     /// A byte-transparent bridge to the home's existing host.
     HostConnect {
@@ -556,23 +564,18 @@ impl Command {
         match self {
             Self::Help | Self::CommandHelp { .. } => "help",
             Self::Snapshot(_) => "snapshot",
-            Self::Deploy(_)
-            | Self::DeployCanary(_)
-            | Self::DeployCredentialGeneration(_)
-            | Self::DeployTarget => "deploy",
             Self::Version
             | Self::StateKey
             | Self::BuildInfo
             | Self::ReloadProbe
-            | Self::HostUpgradeProbe { .. }
             | Self::WriteBinaryManifest { .. }
             | Self::CarryProbe { .. }
             | Self::ReopenProbe { .. }
             | Self::ExportVersion => "version",
             Self::Fork { .. } => "fork",
             Self::Compact { .. } => "compact",
-            Self::Doctor => "doctor",
-            Self::StoreBackup { .. } => "store",
+            Self::Doctor { .. } => "doctor",
+            Self::StoreBackup { .. } | Self::StoreRehearse { .. } => "store",
             Self::Gateway(_) => "gateway",
             Self::StatusAll | Self::StatusJson | Self::AuthStatus(_) => "status",
             Self::AccountsList | Self::AccountsRemove { .. } => "accounts",
@@ -596,6 +599,7 @@ impl Command {
             Self::Usage { .. } => "usage",
             Self::SessionList { .. }
             | Self::SessionCheckBinding { .. }
+            | Self::SessionCheckReopen { .. }
             | Self::SessionRename { .. }
             | Self::SessionUnarchive { .. }
             | Self::SessionArchive { .. }
@@ -630,8 +634,7 @@ impl Command {
             Self::Host(_)
             | Self::HostInstall(_)
             | Self::HostConnect { .. }
-            | Self::HostUpgrade { .. }
-            | Self::HostUpgradeVerdict { .. } => "host",
+            | Self::HostWake { .. } => "host",
             Self::WireSchema => "wire",
         }
     }
@@ -685,10 +688,9 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
             | Command::StoreBackup { .. }
             | Command::WireSchema
             | Command::HostConnect { .. }
-            | Command::HostUpgradeVerdict { acknowledge: None }
             | Command::AccountsList
             | Command::AuthStatus(_)
-            | Command::Doctor
+            | Command::Doctor { .. }
             | Command::KeyStatus { .. }
             | Command::SecretList { .. }
             | Command::Mcp(
@@ -700,6 +702,8 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
             | Command::SessionTrace { .. }
             | Command::SessionTraces { .. }
             | Command::SessionCheckBinding { .. }
+            | Command::SessionCheckReopen { .. }
+            | Command::StoreRehearse { .. }
             | Command::SessionLog { .. }
     )
 }

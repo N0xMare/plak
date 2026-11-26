@@ -1,7 +1,9 @@
 plakd doctor — local health checks
 
 USAGE:
-  plakd doctor
+  plakd doctor [--json]
+
+  --json prints the same checks and exit status as one JSON object.
 
   When an OpenRouter key and default model are set, probes catalog keys via discovery GETs only (no inference).
 

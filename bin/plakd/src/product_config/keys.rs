@@ -623,7 +623,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         field: ConfigField::ReloadRequests,
         kind: "bool",
         constraint: "true or false; home-scoped",
-        doc: "Permit this user's own processes to request a hosted-session reload (plakd session reload <session> --expect-binary <id>). The serving host records the outcome and names the explicit host upgrade workflow; replacing a client does not upgrade its sessions.",
+        doc: "Permit this user's own processes to request a hosted-session reload (plakd session reload <session> --expect-binary <id>). The serving host records the outcome and points to the operator-managed host restart; replacing a client does not upgrade its sessions.",
         example: "false",
         scope: ConfigScope::Immediate,
     },
@@ -730,9 +730,9 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         path: "host.resume_after_loss",
         field: ConfigField::ResumeAfterLoss,
         kind: "enum",
-        constraint: "hold|continue; unset holds; home-scoped",
+        constraint: "hold|continue; unset continues under plakd host and holds in embedded faces; home-scoped",
         doc: "Whether the root and sub-agents that lost their owner (a crash or a proven lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). A loss that interrupted a continuation itself holds under either policy. Read when the root attaches and opens, and by plakd host's start scan, which opens eligible held roots under continue.",
-        example: "\"continue\"",
+        example: "\"hold\"",
         scope: ConfigScope::Immediate,
     },
     ConfigKey {
@@ -836,12 +836,26 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
     },
 ];
 
+static HOSTED_LOSSES_CONTINUE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Called once by `plakd host`: in that process an unset
+/// `[host] resume_after_loss` continues, so a restart is safe with live
+/// children (spec 02 §4.6). Embedded faces keep holding.
+pub(crate) fn continue_hosted_losses() {
+    HOSTED_LOSSES_CONTINUE.store(true, std::sync::atomic::Ordering::Release);
+}
+
+pub(crate) fn hosted_losses_continue() -> bool {
+    HOSTED_LOSSES_CONTINUE.load(std::sync::atomic::Ordering::Acquire)
+}
+
 /// `[host] resume_after_loss`: what a root whose owner was lost does.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResumeAfterLoss {
-    /// Hold for the operator's Resume; the default when unset.
+    /// Hold for the operator's Resume; the embedded default when unset.
     Hold,
-    /// Continue by itself.
+    /// Continue by itself; the `plakd host` default when unset.
     Continue,
 }
 

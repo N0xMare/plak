@@ -736,7 +736,7 @@ fn summarize(
 ) -> Result<(Summary, Option<Holder>), &'static str> {
     let profiles = projection.profiles;
     let policy = profiles.map_or(ResumeAfterLoss::Hold, |profiles| {
-        crate::session_attention::policy(&profiles.config)
+        profiles.config.resume_after_loss(true)
     });
     let activity = store
         .directory_activity(id, policy)

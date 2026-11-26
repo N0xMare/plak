@@ -202,67 +202,23 @@ impl Browser {
         }
     }
 
-    pub(super) fn lifecycle(
-        &mut self,
-        expected: HostLifecyclePhase,
-        binary: &str,
-        mut check_upgrade: impl FnMut(),
-    ) -> usize {
-        let deadline = Instant::now() + WAIT;
-        let mut terminals = 0;
-        loop {
-            check_upgrade();
-            assert!(
-                Instant::now() < deadline,
-                "lifecycle {expected:?} was not sent"
-            );
-            let frame = self.pending.pop_front().or_else(|| {
-                next_until(&mut self.socket, deadline, &mut check_upgrade, |text| {
-                    decode(text, self.welcome.proto)
-                })
-            });
-            match frame.unwrap() {
-                HostFrame::HostLifecycle {
-                    host_generation,
-                    phase,
-                    reason,
-                    target,
-                    ..
-                } => {
-                    assert_eq!(host_generation, self.welcome.host_generation);
-                    assert_eq!(phase, expected);
-                    assert_eq!(reason, HostLifecycleReason::PairedUpgrade);
-                    let target = target.unwrap();
-                    assert_eq!(target.binary_id, binary);
-                    assert_eq!(target.state_key, self.welcome.state_key);
-                    return terminals;
-                }
-                frame => terminals += usize::from(terminal(&frame, self.attachment).is_some()),
-            }
-        }
-    }
-
-    pub(super) fn expect_completed(&mut self) {
-        loop {
-            let frame = self.next().unwrap();
-            assert!(
-                !matches!(frame, HostFrame::HostLifecycle { .. }),
-                "unexpected lifecycle: {frame:?}"
-            );
-            if let Some(phase) = terminal(&frame, self.attachment) {
-                assert_eq!(phase, TurnPhase::Completed, "{frame:?}");
-                return;
-            }
-        }
-    }
-
-    pub(super) fn expect_closed(&mut self) -> usize {
+    /// Reads to the close of a planned stop: only shutdown `Stopping`
+    /// notices, and the turn terminals observed before the close.
+    pub(super) fn expect_stopped(&mut self) -> usize {
         let mut terminals = 0;
         while let Some(frame) = self.next() {
-            assert!(
-                !matches!(frame, HostFrame::HostLifecycle { .. }),
-                "lifecycle after Restarting: {frame:?}"
-            );
+            if let HostFrame::HostLifecycle {
+                host_generation,
+                phase,
+                reason,
+                ..
+            } = &frame
+            {
+                assert_eq!(*host_generation, self.welcome.host_generation);
+                assert_eq!(*phase, HostLifecyclePhase::Stopping);
+                assert_eq!(*reason, HostLifecycleReason::Shutdown);
+                continue;
+            }
             terminals += usize::from(terminal(&frame, self.attachment).is_some());
         }
         terminals

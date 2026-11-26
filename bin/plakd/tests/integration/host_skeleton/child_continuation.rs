@@ -147,9 +147,9 @@ fn an_idle_parent_continues_its_handed_off_child_at_startup_without_an_attach() 
 }
 
 #[test]
-fn an_idle_parent_without_a_child_handoff_stays_dormant_at_startup() {
+fn an_idle_parent_without_a_child_handoff_stays_dormant_until_attach_then_continues() {
     let Some(fixture) = fixture() else { return };
-    let (mut host, session, _node) = start_idle_parent(&fixture);
+    let (mut host, session, node) = start_idle_parent(&fixture);
     kill(&mut host);
     assert_eq!(root_record(&fixture, &session), (vec![], 0));
     gate_child(&fixture, "not-resumed-gate");
@@ -170,6 +170,12 @@ fn an_idle_parent_without_a_child_handoff_stays_dormant_at_startup() {
         1,
         "a crash grants no handoff continuation"
     );
+    client.attach(2, &node);
+    wait_child_calls(&fixture, 2);
+    let row = client.wait_for_row(&session, |row| row.live_work.children > 0);
+    assert_eq!(row.live_work.children, 1);
+    assert_eq!(row.live_work.held_children, 0);
+    assert!(!row.needs_operator, "{row:?}");
     drop(client);
     stop(&mut host);
 }

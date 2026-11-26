@@ -10,7 +10,6 @@ mod auth;
 mod bridge;
 mod callers;
 mod cli_cmd;
-pub(crate) use cli_cmd::deployment_generation;
 pub(crate) mod client;
 mod custody;
 mod dispatch;
@@ -275,23 +274,6 @@ pub(crate) fn drain(address: &GatewayAddress) -> crate::CliResult<()> {
     }
 }
 
-pub(crate) fn deploy_drain(socket: &std::path::Path, expected: &str) -> crate::CliResult<bool> {
-    let address = GatewayAddress::Unix(socket.into());
-    if client::versions(&address, None)?.instance.as_str() != expected {
-        return Err("gateway holder changed before drain".into());
-    }
-    match client::admin::<AdminResponse>(&address, None, &AdminRequest::Drain {})? {
-        AdminResponse::Draining {} => Ok(true),
-        AdminResponse::Refused { .. } => Ok(false),
-        _ => Err("gateway drain returned an unexpected response".into()),
-    }
-}
-
-pub(crate) fn deploy_guard_vacant(state_root: &std::path::Path) -> crate::CliResult<std::fs::File> {
-    holder::guard_vacant(&holder::lock_path(state_root))
-        .map_err(|_| "cannot prove the credential holder released its lock".into())
-}
-
 pub(crate) fn check(
     address: &GatewayAddress,
     key: Option<&str>,
@@ -310,14 +292,18 @@ pub(crate) fn check(
             .join(",")
     )
     .map_err(|error| error.to_string())?;
-    let accounts = client::admin::<AdminResponse>(address, key, &AdminRequest::List {})?;
-    match accounts {
-        AdminResponse::Accounts { accounts } => {
-            for account in accounts {
-                writeln!(stdout, "account {account}").map_err(|error| error.to_string())?;
-            }
-            Ok(())
-        }
+    for account in listed_accounts(address, key)? {
+        writeln!(stdout, "account {account}").map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+pub(crate) fn listed_accounts(
+    address: &GatewayAddress,
+    key: Option<&str>,
+) -> crate::CliResult<Vec<GatewayAccount>> {
+    match client::admin::<AdminResponse>(address, key, &AdminRequest::List {})? {
+        AdminResponse::Accounts { accounts } => Ok(accounts),
         AdminResponse::Refused { refusal } => {
             Err(format!("gateway account list refused: {refusal:?}").into())
         }

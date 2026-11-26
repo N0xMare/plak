@@ -10,8 +10,20 @@ use plakous_hosted::sessions::projector::{
 };
 
 #[test]
-fn parked_child_mail_needs_attention_only_after_a_recorded_owner_loss() {
+fn parked_child_mail_needs_attention_on_owner_loss_only_with_hold_policy() {
+    parked_child_mail_after_loss(true);
+    parked_child_mail_after_loss(false);
+}
+
+fn parked_child_mail_after_loss(hold: bool) {
     let (_temp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    if hold {
+        std::fs::write(
+            paths.config_file(),
+            "[host]\nresume_after_loss = \"hold\"\n",
+        )
+        .unwrap();
+    }
     let mut record = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
     ProductStore::open(&paths)
         .unwrap()
@@ -60,8 +72,13 @@ fn parked_child_mail_needs_attention_only_after_a_recorded_owner_loss() {
     tree.mark_owner_lost(&child);
     crate::store::tree::save_tree(&paths, &mut tree).unwrap();
     sessions.directory.settle();
-    assert!(status(&paths).contains("child_held_after_loss"));
-    assert!(sessions.rows(None, None, false).unwrap()[0].needs_operator);
+    let reported = status(&paths);
+    assert!(!reported.contains("unavailable"), "{reported}");
+    assert_eq!(reported.contains("child_held_after_loss"), hold);
+    assert_eq!(
+        sessions.rows(None, None, false).unwrap()[0].needs_operator,
+        hold
+    );
 }
 
 #[test]

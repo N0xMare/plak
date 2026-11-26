@@ -1,3 +1,4 @@
+use std::os::unix::process::ExitStatusExt as _;
 use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, path::Path};
 
@@ -26,13 +27,83 @@ fn tree_revision_crash_after_commit_skips_both_steps_and_the_old_host_refuses_tr
     crash("subagents:after-commit", CURRENT);
 }
 
+#[test]
+fn startup_revision_excludes_a_standalone_writer_and_stopped_backup_does_too() {
+    let Some(fixture) = fixture() else { return };
+    let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
+    let release = fixture.root.join("finish-writer");
+    fixture.write_script(&json!({
+        "version": 1,
+        "steps": [{"gate": {"file": release}, "output": {"text": ANSWER}}]
+    }));
+    let session = restart::seed(&fixture, 1);
+    let mut host = start(&fixture);
+    let backup = fixture.root.join("backup");
+    let arguments = ["store", "backup", "--stopped", backup.to_str().unwrap()];
+    assert!(!restart::output(&fixture, &arguments).status.success());
+    stop(&mut host);
+
+    let mut writer = TestChild::spawn(
+        fixture
+            .command()
+            .args([
+                "run",
+                "--session",
+                &session,
+                "--",
+                "hold the embedded writer",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    );
+    wait_for_provider_dispatch(&fixture);
+    assert!(!restart::output(&fixture, &arguments).status.success());
+
+    let image = PathBuf::from(env!("CARGO_BIN_EXE_plakd"))
+        .canonicalize()
+        .unwrap();
+    let environment = [(
+        "PLAK_TEST_STORE_REVISION_IMAGE",
+        image.to_str().unwrap().to_owned(),
+    )];
+    let (child, lines) = spawn_env(&fixture, &[], &environment);
+    let (code, stderr) = exit(child, &lines);
+    assert_ne!(code, Some(0), "{stderr}");
+    assert!(stderr.contains("writer"), "{stderr}");
+    assert_eq!(versions(&paths), BASE);
+
+    std::fs::write(release, []).unwrap();
+    let deadline = Instant::now() + WAIT;
+    loop {
+        if let Some(status) = writer.try_wait().unwrap() {
+            assert!(status.success(), "{status}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "embedded writer did not exit");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let result = fixture
+        .command()
+        .envs(environment.iter().cloned())
+        .args(arguments)
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(version(&backup.join("product.sqlite3")), BASE[0]);
+    assert_eq!(version(&backup.join("subagents.sqlite3")), BASE[1]);
+    let mut host = start_env(&fixture, &[], &environment);
+    assert_eq!(versions(&paths), CURRENT);
+    stop(&mut host);
+}
+
 fn crash(cut: &str, expected: [i64; 2]) {
     let Some(fixture) = fixture() else { return };
     let image = PathBuf::from(env!("CARGO_BIN_EXE_plakd"))
         .canonicalize()
         .unwrap();
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
-    let session = upgrade::seed(&fixture, 1);
+    let session = restart::seed(&fixture, 1);
     stop(&mut start(&fixture));
     assert_eq!(versions(&paths), BASE);
 
@@ -47,8 +118,8 @@ fn crash(cut: &str, expected: [i64; 2]) {
             ("PLAK_TEST_HOST_UPGRADE_CUT", cut.to_owned()),
         ],
     );
-    let (code, stderr) = exit(child, &lines);
-    assert_eq!(code, Some(86), "{cut}: {stderr}");
+    let (status, stderr) = wait_for_exit(child, &lines);
+    assert_eq!(status.signal(), Some(9), "{cut}: {stderr}");
     assert_eq!(versions(&paths), expected);
     let product_backup = paths
         .state_dir()
@@ -99,11 +170,19 @@ fn crash(cut: &str, expected: [i64; 2]) {
     }
 }
 
-pub(super) fn exit(mut child: Child, lines: &mpsc::Receiver<String>) -> (Option<i32>, String) {
+pub(super) fn exit(child: Child, lines: &mpsc::Receiver<String>) -> (Option<i32>, String) {
+    let (status, stderr) = wait_for_exit(child, lines);
+    (status.code(), stderr)
+}
+
+fn wait_for_exit(
+    mut child: Child,
+    lines: &mpsc::Receiver<String>,
+) -> (std::process::ExitStatus, String) {
     let deadline = Instant::now() + WAIT;
     loop {
         if let Some(status) = child.try_wait().unwrap() {
-            return (status.code(), lines.iter().collect::<Vec<_>>().join("\n"));
+            return (status, lines.iter().collect::<Vec<_>>().join("\n"));
         }
         assert!(
             Instant::now() < deadline,

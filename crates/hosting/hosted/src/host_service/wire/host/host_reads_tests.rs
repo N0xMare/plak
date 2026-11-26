@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "isolated host read fixtures")]
 
 use super::*;
-use plakous_host_protocol::wire::decode_line;
+use plakous_host_protocol::wire::{decode_line, encode_line};
 use plakous_host_protocol::{Never, ProtocolExtension};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::task::{Context, Poll, Waker};
@@ -161,8 +161,8 @@ impl Output {
 }
 type Connection = HostConnection<Reads, Output>;
 
-fn lifecycle_notice(phase: u8) -> plakous_host_protocol::wire::HostLifecycle<Reads> {
-    plakous_host_protocol::wire::HostLifecycle {
+fn lifecycle_notice(phase: u8) -> HostLifecycle<Reads> {
+    HostLifecycle {
         host_generation: 1,
         phase,
         reason: 0,
@@ -171,77 +171,34 @@ fn lifecycle_notice(phase: u8) -> plakous_host_protocol::wire::HostLifecycle<Rea
     }
 }
 
-fn draft_lifecycle_output(
-    out: &mut dyn Write,
-    phase: LifecycleState<Reads>,
-    remaining: u64,
-) -> CliResult<()> {
-    let (generation, phase) = match phase {
-        LifecycleState::Starting { host_generation } => (host_generation, 0),
-        LifecycleState::Started { host_generation } => (host_generation, 3),
-        LifecycleState::Transition(notice) => (notice.host_generation, notice.phase),
-    };
-    writeln!(out, "{generation} {phase} {remaining}")
-        .map_err(|error| CliFailure::new(error.to_string()))
+fn draft_lifecycle_output(out: &mut dyn Write, notice: HostLifecycle<Reads>) -> CliResult<()> {
+    let frame = encode_line(&HostFrame::from(notice)).unwrap();
+    write!(out, "projected: {frame}").map_err(|error| CliFailure::new(error.to_string()))
 }
 
 #[test]
-fn draft_lifecycle_samples_each_monotonic_deadline_at_write_and_clears_it_on_cancel() {
+fn product_lifecycle_output_projects_current_and_later_advisories_in_order() {
     let (host, _) = fixture(limits());
-    let epoch = Instant::now();
-    let deadline = epoch + Duration::from_secs(15);
+    host.publish_lifecycle(lifecycle_notice(2));
     let mut connection = host
         .connect(Vec::new(), Face::Remote, HostPrincipal::Socket(501), || {
             false
         })
         .with_lifecycle_output(draft_lifecycle_output);
-    host.publish_lifecycle_until(lifecycle_notice(1), Some(deadline));
-    host.publish_lifecycle_until(lifecycle_notice(1), Some(deadline));
-    host.publish_lifecycle_until(lifecycle_notice(1), Some(deadline));
-    host.publish_lifecycle_until(lifecycle_notice(1), Some(deadline));
-    host.publish_lifecycle_until(lifecycle_notice(1), Some(deadline));
     host.publish_lifecycle(lifecycle_notice(3));
-    let mut write_times = [2250, 11_400, 14_999, 15_000, 17_000, 18_000].into_iter();
-    connection
-        .flush_lifecycle_at(|| epoch + Duration::from_millis(write_times.next().unwrap()))
-        .unwrap();
+    connection.flush_lifecycle().unwrap();
+    let output = std::str::from_utf8(&connection.out).unwrap();
+    let frames: Vec<HostFrame<Reads>> = output
+        .lines()
+        .map(|line| decode_line(line.strip_prefix("projected: ").unwrap()).unwrap())
+        .collect();
     assert_eq!(
-        connection.out,
-        b"1 1 13\n1 1 4\n1 1 1\n1 1 0\n1 1 0\n1 3 0\n"
+        frames,
+        [
+            HostFrame::from(lifecycle_notice(2)),
+            HostFrame::from(lifecycle_notice(3))
+        ]
     );
-}
-
-#[test]
-fn draft_successor_start_and_readiness_are_local_to_the_new_generation() {
-    let (source, state) = fixture(limits());
-    let epoch = Instant::now();
-    source.publish_lifecycle_until(lifecycle_notice(1), Some(epoch + Duration::from_secs(35)));
-    let successor = SessionHost::new(
-        Stores {
-            state,
-            limits: limits(),
-        },
-        "successor",
-        2,
-    );
-    let mut legacy =
-        successor.connect(Vec::new(), Face::Remote, HostPrincipal::Socket(501), || {
-            false
-        });
-    successor.publish_starting(epoch + Duration::from_secs(10));
-    let mut draft = successor
-        .connect(Vec::new(), Face::Remote, HostPrincipal::Socket(501), || {
-            false
-        })
-        .with_lifecycle_output(draft_lifecycle_output);
-    let now = || epoch + Duration::from_secs(7);
-    draft.flush_lifecycle_at(now).unwrap();
-    assert_eq!(draft.out, b"2 0 3\n");
-    successor.publish_started();
-    draft.flush_lifecycle_at(now).unwrap();
-    legacy.flush_lifecycle_at(now).unwrap();
-    assert_eq!(draft.out, b"2 0 3\n2 3 0\n");
-    assert_eq!(legacy.out, [] as [u8; 0]);
 }
 
 #[test]
@@ -326,7 +283,6 @@ async fn lifecycle_advisories_preserve_order_and_join_transport_attempts_not_adm
     )
     .await
     .unwrap();
-    assert!(!*host.upgrade_admission.read().unwrap());
     assert_eq!(
         state.started.load(Ordering::SeqCst),
         0,
@@ -358,8 +314,7 @@ fn dropping_a_connection_retires_operator_authority_even_without_explicit_leave(
     assert_eq!(state.dropped.load(Ordering::SeqCst), 1);
 }
 fn request(connection: &mut Connection, id: u64, op: Op<Reads>) {
-    let line = plakous_host_protocol::wire::encode_line(&ClientFrame::<Reads>::Request { id, op })
-        .unwrap();
+    let line = encode_line(&ClientFrame::<Reads>::Request { id, op }).unwrap();
     assert!(connection.frame(Ok(line)).unwrap());
 }
 fn refused(frames: &[HostFrame<Reads>], id: u64) -> &RequestRefusal {

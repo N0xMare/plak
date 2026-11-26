@@ -4,8 +4,6 @@ use plakous_host_protocol::wire::{
 };
 use std::io::Write as _;
 
-mod paused_page;
-
 #[tokio::test(start_paused = true)]
 async fn web_paced_pages_deliver_ping_before_replay_without_closing() {
     use crate::host::connection::test_fixtures as paced;

@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
-use std::time::Instant;
 
 use super::{ANSWER, Pending, attachment_of};
 use plakous_host_protocol::wire::{AttachmentId, ClientDraftId, NodeAddress};
@@ -107,44 +106,6 @@ impl DraftRegistry {
             registry: self.clone(),
             id,
         }))
-    }
-
-    pub(crate) fn wait_resolved(
-        &self,
-        deadline: Instant,
-        cancelled: &std::sync::atomic::AtomicBool,
-    ) -> Result<(), &'static str> {
-        let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
-        loop {
-            if cancelled.load(std::sync::atomic::Ordering::Acquire) {
-                return Err(
-                    "host_upgrade_cancelled: requester left before admission verdicts settled",
-                );
-            }
-            if state.unresolved_drop {
-                return Err(
-                    "host_upgrade_draft_verdict_unknown: a service ended without resolving a reserved input",
-                );
-            }
-            if state.deliveries == 0 && state.entries.values().all(|entry| entry.admitted) {
-                return Ok(());
-            }
-            let now = Instant::now();
-            if now >= deadline {
-                return Err(
-                    "host_upgrade_draft_verdicts_pending: admission or verdict delivery did not settle before the deadline",
-                );
-            }
-            state = self
-                .0
-                .changed
-                .wait_timeout(
-                    state,
-                    (deadline - now).min(std::time::Duration::from_millis(100)),
-                )
-                .unwrap_or_else(PoisonError::into_inner)
-                .0;
-        }
     }
 }
 

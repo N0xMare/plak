@@ -133,7 +133,6 @@ mod extension_tests;
 mod fork;
 mod host_loop;
 pub use host_loop::CONTINUATION_PROMPT;
-pub(crate) use host_loop::record_tree_handoff;
 mod info;
 pub(crate) mod job_events;
 mod ledger;
@@ -209,10 +208,6 @@ mod tool_facts;
 mod tools;
 mod topology_state;
 #[cfg(test)]
-pub(crate) use topology_state::mark_root_interrupted as cascade_root_for_step_drain_test;
-#[cfg(test)]
-pub(crate) use topology_state::mark_root_interrupted_after_handoff_cancel as handoff_cancel_for_step_drain_test;
-#[cfg(test)]
 pub(crate) use topology_state::mark_root_interrupted_for_run;
 mod transcript_rows;
 pub(crate) use transcript_rows::{Derived, item_rows, projected_tool_row, settle_tool_row};
@@ -252,7 +247,6 @@ pub use source_release::SourceReleases;
 pub use startup::HostWorker;
 mod sender;
 pub use sender::{LiveRowReadError, LiveRowSlice, RootHistoryCapture, RootTranscript};
-pub(crate) mod step_hold;
 mod worker;
 pub use startup::spawn_deferred_host;
 pub use startup::spawn_deferred_host_with_clear_publication;
@@ -323,7 +317,6 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     request_tools: Arc<std::sync::Mutex<Vec<String>>>,
     session_id: Option<Arc<str>>,
     quit_receipt: worker::QuitReceipt,
-    step_control: Arc<step_hold::StepControl>,
     /// The correlation of the `IntentStarted` window the session's answers
     /// are in now, shared by every clone; `None` before the first window
     /// and after a correlation reset.

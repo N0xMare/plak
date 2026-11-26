@@ -100,12 +100,12 @@ pub(crate) fn probe_prepared_capacity(
 /// Whether an exact reopen of `record` would attach on this build, answered
 /// without owning it: the attach's own binding resolution, then the open's
 /// verification at `head` (spec 02 §2.5.1).
-pub(crate) fn verify_host_upgrade_reopen(
+pub(crate) fn verify_restart_reopen(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,
     head: plakous::sessions::SessionLocator,
 ) -> CliResult<crate::carry::ReopenProbe> {
-    let placement = crate::carry::upgrade::remote::Placement::prepare(
+    let placement = crate::carry::placement::Placement::prepare(
         services,
         record
             .runner
@@ -129,7 +129,7 @@ fn verify_reopen(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,
     head: plakous::sessions::SessionLocator,
-    host_upgrade: bool,
+    restart_probe: bool,
 ) -> CliResult<crate::carry::ReopenProbe> {
     let config = match build_attached_host_config(services, record, AttachedPurpose::Verify) {
         Ok(config) => config,
@@ -137,7 +137,7 @@ fn verify_reopen(
         Err(error) => return Err(error.into()),
     };
     match product_host::verify_exact_reopen(config, head)? {
-        plakous_hosted::runtime::ReopenVerdict::HeadAdvanced(_) if host_upgrade => {
+        plakous_hosted::runtime::ReopenVerdict::HeadAdvanced(_) if restart_probe => {
             Ok(crate::carry::ReopenProbe::Unknown {
                 reason: crate::carry::REOPEN_HEAD_ADVANCED.to_owned(),
             })

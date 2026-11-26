@@ -293,11 +293,11 @@ save leaves them exactly as written, and `plakd config show` prints the
 canonical rendering of the tool and server tables after the keys.
 
 `[host] resume_after_loss` decides whether the root and the sub-agents a lost
-host interrupted hold for the operator's Resume or continue once by themselves
-(chapter 03 §14.1); `[mcp_servers.<id>] placement` places a server (§3.5);
+host interrupted hold for the operator's Resume or continue once by themselves;
+unset, `plakd host` continues and embedded faces hold (chapter 03 §14.1); `[mcp_servers.<id>] placement` places a server (§3.5);
 `[runners.<name>]` configures the host's runner registry for placed-session
-creation, reopen and reconnect, as well as destination qualification during
-host upgrade. `plakd runner pair` and `plakd runner ps` dial the configured
+creation, reopen and reconnect, as well as a candidate's pre-stop reopen
+probe before a host restart. `plakd runner pair` and `plakd runner ps` dial the configured
 runner; `plakd doctor` inspects its SSH resolution without connecting (section 3.6).
 `[web] allow` and `[web] origin` are
 read by `plakd host` when it serves its web endpoint (`--web`, chapter 02 §4.5,
@@ -350,7 +350,7 @@ raised or enough data is reclaimed (spec 01 §5).
 | `jobs.foreground_seconds` | integer | `30` | 1..=600 | Default process foreground budget before promotion. Bound at session construction and rebind; exact reopen keeps the stored value. |
 | `jobs.max_runtime_hours` | integer | `10` | 1..=24 | Hard runtime cap per background process. Bound at session construction and rebind; exact reopen keeps the stored value. |
 | `api.full_window` | bool | `false` | true or false | Admit direct API sessions (openai, anthropic, xai-api) under the model's full input window instead of the provider's price threshold. Bound at session construction and rebind; exact reopen keeps the stored value. |
-| `host.reload_requests` | bool | `false` | true or false; home-scoped | Permit this user's own processes to request a hosted-session reload (plakd session reload <session> --expect-binary <id>). The serving host records the outcome and names the explicit host upgrade workflow; replacing a client does not upgrade its sessions. |
+| `host.reload_requests` | bool | `false` | true or false; home-scoped | Permit this user's own processes to request a hosted-session reload (plakd session reload <session> --expect-binary <id>). The serving host records the outcome and points to the operator-managed host restart; replacing a client does not upgrade its sessions. |
 | `compaction.enabled` | bool | `true` | — | Automatic transcript compaction when a session approaches its context bound. |
 | `skills.enabled` | bool | `true` | true or false | Discover Agent Skills (<workspace>/.agents/skills, then ~/.agents/skills; both on the selected runner for a remote session, using that runner process's home, never the host's) when a session is constructed, list them in its instructions, let its read tool read files under that user skill root on the same machine, and give Claude-vocabulary sessions the Skill tool. Bound when a new session or spawn is constructed; exact reopen keeps the listing and tools it froze, and a fork, rebind or switch keeps the source session's on or off. |
 | `runtime_store.max_sessions` | integer | `1024` | greater than 0, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store session cap; includes children and archived sessions. Serving hosts read these limits at startup. |
@@ -362,7 +362,7 @@ raised or enough data is reclaimed (spec 01 §5).
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
 | `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plakd mcp login`. |
-| `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset holds; home-scoped | Whether the root and sub-agents that lost their owner (a crash or a proven lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). A loss that interrupted a continuation itself holds under either policy. Read when the root attaches and opens, and by plakd host's start scan, which opens eligible held roots under continue. |
+| `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset continues under plakd host and holds in embedded faces; home-scoped | Whether the root and sub-agents that lost their owner (a crash or a proven lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). A loss that interrupted a continuation itself holds under either policy. Read when the root attaches and opens, and by plakd host's start scan, which opens eligible held roots under continue. |
 
 | `web.allow` | array of string | `(unset)` | tailnet logins, no duplicates; unset admits no one; home-scoped | The tailnet logins (Tailscale-User-Login) plakd host --web admits through tailscale serve. Read when plakd host starts with --web. |
 | `web.origin` | string | `(unset)` | https://<host>[:port], nothing after it; home-scoped | The exact origin tailscale serve publishes plakd host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plakd host starts with --web. |

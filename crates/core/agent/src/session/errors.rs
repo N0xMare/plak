@@ -465,11 +465,6 @@ pub enum SessionStoreError {
         "runtime store bootstrap required; close all store handles and bootstrap the stopped store before opening it"
     )]
     BootstrapRequired,
-    /// The source exceeds the detached rehearsal's disk budget.
-    #[error(
-        "runtime store is too large for online bootstrap qualification; stop the store before bootstrapping"
-    )]
-    BootstrapRehearsalTooLarge,
     /// Physical storage is exhausted, independently of logical retention limits.
     #[error("session store disk is full")]
     StorageFull,

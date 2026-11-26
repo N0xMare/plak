@@ -130,10 +130,35 @@ pub(crate) fn run_with_budget(
     budget: Duration,
     out: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
-    let manifest = publish(paths, directory, &sources(paths), budget).map_err(Refusal::into_cli)?;
+    execute(paths, directory, budget, false, out)
+}
+
+fn execute(
+    paths: &PlakPaths,
+    directory: &Path,
+    budget: Duration,
+    stopped: bool,
+    out: &mut dyn Write,
+) -> CliResult<ProcessOutcome> {
+    let manifest =
+        publish(paths, directory, &sources(paths), budget, stopped).map_err(Refusal::into_cli)?;
     out.write_all(&manifest)
         .map_err(|error| CliFailure::new(format!("backup published but stdout failed: {error}")))?;
     Ok(ProcessOutcome::Success)
+}
+
+pub(crate) fn stopped(
+    paths: &PlakPaths,
+    directory: &Path,
+    budget: Duration,
+    out: &mut dyn Write,
+) -> CliResult<ProcessOutcome> {
+    paths.ensure_private_state_home().map_err(CliFailure::new)?;
+    paths.ensure_layout().map_err(CliFailure::new)?;
+    let _host_locks =
+        crate::host_lock::HostLock::take_home(paths, crate::build_identity::binary_id())?;
+    let _writers = crate::writers::admission(paths, true)?;
+    execute(paths, directory, budget, true, out)
 }
 
 fn sources(paths: &PlakPaths) -> [(&'static str, PathBuf); 3] {
@@ -149,6 +174,7 @@ fn publish(
     directory: &Path,
     sources: &[(&'static str, PathBuf); 3],
     budget: Duration,
+    stopped: bool,
 ) -> BackupResult<Vec<u8>> {
     let target = target_directory(paths, sources, directory)?;
     let stage = tempfile::Builder::new()
@@ -167,7 +193,7 @@ fn publish(
             copy(&pair.snapshot, &stage.path().join(name), deadline)?;
         }
     } // Release every read transaction before hashing or publishing.
-    check_current_copies(stage.path())?;
+    check_copies(paths, stage.path(), stopped)?;
     for (name, _) in sources {
         seal(&stage.path().join(name)).map_err(Refusal::destination)?;
     }
@@ -350,15 +376,29 @@ fn destination_sql(error: rusqlite::Error) -> Refusal {
     Refusal::sqlite(error, Refusal::destination)
 }
 
-fn check_current_copies(path: &Path) -> BackupResult<()> {
+fn check_copies(paths: &PlakPaths, path: &Path, stopped: bool) -> BackupResult<()> {
     use plakous::sessions::{SessionBackend, SessionPersistenceShape};
-    if !matches!(
-        SessionBackend::classify_sqlite(path.join("runtime.sqlite3")).map_err(Refusal::source)?,
-        SessionPersistenceShape::Current
-    ) {
+    let runtime = path.join("runtime.sqlite3");
+    let shape = SessionBackend::classify_sqlite(&runtime).map_err(Refusal::source)?;
+    if !matches!(shape, SessionPersistenceShape::Current) {
         return Err(Refusal::source(
-            "runtime.sqlite3: source is not an initialized current runtime store",
+            "runtime.sqlite3: source is not an initialized readable runtime store",
         ));
+    }
+    if stopped {
+        let copies = paths.clone().with_probe_stores(path.to_path_buf());
+        for (schema, database) in crate::store::revisions::databases(&copies) {
+            let status = schema.inspect(&database).map_err(Refusal::source)?;
+            if matches!(
+                status,
+                plakous_recursive_subagents_store::admission::Status::Fresh
+            ) {
+                return Err(Refusal::source(format!(
+                    "{}: source is not initialized",
+                    database.display()
+                )));
+            }
+        }
     }
     let open = |name| {
         Connection::open_with_flags(
@@ -367,11 +407,13 @@ fn check_current_copies(path: &Path) -> BackupResult<()> {
         )
     };
     let product = open("product.sqlite3").map_err(source_sql)?;
-    crate::store::ProductStore::admit_read_only(&product).map_err(Refusal::source)?;
     let tree = open("subagents.sqlite3").map_err(source_sql)?;
-    plakous_recursive_subagents_store::database::schema()
-        .require_current(&tree)
-        .map_err(Refusal::source)?;
+    if !stopped {
+        crate::store::ProductStore::admit_read_only(&product).map_err(Refusal::source)?;
+        plakous_recursive_subagents_store::database::schema()
+            .require_current(&tree)
+            .map_err(Refusal::source)?;
+    }
     quick_check(
         "runtime.sqlite3",
         &open("runtime.sqlite3").map_err(source_sql)?,
@@ -606,7 +648,7 @@ mod tests {
         let sources = sources(&paths);
         let _writers = sources.each_ref().map(|(_, path)| writer(path));
         let target = root.path().join("backup");
-        let error = publish(&paths, &target, &sources, Duration::ZERO)
+        let error = publish(&paths, &target, &sources, Duration::ZERO, false)
             .unwrap_err()
             .into_cli();
         assert_eq!(error.exit_code(), 8);

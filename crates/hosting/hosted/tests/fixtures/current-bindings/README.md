@@ -18,7 +18,7 @@ in that checkout:
 
 ```sh
 python3 tools/dev/fixtures/current_bindings.py
-just nextest run --locked -p plakd --all-features --profile durability --ignore-default-filter -E 'test(=host_skeleton::upgrade::host_upgrade_binding_regression_refuses_before_surrender_and_prints_live_rows)'
+just nextest run --locked -p plakd --all-features --profile durability --ignore-default-filter -E 'test(host_skeleton::restart::probes)'
 ```
 
 The generator temporarily enrolls `tools/dev/fixtures/previous_release.rs`, runs
