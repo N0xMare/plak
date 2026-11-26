@@ -494,6 +494,11 @@ impl SummarizedTurns {
 /// reasoning survive. This prefix is presentation only.
 pub const PLACEHOLDER_NOTICE_PREFIX: &str = "Tool result placeholders:";
 
+/// Exact standalone notice written by offline passes, including older writers.
+pub const PLACEHOLDER_NOTICE_LINE: &str = "Tool result placeholders: tool result bodies and images in this conversation may have been replaced \
+with bounded placeholders to fit this request's context and size limits. Every tool call and its result remain paired; \
+ask for a new attachment or safely reissue the identified tool to see removed content again.";
+
 /// A canonical compaction marker and semantic summary.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct CompactionBlock {

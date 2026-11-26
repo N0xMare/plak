@@ -15,7 +15,8 @@ pub use citation::{CitationBlock, CitationRange, CitationSource, CitationTarget,
 pub use media::{AudioBlock, DocumentBlock, ImageBlock, ImageDetailHint, MediaSource};
 pub use replay::{
     CompactionBlock, CompactionReplayBinding, DataClassification, OpaqueBlock, OpaqueFallback,
-    PLACEHOLDER_NOTICE_PREFIX, ReplayEnvelope, ReplayScope, SummarizedTurns,
+    PLACEHOLDER_NOTICE_LINE, PLACEHOLDER_NOTICE_PREFIX, ReplayEnvelope, ReplayScope,
+    SummarizedTurns,
 };
 pub use text::{ReasoningBlock, ReasoningVisibility, RefusalBlock, TextBlock, TextPhase};
 pub use tool::{

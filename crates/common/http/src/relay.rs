@@ -411,7 +411,7 @@ impl RelayClient {
             .map_err(RelayCallError::Transport)?;
         let status = response.status();
         let refused = refusal_code(response.headers());
-        if refused.is_none() && status == StatusCode::REQUEST_TIMEOUT {
+        if refused.as_deref() == Some("busy") && status == StatusCode::REQUEST_TIMEOUT {
             let _ = response.into_body().close().await;
             return Err(RelayCallError::Transport(request_body_timeout()));
         }
@@ -618,16 +618,16 @@ async fn answer(
     cut_after_head: bool,
 ) -> Result<Answer, Failure> {
     if let Some(code) = refusal_code(response.headers()) {
+        if code == "busy" && response.status() == StatusCode::REQUEST_TIMEOUT {
+            let _ = response.into_body().close().await;
+            return Err(request_body_timeout());
+        }
         let body = read_all(response.into_body(), call::MAX_CALL_BYTES)
             .await
             .ok()
             .flatten()
             .unwrap_or_default();
         return Ok(Answer::Refused(decode_refusal(&code, &body)));
-    }
-    if response.status() == StatusCode::REQUEST_TIMEOUT {
-        let _ = response.into_body().close().await;
-        return Err(request_body_timeout());
     }
     let relayed_frames = response.status() == StatusCode::OK
         && response

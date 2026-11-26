@@ -1347,8 +1347,8 @@ fn semantic_cut_folds_nonleading_placeholder_notice_across_turns_and_intra_turn(
         ],
     )
     .expect("notice segment");
-    assert!(is_placeholder_notice_segment(&notice));
-    assert!(!is_placeholder_notice_segment(&paid));
+    assert!(is_placeholder_notice_segment(&notice, 2));
+    assert!(!is_placeholder_notice_segment(&paid, 2));
     let turn1_intent = HistorySegment::new(
         HistorySegmentKind::RecentIntent,
         vec![text(1, Actor::User, "turn one")],
@@ -1359,6 +1359,23 @@ fn semantic_cut_folds_nonleading_placeholder_notice_across_turns_and_intra_turn(
         vec![text(2, Actor::User, "turn two")],
     )
     .expect("turn2 intent");
+
+    let legacy = compaction_summary(93, crate::PLACEHOLDER_NOTICE_LINE);
+    assert!(!is_placeholder_notice_segment(&legacy, 0));
+    let reopened = ConversationView::from_shared(
+        CanonicalHistory::new(vec![
+            turn1_intent.clone(),
+            complete_exchange(100),
+            legacy.clone(),
+            complete_exchange(200),
+            turn2_intent.clone(),
+        ])
+        .expect("legacy history"),
+        WorkingProjection::default(),
+    );
+    let plan = ContextHistoryPlan::new(&reopened).expect("legacy notice leaves a fold eligible");
+    let cut = SemanticCompactionCut::seal(&reopened, &plan).expect("legacy history can fold");
+    assert_eq!(cut.prior_compaction(), Some(&legacy));
 
     // Multi-turn shape: nonleading placeholder notice inside Turn 1 folds cleanly
     // with Turn 1 into a single leading semantic summary while retaining Turn 2.

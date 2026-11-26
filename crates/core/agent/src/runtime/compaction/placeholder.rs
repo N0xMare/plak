@@ -23,8 +23,8 @@ use crate::runtime::driver::turn_position::summarized_turns;
 use crate::{AgentError, AgentErrorKind, SessionWorkflowId};
 use plakous_model::{
     Actor, CallId, CanonicalHistory, CompactionBlock, ContentBlock, ConversationItem, EntryId,
-    HistorySegment, HistorySegmentKind, PLACEHOLDER_NOTICE_PREFIX, Provenance,
-    SemanticCompactionCut, SummarizedTurns, TextBlock, ToolName, ToolResultBlock, ToolResultPart,
+    HistorySegment, HistorySegmentKind, PLACEHOLDER_NOTICE_LINE, Provenance, SemanticCompactionCut,
+    SummarizedTurns, TextBlock, ToolName, ToolResultBlock, ToolResultPart,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -362,25 +362,17 @@ pub(super) fn replace_compaction_result_body(
     CanonicalHistory::new(segments).map_err(|_| invalid("summary reduction history is invalid"))
 }
 
-fn placeholder_notice_line() -> String {
-    format!(
-        "{PLACEHOLDER_NOTICE_PREFIX} tool result bodies and images in this conversation may have been replaced \
-         with bounded placeholders to fit this request's context and size limits. Every tool call and its result remain paired; \
-         ask for a new attachment or safely reissue the identified tool to see removed content again.",
-    )
-}
-
 /// The canonical summary text after this pass, given the prior summary.
 ///
 /// Keeps the prior summary verbatim and appends the constant notice once.
 fn merged_notice_text(previous: Option<(&str, bool)>) -> String {
-    let line = placeholder_notice_line();
+    let line = PLACEHOLDER_NOTICE_LINE;
     let Some((previous, standalone)) = previous else {
-        return line;
+        return line.to_owned();
     };
     if standalone {
-        line
-    } else if previous.lines().next_back() == Some(line.as_str()) {
+        line.to_owned()
+    } else if previous.lines().next_back() == Some(line) {
         previous.to_owned()
     } else {
         format!("{previous}\n{line}")
@@ -433,7 +425,7 @@ fn existing_compaction_summary(
     history: &CanonicalHistory,
 ) -> Result<Option<(&str, bool)>, AgentError> {
     let mut found = None;
-    for segment in history.segments() {
+    for (position, segment) in history.segments().iter().enumerate() {
         if segment.kind() != HistorySegmentKind::Compaction {
             continue;
         }
@@ -453,7 +445,10 @@ fn existing_compaction_summary(
                 text = compaction.summary();
             }
         }
-        found = Some((text, plakous_model::is_placeholder_notice_segment(segment)));
+        found = Some((
+            text,
+            plakous_model::is_placeholder_notice_segment(segment, position),
+        ));
     }
     Ok(found)
 }

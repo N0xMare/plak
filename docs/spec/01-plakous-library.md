@@ -6198,14 +6198,17 @@ flag, `cancelled`, or `gateway_failed`). The decoder refuses any other order,
 a sequence or offset gap, an oversized response and bytes after `End`. There
 is no keepalive frame, so relay silence is upstream silence.
 
-Connection-cap overflow returns the typed `busy` refusal before
-authenticating or reading the request body, then closes the connection. That
-rejection has its own short deadline and does not consume relay admission
-capacity. If the gateway times out reading a request body, it closes after an
-HTTP 408 rather than classifying an incomplete read as a malformed envelope.
-The caller maps this gateway-hop response to a retryable deadline failure
-with transmission `NotStarted`; an upstream 408 remains a framed upstream
-response. A malformed body still receives the terminal typed envelope refusal.
+After parsing the request head, connection-cap overflow returns the typed
+`busy` refusal without authenticating, admitting or dispatching the call.
+It half-closes the connection and briefly drains a bounded amount of bytes
+already in flight. The whole rejection has a short deadline and consumes no
+relay admission capacity. On a request-body read timeout the gateway sends
+HTTP 408 carrying the existing `busy` refusal header and body, then closes.
+Older callers recognize that refusal as retryable and unsent. Current callers
+recognize the marked 408 as a deadline failure with transmission
+`NotStarted`. An unmarked 408 is not proof of non-dispatch, and an upstream
+408 remains a framed response. A malformed body still receives the terminal
+typed envelope refusal.
 
 Account facts are the non-secret view of one custodied credential: status,
 generation, access expiry, login selection epoch digest, account binding and
@@ -11127,10 +11130,12 @@ placeholder records and operator observations. A standalone placeholder or
 image-residency notice is an assistant compaction item with instruction
 provenance and no native item. A paid summary has model-output provenance even
 when a placeholder pass appends the notice line. Merging preserves the entire
-paid summary verbatim and adds the constant line at most once. Text never
-identifies a standalone notice, including in older histories without the
-instruction provenance. When the sole compaction segment is a non-leading
-standalone notice, the planner keeps its barrier at position
+paid summary verbatim and adds the constant line at most once. On read, the
+legacy equivalent is a non-leading assistant compaction item with model-output
+provenance, no native replay, and a summary exactly equal to the standalone
+notice line. Neither a prefix match nor a leading model-output item qualifies.
+Legacy records need no format conversion. When the sole compaction segment
+is a non-leading standalone notice, the planner keeps its barrier at position
 zero so earlier rewritten turns remain selectable for a later semantic fold,
 while `publish_placeholders` applies the same post-compaction plan-restoration
 note seam as a paid fold.

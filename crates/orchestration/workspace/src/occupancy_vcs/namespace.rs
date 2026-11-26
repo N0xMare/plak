@@ -248,6 +248,36 @@ pub(super) fn cleanup(common: &Path, prefix: &str) -> Result<(), VcsError> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn reservation_sweeps_only_private_stages_under_the_namespace_lock() {
+        use super::*;
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _, symlink};
+        let common = tempfile::tempdir().unwrap();
+        let directory = common.path().join("plak-namespaces");
+        let held = lock(common.path()).unwrap();
+        let stage = directory.join(".tmpABC123");
+        let shared = directory.join(".tmpABC124");
+        fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&stage)
+            .unwrap();
+        fs::File::create(&shared)
+            .unwrap()
+            .set_permissions(fs::Permissions::from_mode(0o640))
+            .unwrap();
+        let link = directory.join(".tmpABC125");
+        symlink(&shared, &link).unwrap();
+        assert!(stage.exists(), "an active publisher owns its stage");
+        drop(held);
+        let digest = "a".repeat(64);
+        let _next = reserve(common.path(), &digest).unwrap();
+        assert!(!stage.exists());
+        assert!(shared.is_file() && link.is_symlink());
+        assert!(directory.join(&digest[..16]).is_file());
+    }
+
+    #[test]
     fn namespace_reservation_guard_fences_evidence_cleanup() {
         let common = tempfile::tempdir().unwrap();
         let digest = "0123456789abcdef".to_owned() + &"1".repeat(48);

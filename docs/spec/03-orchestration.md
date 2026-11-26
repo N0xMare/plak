@@ -2020,12 +2020,12 @@ with the typed error it already had (a failed seal is a fault, §6.5), never a
 hang that holds the seal or the adopt.
 
 **Filtered repositories are refused.** Before `snapshot`, `mint`, or `adopt`,
-Plak inspects repository-local (and worktree-local, when
-`extensions.worktreeConfig` is enabled) `filter.*.(clean|smudge|process)`
-configuration and the bounded attribute sources specified by chapter 04 §2.6
-without invoking any filter.
-If any clean, smudge, or process filter driver or active `filter=<name>`
-attribute is present (including Git LFS or `git-crypt`), the operation refuses
+Plak requires Git 2.44 or later and inspects effective filter configuration
+and the bounded attribute sources specified by chapter 04 §2.6 without
+invoking any filter. A system or global driver triggers inspection of its
+attribute sources; a repository-local or worktree-local driver is refused.
+If an inspected attribute enables a filter, or `attr.tree` selects an alternate
+source, the operation refuses
 with a typed `mint_unavailable` / `Unavailable` error rather than executing
 repository-controlled filter code or silently blanking filters and corrupting
 LFS pointers or encrypted content. Standard non-filter attributes and unset

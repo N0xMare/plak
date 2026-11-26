@@ -30,7 +30,7 @@ use plakous_gateway_protocol::refusal::{GatewayRefusal, RefusalBody};
 use plakous_gateway_protocol::{
     Endpoint, GatewayAccount, SUPPORTED_VERSIONS, UuidText, VersionsReply, call,
 };
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 
 use crate::transport::pool::{Pool, PoolScope, PoolUse};
@@ -408,8 +408,9 @@ impl<S: GatewayService> RelayServer<S> {
         }
     }
 
-    /// Sends one typed capacity refusal without authenticating, reading a
-    /// body, or dispatching. The caller bounds concurrent rejection tasks.
+    /// Parses a request head and sends one typed capacity refusal without
+    /// authenticating or dispatching. Then half-closes and briefly drains
+    /// in-flight bytes. The caller bounds concurrent rejection tasks.
     ///
     /// # Errors
     /// Returns the HTTP/1.1 connection failure, if any.
@@ -426,7 +427,16 @@ impl<S: GatewayService> RelayServer<S> {
             .keep_alive(false)
             .header_read_timeout(None)
             .serve_connection(TokioIo::new(io), service);
-        match tokio::time::timeout(BUSY_RESPONSE_TIMEOUT, connection).await {
+        let answer = async {
+            let parts = connection.without_shutdown().await?;
+            let mut io = parts.io.into_inner();
+            if io.shutdown().await.is_ok() {
+                let mut remainder = [0; 4096];
+                let _ = io.read(&mut remainder).await;
+            }
+            Ok(())
+        };
+        match tokio::time::timeout(BUSY_RESPONSE_TIMEOUT, answer).await {
             Ok(result) => result.map_err(ServeError),
             Err(_) => Ok(()),
         }
@@ -1077,7 +1087,11 @@ async fn read_whole_budgeted(
 }
 
 fn body_timeout_reply() -> Reply {
-    let mut reply = bytes_reply(StatusCode::REQUEST_TIMEOUT, "text/plain", Vec::new());
+    // Older callers classify by the existing refusal marker and body.
+    let mut reply = refusal_reply(&GatewayRefusal::Busy {
+        retry_after_ms: 500,
+    });
+    *reply.status_mut() = StatusCode::REQUEST_TIMEOUT;
     reply
         .headers_mut()
         .insert(http::header::CONNECTION, HeaderValue::from_static("close"));

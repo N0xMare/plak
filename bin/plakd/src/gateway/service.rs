@@ -128,7 +128,14 @@ impl Gateway {
                 stop_state.draining.store(true, Ordering::Relaxed);
                 Ok(())
             };
-            run(state, server, &listening, stop).await
+            run(
+                state,
+                server,
+                &listening,
+                stop,
+                [MAX_UNIX_CONNECTIONS as usize, MAX_TCP_CONNECTIONS as usize],
+            )
+            .await
         });
         let deadline = Instant::now() + RUNTIME_SHUTDOWN;
         accounts.close();
@@ -168,6 +175,7 @@ async fn run(
     server: RelayServer<ProductGateway>,
     lock: &HolderLock,
     stop: impl Future<Output = Result<(), String>>,
+    [unix_cap, tcp_cap]: [usize; 2],
 ) -> Result<(), String> {
     prepare_socket(&state.config.socket)?;
     let unix = UnixListener::bind(&state.config.socket)
@@ -199,8 +207,8 @@ async fn run(
             listeners.push(format!("tcp:{addr}"));
         }
     }
-    let unix_connections = Arc::new(Semaphore::new(MAX_UNIX_CONNECTIONS as usize));
-    let tcp_connections = Arc::new(Semaphore::new(MAX_TCP_CONNECTIONS as usize));
+    let unix_connections = Arc::new(Semaphore::new(unix_cap));
+    let tcp_connections = Arc::new(Semaphore::new(tcp_cap));
     let mut connections = JoinSet::new();
     // One bounded overload response per listener. Leave later dials queued
     // in the listener backlog while it flushes, without blocking the other listener.
@@ -360,6 +368,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn each_product_listener_answers_busy_at_its_own_cap() {
+        use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+
+        async fn start_request(io: &mut (impl AsyncRead + AsyncWrite + Unpin)) -> u16 {
+            io.write_all(b"GET /versions HTTP/1.1\r\nhost: gateway\r\n\r\n")
+                .await
+                .unwrap();
+            let mut status = [0; 12];
+            io.read_exact(&mut status).await.unwrap();
+            std::str::from_utf8(&status[9..]).unwrap().parse().unwrap()
+        }
+        async fn expect_busy(io: &mut (impl AsyncRead + AsyncWrite + Unpin)) {
+            assert_eq!(start_request(io).await, 503);
+            let mut response = Vec::new();
+            io.read_to_end(&mut response).await.unwrap();
+            let response = String::from_utf8(response).unwrap();
+            assert!(response.contains("plak-gateway-error: busy"), "{response}");
+            assert!(response.contains(r#""code":"busy""#), "{response}");
+        }
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let (_temp, home) = PlakPaths::isolated_test_home();
+            let mut state = super::super::tests::state_for(&home);
+            Arc::get_mut(&mut state).unwrap().config.listen_tcp =
+                Some("127.0.0.1:0".parse().unwrap());
+            let server = RelayServer::new(
+                Arc::new(ProductGateway::new(&home, Arc::clone(&state))),
+                plakous::gateway::server::http1_upstream().unwrap(),
+                state.instance.clone(),
+            );
+            let socket = state.config.socket.clone();
+            let lock = HolderLock::try_acquire(
+                &holder::lock_path(&state.config.state_root),
+                HolderMode::Exclusive,
+            )
+            .unwrap();
+            let (stop, stopping) = tokio::sync::oneshot::channel();
+            let running = Arc::clone(&state);
+            let service = tokio::spawn(async move {
+                run(
+                    running,
+                    server,
+                    &lock,
+                    async { stopping.await.map_err(|e| e.to_string()) },
+                    [1, 1],
+                )
+                .await
+            });
+            let tcp: SocketAddr = loop {
+                if let Some(addr) = state.listeners.lock().unwrap().iter().find_map(|endpoint| {
+                    endpoint
+                        .strip_prefix("tcp:")
+                        .and_then(|addr| addr.parse().ok())
+                }) {
+                    break addr;
+                }
+                tokio::task::yield_now().await;
+            };
+            let mut unix_hold = tokio::net::UnixStream::connect(&socket).await.unwrap();
+            assert_eq!(start_request(&mut unix_hold).await, 200);
+            let mut tcp_hold = tokio::net::TcpStream::connect(tcp).await.unwrap();
+            assert_eq!(start_request(&mut tcp_hold).await, 401);
+            expect_busy(&mut tokio::net::UnixStream::connect(socket).await.unwrap()).await;
+            expect_busy(&mut tokio::net::TcpStream::connect(tcp).await.unwrap()).await;
+            drop((unix_hold, tcp_hold));
+            stop.send(()).unwrap();
+            service.await.unwrap().unwrap();
+        })
+        .await
+        .expect("both listeners answer and drain");
+    }
+
+    #[tokio::test]
     async fn product_gateway_closes_listeners_and_flushes_an_accepted_call_during_drain() {
         use std::io::Read as _;
 
@@ -389,10 +469,16 @@ mod tests {
         let socket = state.config.socket.clone();
         let running = Arc::clone(&state);
         let service = tokio::spawn(async move {
-            run(Arc::clone(&running), server, &lock, async {
-                running.shutdown.notified().await;
-                Ok(())
-            })
+            run(
+                Arc::clone(&running),
+                server,
+                &lock,
+                async {
+                    running.shutdown.notified().await;
+                    Ok(())
+                },
+                [MAX_UNIX_CONNECTIONS as usize, MAX_TCP_CONNECTIONS as usize],
+            )
             .await
         });
         let tcp = tokio::time::timeout(Duration::from_secs(5), async {

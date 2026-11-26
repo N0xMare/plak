@@ -132,4 +132,32 @@ mod tests {
         }
         Ok(())
     }
+
+    #[test]
+    fn group_writable_parent_blocks_sweep_and_fresh_writer_can_publish() -> std::io::Result<()> {
+        use std::io::Write as _;
+        let root = tempfile::tempdir()?;
+        let directory = File::open(root.path())?;
+        let stage = root.path().join(".stage.writer");
+        let mut writer = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&stage)?;
+        directory.set_permissions(fs::Permissions::from_mode(0o770))?;
+        sweep_before(&directory, |name| name == ".stage.writer", i64::MAX);
+        assert!(
+            stage.is_file(),
+            "even old-looking files in a shared directory must stay"
+        );
+        directory.set_permissions(fs::Permissions::from_mode(0o700))?;
+        std::thread::scope(|scope| {
+            scope.spawn(|| sweep_at(&directory, |name| name == ".stage.writer"));
+            writer.write_all(b"new complete value")
+        })?;
+        let published = root.path().join("published");
+        fs::rename(stage, &published)?;
+        assert_eq!(fs::read(published)?, b"new complete value");
+        Ok(())
+    }
 }

@@ -2699,6 +2699,29 @@ fn git_attribute_scan_covers_nested_worktree_index_head_and_candidate() {
 }
 
 #[test]
+fn git_attribute_scan_refuses_unterminated_quotes_and_alternate_trees() {
+    let repo = git_repo();
+    let root = repo.path();
+    let file = root.join(".gitattributes");
+    std::fs::write(&file, b"\"foo filter=synthetic\n").unwrap();
+    assert!(
+        git::reject_configured_git_filters(root, None)
+            .unwrap_err()
+            .detail
+            .contains("filter=synthetic")
+    );
+    std::fs::write(&file, b"\"foo filter=synthetic\" -filter\n").unwrap();
+    git::reject_configured_git_filters(root, None).unwrap();
+    git_in(root, &["config", "attr.tree", "HEAD"]);
+    assert!(
+        git::reject_configured_git_filters(root, None)
+            .unwrap_err()
+            .detail
+            .contains("attr.tree")
+    );
+}
+
+#[test]
 fn git_attribute_scan_skips_ignored_directories_and_submodules() {
     let repo = git_repo();
     let root = repo.path();

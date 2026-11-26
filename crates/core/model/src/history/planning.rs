@@ -942,13 +942,19 @@ fn is_canonical_compaction_summary(segment: &HistorySegment) -> bool {
 /// Whether this is a standalone offline placeholder or image-residency notice.
 /// Unlike a paid summary, the notice is authored by the harness.
 #[must_use]
-pub fn is_placeholder_notice_segment(segment: &HistorySegment) -> bool {
-    is_canonical_compaction_summary(segment)
-        && segment.items()[0].provenance() == crate::Provenance::Instruction
-        && matches!(
-            segment.items()[0].blocks(),
-            [ContentBlock::Compaction(block)] if block.native_item().is_none()
-        )
+pub fn is_placeholder_notice_segment(segment: &HistorySegment, position: usize) -> bool {
+    if !is_canonical_compaction_summary(segment) {
+        return false;
+    }
+    let item = &segment.items()[0];
+    matches!(
+        item.blocks(),
+        [ContentBlock::Compaction(block)]
+            if block.native_item().is_none() && block.native_binding().is_none()
+                && (item.provenance() == crate::Provenance::Instruction
+                    || (position > 0 && item.provenance() == crate::Provenance::ModelOutput
+                        && block.summary() == crate::PLACEHOLDER_NOTICE_LINE))
+    )
 }
 
 fn is_nonleading_placeholder_notice(source: &ConversationView, position: usize) -> bool {
@@ -957,7 +963,7 @@ fn is_nonleading_placeholder_notice(source: &ConversationView, position: usize) 
             .history()
             .segments()
             .get(position)
-            .is_some_and(is_placeholder_notice_segment)
+            .is_some_and(|segment| is_placeholder_notice_segment(segment, position))
 }
 
 // Native successors place retained instructions before their sole bound item,
@@ -980,7 +986,7 @@ fn prior_compaction_position(source: &ConversationView) -> Option<usize> {
     let [ContentBlock::Compaction(block)] = segment.items()[0].blocks() else {
         return None;
     };
-    if is_placeholder_notice_segment(segment) {
+    if is_placeholder_notice_segment(segment, position) {
         return Some(position);
     }
     (block.native_item().is_some()

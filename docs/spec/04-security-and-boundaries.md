@@ -730,17 +730,21 @@ Every such step is built by one constructor that:
 
 The adopt diff passes `--no-ext-diff --no-textconv`, so a configured external
 diff driver or textconv filter neither runs nor alters the landed bytes.
-Before a snapshot, mint or adopt can use a filter, its preflight inspects
+Git-backed workspace filter preflight requires Git 2.44 or later. Before a
+snapshot, mint or adopt can use a filter, its preflight inspects
 the common `info/attributes`, configured attribute files, the index,
 all regular `.gitattributes` blobs in both `HEAD` and any candidate tree,
 and working-tree attribute files along paths that are tracked or not
 excluded by Git. Ignored-only directory trees and submodule interiors
 are outside the superproject scan. With a system or global driver configured,
-preflight also inspects Git's system and global attribute files. Inspection
-has size, listing, blob-count and time limits; a limit or an unreadable
+preflight also inspects Git's system and global attribute files. Any configured
+`attr.tree` is refused. Listings are streamed under per-entry and time limits,
+not a total pathname byte limit. Attribute files and distinct blobs also have
+inspection limits; a limit or an unreadable
 required source is a refusal, never evidence that no filter applies.
 Worktree dirt and divergence reads refuse repository-configured drivers and
-use the attribute preflight when a system or global driver could be invoked.
+check effective worktree and index attributes when a system or global driver
+could be invoked; they do not enumerate committed trees.
 They do not inspect submodule worktree dirt. Superproject operations do not
 recurse into submodules.
 Tree namespace ownership markers live under the repository's
@@ -1690,6 +1694,8 @@ whose modification and status-change times have both aged past the grace
 period, unless an exclusive publication lock already excludes all writers.
 It never follows links, reads staged data or removes published names.
 A failed or incomplete sweep does not block publication.
+Each pass starts at the beginning of the directory; stale files beyond the
+entry bound can remain if earlier entries keep filling the inspection window.
 
 The native subscription dialects share the local custody retry, Ready-lease
 and refresh-settlement loops in `plakous-auth`. Refresh eligibility reads the

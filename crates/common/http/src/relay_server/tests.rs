@@ -1289,14 +1289,16 @@ async fn header_read_timeout_and_body_timeout_bound_stalled_callers() {
         super::RELAY_BUFFER_BUDGET_BYTES,
         "chunked body must not reserve 32 MiB before bytes arrive"
     );
-    let mut reply = vec![0_u8; 4096];
-    let n = tokio::time::timeout(Duration::from_secs(2), client_io.read(&mut reply))
+    let mut reply = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), client_io.read_to_end(&mut reply))
         .await
         .expect("stalled chunked body must time out promptly")
         .unwrap();
-    let text = String::from_utf8_lossy(&reply[..n]);
+    let text = String::from_utf8_lossy(&reply);
     assert!(
-        text.starts_with("HTTP/1.1 408") && !text.contains("plak-gateway-error"),
+        text.starts_with("HTTP/1.1 408")
+            && text.contains("plak-gateway-error: busy")
+            && text.contains(r#""gateway_error":{"code":"busy","retry_after_ms":500}"#),
         "expected refusal on body timeout, got: {text}"
     );
     drop(client_io);
