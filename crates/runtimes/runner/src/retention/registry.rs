@@ -273,12 +273,13 @@ impl Registry {
         instance: &str,
         request_id: &str,
     ) -> Vec<Delegation> {
+        // Final job consumption may race the host's receipt acknowledgement.
+        // An empty inventory cannot prove that the host accepted the answer.
         self.entries(host, None)
             .into_iter()
             .filter(|entry| {
                 entry.holder == instance
                     && !entry.inventory.lost
-                    && !entry.inventory.jobs.is_empty()
                     && entry.controls.iter().any(|id| id.as_str() == request_id)
             })
             .collect()

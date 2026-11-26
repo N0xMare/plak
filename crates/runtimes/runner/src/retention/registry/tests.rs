@@ -215,7 +215,7 @@ fn retention_observed_occupancy_deduplicates_and_cannot_revive_consumed_terminal
 }
 
 #[test]
-fn retention_review_control_ack_targets_only_live_nonempty_relays_for_that_id() {
+fn control_ack_targets_owned_live_relays_even_after_final_job_consumption() {
     let (_root, registry, scope, line, to) = fixture();
     for index in 0..4 {
         let mut other = line.clone();
@@ -238,23 +238,33 @@ fn retention_review_control_ack_targets_only_live_nonempty_relays_for_that_id() 
             registry.lose(&scope, &other.origin, &to).unwrap();
         }
         if index == 2 {
+            let sessions = other
+                .jobs
+                .iter()
+                .map(|job| job.session.clone())
+                .collect::<Vec<_>>();
             registry
-                .update(&scope, &other.origin, &to, Vec::new(), 2)
+                .acknowledged(&scope, &other.origin, &to, &sessions)
                 .unwrap();
         }
     }
+    let registry = Registry::open(registry.path.parent().unwrap()).unwrap();
     let targets = registry.control_targets("home", "receiver", "relayed");
-    assert_eq!(targets.len(), 1);
+    assert_eq!(targets.len(), 2);
     assert_eq!(targets[0].inventory.origin.instance, id("original-0"));
-    registry
-        .control_receipt(
-            &scope,
-            &targets[0].inventory.origin,
-            &to,
-            &id("relayed"),
-            ControlReceipt::Acknowledged,
-        )
-        .unwrap();
+    assert_eq!(targets[1].inventory.origin.instance, id("original-2"));
+    assert_eq!(targets[1].inventory.jobs, []);
+    for target in targets {
+        registry
+            .control_receipt(
+                &scope,
+                &target.inventory.origin,
+                &to,
+                &id("relayed"),
+                ControlReceipt::Acknowledged,
+            )
+            .unwrap();
+    }
     let reopened = Registry::open(registry.path.parent().unwrap()).unwrap();
     assert_eq!(
         reopened

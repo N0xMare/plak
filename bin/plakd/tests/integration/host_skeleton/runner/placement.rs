@@ -103,10 +103,16 @@ impl Pair {
             }}}, "finish":"tool_calls"},
             {"output":{"text":"child done"}}
         ]})).unwrap()).unwrap();
+        let windows = plakous::runner::ClientWindows::default();
         self.host.write_script(&json!({
             "version":1, "tree":true, "durable_tree":true, "repeat_last_step":true,
             "product_child_script":child,
-            "runner_windows":{"read_ms":1500,"effect_ms":2500,"ping_ms":75,"dead_ms":500},
+            "runner_windows":{
+                "read_ms":windows.read.as_millis(),
+                "effect_ms":windows.effect.as_millis(),
+                "ping_ms":250,
+                "dead_ms":2000
+            },
             "steps":steps
         }));
         let host = self.start();
@@ -306,6 +312,8 @@ fn cross_runner_child_fork_runs_holds_seals_and_adopts() {
     assert_eq!(child_dispatches, 1);
     paused.resume();
     write_cut_marker(&pair.cuts.join("before-answer.release"), b"release");
+    client.wait_for_row(&session, |row| !row.needs_operator);
+    wait_for(|| !tree(&pair, &node).candidates().is_empty());
     client.prompt(18, attachment, "wait and adopt", "child adopted");
     let results = tool_results(&pair.host, &session, 7);
     let row = &results[5]["agents"][0];

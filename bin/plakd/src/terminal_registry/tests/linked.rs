@@ -255,6 +255,10 @@ async fn operator_host_renewal_keeps_controller_and_unreachable_close_keeps_pin(
 
 #[tokio::test]
 async fn operator_host_shutdown_cleans_healthy_runner_while_another_operation_stalls() {
+    use std::future::Future as _;
+    use std::task::Poll;
+    use std::time::Duration;
+
     let (directory, registry, count) = fixture();
     let workspace = directory.path().join("workspace");
     std::fs::create_dir(&workspace).unwrap();
@@ -269,17 +273,30 @@ async fn operator_host_shutdown_cleans_healthy_runner_while_another_operation_st
     retained.runner = "stalled".into();
     retained.instance = client.instance();
     retained.key.terminal_id = id("stalled".into()).unwrap();
-    registry.reserve(retained, count.hold().unwrap()).unwrap();
+    let stalled = registry.reserve(retained, count.hold().unwrap()).unwrap();
     let _stalled = registry
         .namespace_operation("stalled", &registry.namespace(&owner.principal).unwrap())
         .await;
-    assert_eq!(
-        registry.shutdown(std::time::Duration::from_secs(3)).await,
-        1
-    );
-    assert!(!registry.lock().entries[&view.handle.identity].pinned);
+    // PTY cleanup needs real time for process scans. Test the host's deadline
+    // separately, after observing the healthy runner's cleanup proof.
+    let budget = Duration::from_secs(30);
+    let mut shutdown = std::pin::pin!(registry.shutdown(budget));
+    std::future::poll_fn(|cx| {
+        assert!(shutdown.as_mut().poll(cx).is_pending());
+        if registry.lock().entries[&view.handle.identity].pinned {
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
+    })
+    .await;
     assert_eq!(count.get(), 1);
     assert!(!service.operator_terminals().unwrap().has_live_terminals());
+    assert!(!registry.lock().entries[&stalled].lost);
+    tokio::time::pause();
+    tokio::time::advance(budget).await;
+    assert_eq!(shutdown.await, 1);
+    assert!(registry.lock().entries[&stalled].lost);
     client.disconnect();
     serving.await.unwrap();
 }
