@@ -414,6 +414,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             "PLAK_TEST_SESSION_LEASE_SECONDS",
             "PLAK_TEST_CELL_HELLO_MS",
             "PLAK_TEST_HOST_IDLE_EXIT_SECONDS",
+            "PLAK_TEST_OWNER_LOCK",
             "PLAK_PRINT_PROMPT_PINS",
             "PLAK_UPDATE_GOLDENS",
             "PLAK_UPDATE_BINDING_CONTRACTS",

@@ -42,6 +42,10 @@ pub(super) fn select(plan: &ChildRunnerPlan) -> Result<(), String> {
         )
         .env("HOME", &plan.home)
         .env("PLAK_HOME", &plan.home)
+        .envs(
+            super::hook_environment(super::lifetime::OWNER_LOCK)
+                .map(|path| (super::lifetime::OWNER_LOCK, path)),
+        )
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null());

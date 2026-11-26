@@ -558,7 +558,7 @@ struct Paired {
     id: String,
     path: String,
     link: PathBuf,
-    daemon: std::process::Child,
+    daemon: Child,
 }
 
 impl Paired {

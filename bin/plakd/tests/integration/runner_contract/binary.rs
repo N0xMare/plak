@@ -48,11 +48,15 @@ fn runner_binary_exec_preserves_exact_native_triples_and_pairing_admission() {
         format!("roots = [{work:?}]\npath = \"/usr/bin:/bin\"\nhosts = [\"{host}\"]\n"),
     )
     .unwrap();
+    let template = plak_command(&home);
     let _daemon = Daemon(
         Command::new(&image)
             .args(["runner", "serve"])
-            .env("HOME", &home)
-            .env("PLAK_HOME", &home)
+            .envs(
+                template
+                    .get_envs()
+                    .filter_map(|(key, value)| value.map(|value| (key, value))),
+            )
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()

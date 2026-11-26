@@ -224,10 +224,12 @@ fn host_install_running_manager_places_the_daemon_outside_the_host_unit() -> Tes
 
 #[cfg(feature = "test-support")]
 fn host_lifecycle(managed: bool) -> TestResult {
+    use super::daemon_lifetime::Lifetime;
     use super::offline_support::TestChild;
     use std::process::Stdio;
     let mut fixture = Fixture::new()?;
     let argv = host_argv(&mut fixture, managed)?;
+    let _lifetime = Lifetime::new(fixture.root.path());
     let _gateway = super::gateway_process::GatewayProcess::start(
         Command::new(fixture.home.join(".local/bin/plakd-gateway"))
             .env_clear()
@@ -242,6 +244,7 @@ fn host_lifecycle(managed: bool) -> TestResult {
         Command::new(&argv[0])
             .args(&argv[1..])
             .current_dir(&fixture.home)
+            .envs([Lifetime::environment(fixture.root.path())])
             .env("UNRELATED_SECRET", "must-not-be-copied")
             .env("SHELL", fixture.home.join(".local/bin/login-shell"))
             .stdin(Stdio::null())

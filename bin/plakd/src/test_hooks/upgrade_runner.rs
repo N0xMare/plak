@@ -36,8 +36,15 @@ fn matches_image(name: &str) -> bool {
 }
 
 pub(crate) fn upgrade_runner_environment() -> Vec<(&'static str, OsString)> {
-    [CANDIDATE, REVISION, PROTOCOL, NEXT, NEXT_REVISION]
-        .into_iter()
-        .filter_map(|name| hook_environment(name).map(|value| (name, value)))
-        .collect()
+    [
+        CANDIDATE,
+        REVISION,
+        PROTOCOL,
+        NEXT,
+        NEXT_REVISION,
+        super::lifetime::OWNER_LOCK,
+    ]
+    .into_iter()
+    .filter_map(|name| hook_environment(name).map(|value| (name, value)))
+    .collect()
 }

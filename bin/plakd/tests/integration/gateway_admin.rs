@@ -29,6 +29,7 @@ use plakous::gateway::{
 };
 use plakous::subscriptions::{NativeProvider, NativeSubscriptions};
 
+use super::daemon_lifetime::Lifetime;
 use super::offline_support::TestChild;
 
 const SUBSCRIPTIONS: [(&str, NativeProvider); 3] = [
@@ -41,6 +42,7 @@ struct GatewayFixture {
     relay: RelayClient,
     executor: plakous::application::ApplicationExecutor,
     process: TestChild,
+    _lifetime: Lifetime,
     root: tempfile::TempDir,
 }
 
@@ -67,6 +69,7 @@ impl GatewayFixture {
         let root = tempfile::Builder::new().prefix("gw").tempdir().unwrap();
         let base = root.path();
         fs::set_permissions(base, fs::Permissions::from_mode(0o700)).unwrap();
+        let lifetime = Lifetime::new(base);
         let home = base.join("home");
         fs::DirBuilder::new().mode(0o700).create(&home).unwrap();
         let socket = base.join("g.sock");
@@ -102,6 +105,7 @@ impl GatewayFixture {
         }
         serve
             .args(["gateway", "serve"])
+            .envs([Lifetime::environment(base)])
             .env("PLAK_TEST_GATEWAY_REVIEW_CLOCK", "1")
             .env(
                 "PLAK_TEST_FAULTS",
@@ -139,6 +143,7 @@ impl GatewayFixture {
             relay: RelayClient::new(GatewayEndpoint::Unix(socket), None).unwrap(),
             executor: plakous::application::ApplicationExecutor::new().unwrap(),
             process,
+            _lifetime: lifetime,
             root,
         }
     }

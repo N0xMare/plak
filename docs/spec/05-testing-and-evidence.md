@@ -309,7 +309,8 @@ gate does not qualify the supported musl platform.
 `tools/gate/test-tmpdir.sh`, `PLAK_HOME` (`$TMPDIR/plak-isolated-home`, mode
 0700), an empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`. Its shell and
 command forms also unset the test-hook overrides `PLAK_TEST_SESSION_LEASE_SECONDS`,
-`PLAK_TEST_CELL_HELLO_MS` and `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` and the provider keys `OPENAI_API_KEY`,
+`PLAK_TEST_CELL_HELLO_MS`, `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` and
+`PLAK_TEST_OWNER_LOCK` and the provider keys `OPENAI_API_KEY`,
 `XAI_API_KEY`, `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`, so an operator's
 exported key never reaches an offline test. Every form also puts
 `$TMPDIR/plak-test-jj`, which holds only a `jj` link to the jj the tools check
@@ -1899,6 +1900,11 @@ daemons before deleting the home. Signal delivery alone is not a join: a
 grandchild must no longer be able to run, even if its zombie PID is still
 visible. Failure injection targets the recorded owner, not a transient probe
 or redial successor. Teardown re-lists successors in its own home.
+Test-support binaries launched by daemon fixtures also watch an exclusive lock
+held by the fixture. Detached launches carry the same lock path, so killing a
+host still exercises recovery, but killing the test releases the lock even
+when its teardown cannot run. Binaries shipped without test support do not
+watch the lock.
 Signal tests wait for the fsynced provider-dispatch record, after installation
 of the signal watcher, not for an arbitrary elapsed interval.
 The tooling reference client starts the home-local runner as its own child

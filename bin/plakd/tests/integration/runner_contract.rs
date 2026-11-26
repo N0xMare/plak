@@ -20,6 +20,20 @@ use plakous::runner::{ClientWindows, ConnectError, RunnerClient};
 use plakous::tools::runner::{RunnerCall, RunnerFailure, RunnerLink as _, RunnerVerb};
 
 mod binary;
+#[cfg(all(target_os = "linux", feature = "test-support"))]
+mod lifetime;
+
+struct RunnerFixture {
+    #[cfg(feature = "test-support")]
+    _lifetime: super::daemon_lifetime::Lifetime,
+    root: tempfile::TempDir,
+}
+
+impl RunnerFixture {
+    fn path(&self) -> &Path {
+        self.root.path()
+    }
+}
 
 fn plak_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_plakd"))
@@ -32,10 +46,15 @@ fn plak_command(home: &Path) -> Command {
         .env("PLAK_HOME", home)
         .env("HOME", home)
         .current_dir(home);
+    #[cfg(feature = "test-support")]
+    command.envs(
+        home.parent()
+            .map(super::daemon_lifetime::Lifetime::environment),
+    );
     command
 }
 
-fn isolated_home() -> (tempfile::TempDir, PathBuf) {
+fn isolated_home() -> (RunnerFixture, PathBuf) {
     let base = std::env::temp_dir();
     std::fs::create_dir_all(&base).unwrap();
     // Credential storage refuses a home path with `..` in it.
@@ -47,7 +66,12 @@ fn isolated_home() -> (tempfile::TempDir, PathBuf) {
     let home = temporary.path().join("home");
     std::fs::create_dir(&home).unwrap();
     std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
-    (temporary, home)
+    let fixture = RunnerFixture {
+        #[cfg(feature = "test-support")]
+        _lifetime: super::daemon_lifetime::Lifetime::new(temporary.path()),
+        root: temporary,
+    };
+    (fixture, home)
 }
 
 /// One host link through `plakd runner connect --stdio`, as ssh would run it.
@@ -65,16 +89,12 @@ async fn selected_bridge(
     version: VersionTriple,
     binary: Option<&str>,
 ) -> (Result<RunnerClient, ConnectError>, tokio::process::Child) {
-    let mut command = tokio::process::Command::new(plak_bin());
+    let mut command = tokio::process::Command::from(plak_command(home));
     command.args(["runner", "connect", "--stdio"]);
     if let Some(binary) = binary {
         command.args(["--binary", binary]);
     }
     let mut child = command
-        .env("PLAK_TEST_STORAGE_CAPACITY", "available")
-        .env("PLAK_HOME", home)
-        .env("HOME", home)
-        .current_dir(home)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -197,12 +217,8 @@ async fn an_unpaired_host_fails_at_once(home: &Path, work: &Path, runner: Versio
 async fn a_refused_link_ends_the_bridge_at_once(home: &Path, runner: VersionTriple) {
     use plakous::runner::protocol::{HostFrame, frame::encode};
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    let mut child = tokio::process::Command::new(plak_bin())
+    let mut child = tokio::process::Command::from(plak_command(home))
         .args(["runner", "connect", "--stdio"])
-        .env("PLAK_TEST_STORAGE_CAPACITY", "available")
-        .env("PLAK_HOME", home)
-        .env("HOME", home)
-        .current_dir(home)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

@@ -5,6 +5,9 @@ mod cli_contract;
 mod client_fixture_contract;
 #[cfg(all(feature = "test-support", feature = "maintainer"))]
 mod crash_sweep;
+#[cfg(feature = "test-support")]
+#[path = "support/lifetime.rs"]
+mod daemon_lifetime;
 mod diagnostics_contract;
 #[cfg(feature = "test-support")]
 mod gateway_admin;

@@ -6,12 +6,14 @@
 )]
 use serde_json::{Value, json};
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
-use std::os::unix::fs::PermissionsExt as _;
+use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+use super::daemon_lifetime::Lifetime;
 pub(super) const WAIT: Duration = Duration::from_secs(45);
 
 pub(super) fn image_command(fixture: &Fixture, image: &Path) -> Command {
@@ -172,6 +174,7 @@ pub(super) struct Fixture {
     session_lease_seconds: Option<u64>,
     ledger_retirement_high_water: AtomicUsize,
     gateway: OnceLock<super::gateway_process::GatewayProcess>,
+    _lifetime: Lifetime,
 }
 
 static FIXTURE_ORDINAL: AtomicU32 = AtomicU32::new(0);
@@ -185,7 +188,12 @@ impl Fixture {
         // Keep socket paths short even inside an invocation's run directory.
         let root = std::env::temp_dir().join(format!("e{:x}-{ordinal:x}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&root)
+            .expect("fixture root");
         let fixture = Self {
+            _lifetime: Lifetime::new(&root),
             root,
             workspace_override: None,
             preserve: AtomicBool::new(false),
@@ -194,8 +202,6 @@ impl Fixture {
             gateway: OnceLock::new(),
         };
         std::fs::create_dir_all(fixture.home().join("agents")).expect("home");
-        std::fs::set_permissions(&fixture.root, std::fs::Permissions::from_mode(0o700))
-            .expect("gateway socket directory mode");
         std::fs::create_dir_all(fixture.workspace()).expect("workspace");
         fixture.write_config(
             "[root]\nagent = \"lead\"\n\n[orchestration]\nsubagents = false\n\n[compaction]\nenabled = true\n",
@@ -347,6 +353,7 @@ impl Fixture {
             .env("PLAK_TEST_RUNNER_DETACHED", "1")
             .env("PLAK_TEST_MODEL", "offline-loopback-v1")
             .env("PLAK_TEST_SCRIPT", self.script())
+            .envs([Lifetime::environment(&self.root)])
             .env("PLAK_TEST_EVIDENCE", self.root.join("evidence.jsonl"));
         if let Some(seconds) = self.session_lease_seconds {
             command.env("PLAK_TEST_SESSION_LEASE_SECONDS", seconds.to_string());
@@ -1221,7 +1228,7 @@ impl ChildRunner {
         pid
     }
 
-    pub(super) fn start_daemon_from(&self, image: &Path) -> Child {
+    pub(super) fn start_daemon_from(&self, image: &Path) -> TestChild {
         let log = std::fs::File::create(self.home.join("serve-harness.log")).unwrap();
         let mut command = Command::new(image);
         command
@@ -1231,12 +1238,12 @@ impl ChildRunner {
             .env("HOME", &self.home)
             .env("XDG_STATE_HOME", self.home.join("os-state"))
             .env("PLAK_HOME", &self.home)
+            .envs(self.pid_file.parent().map(Lifetime::environment))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(log);
         forward_coverage_environment(&mut command);
-        std::os::unix::process::CommandExt::process_group(&mut command, 0);
-        let mut child = command.spawn().expect("runner daemon");
+        let mut child = TestChild::spawn(&mut command);
         let pid = i32::try_from(child.id()).unwrap();
         std::fs::write(&self.pid_file, pid.to_string()).unwrap();
         let deadline = Instant::now() + WAIT;

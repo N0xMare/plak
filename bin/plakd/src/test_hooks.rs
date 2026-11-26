@@ -283,6 +283,7 @@ pub(crate) fn profile_route_ready(
 
 pub(crate) mod client_fixtures;
 mod host;
+pub(crate) mod lifetime;
 mod runner;
 mod stop_notice;
 mod upgrade_runner;
