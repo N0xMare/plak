@@ -1,5 +1,6 @@
 //! Control-socket adapter for indexed host/daemon crash sweeps.
 
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use super::*;
@@ -51,7 +52,7 @@ pub(crate) fn run(
     let mut records = Vec::new();
     let driven = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if prompts {
-            records = drive(
+            (records, _) = drive(
                 &host,
                 session,
                 true,
@@ -91,7 +92,7 @@ fn drive(
     busy: bool,
     answer: &str,
     unknown_jobs: &[u32],
-) -> Vec<String> {
+) -> (Vec<String>, BTreeSet<String>) {
     let mut client = Client::connect(host);
     let row = client
         .rows(1)
@@ -99,6 +100,7 @@ fn drive(
         .find(|row| row.session == session)
         .unwrap();
     let mut records = Vec::new();
+    let mut unknown = BTreeSet::new();
     client.send(&ClientFrame::Request {
         id: 2,
         op: Op::Attach { node: row.node },
@@ -109,7 +111,10 @@ fn drive(
                 id: 2,
                 outcome: Outcome::Ok(Answer::Attached { attachment }),
             } => break attachment,
-            HostFrame::Event { observation, .. } => project(&observation, &mut records),
+            HostFrame::Event { observation, .. } => {
+                unknown.extend(outcome_unknown_jobs(&observation));
+                project(&observation, &mut records);
+            }
             other => assert!(
                 !matches!(other, HostFrame::Response { id: 2, .. }),
                 "attach refused: {other:?}"
@@ -133,12 +138,6 @@ fn drive(
     let mut answered = answer.is_empty();
     let mut settled = answer.is_empty();
     let mut idle = false;
-    let mut unknown = records
-        .iter()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .filter(|row| row["kind"] == "job_terminal" && row["status"] == "outcome_unknown")
-        .filter_map(|row| row["job_id"].as_str().map(str::to_owned))
-        .collect::<std::collections::BTreeSet<_>>();
     loop {
         if let HostFrame::Event { observation, .. } = client.next() {
             answered |= format!("{observation:?}").contains(answer);
@@ -147,12 +146,7 @@ fn drive(
                 observation,
                 plakous_host_protocol::SessionObservation::SetBusy(false)
             );
-            if let plakous_host_protocol::SessionObservation::JobTerminal { job_id, status, .. } =
-                &observation
-                && status == "outcome_unknown"
-            {
-                unknown.insert(job_id.clone());
-            }
+            unknown.extend(outcome_unknown_jobs(&observation));
             project(&observation, &mut records);
             if answered
                 && (busy
@@ -166,7 +160,28 @@ fn drive(
             }
         }
     }
-    records
+    (records, unknown)
+}
+
+/// The jobs `observation` reports as `OutcomeUnknown`. The live terminal
+/// event reaches only an attachment admitted before reconciliation ends; a
+/// later attachment sees the outcome in its attach-time process state.
+fn outcome_unknown_jobs(
+    observation: &plakous_host_protocol::SessionObservation<PlakExtension>,
+) -> Vec<String> {
+    use plakous_host_protocol::SessionObservation;
+    use plakous_host_protocol::views::ProcessStatus;
+    match observation {
+        SessionObservation::JobTerminal { job_id, status, .. } if status == "outcome_unknown" => {
+            vec![job_id.clone()]
+        }
+        SessionObservation::Processes { views, .. } => views
+            .iter()
+            .filter(|view| view.status == ProcessStatus::OutcomeUnknown)
+            .filter_map(|view| view.id.rsplit_once(':').map(|(_, job)| job.to_owned()))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn project(
@@ -200,12 +215,14 @@ fn finish(host: &mut Host) -> std::process::ExitStatus {
     }
 }
 
+/// Restarts the host over `fixture` and drives `session` to rest, returning
+/// the jobs it reported as `OutcomeUnknown`.
 pub(crate) fn recover(
     fixture: &Fixture,
     session: &str,
     answer: &str,
     unknown_jobs: &[u32],
-) -> AgentOutcome {
+) -> BTreeSet<String> {
     use plakous_hosted::runtime::RootStanding;
     let store = plakd::store::session_records::SqliteSessionStore::new(
         plakd::home::paths::PlakPaths::explicit(fixture.home()),
@@ -216,7 +233,7 @@ pub(crate) fn recover(
             | RootStanding::Continuing { held: false, .. }
     );
     let mut host = start(fixture);
-    let records = drive(
+    let (_, unknown) = drive(
         &host,
         session,
         false,
@@ -226,11 +243,7 @@ pub(crate) fn recover(
     );
     let status = finish(&mut host);
     assert!(status.success());
-    AgentOutcome {
-        status,
-        lines: records,
-        stderr: host.lines.try_iter().collect::<Vec<_>>().join("\n"),
-    }
+    unknown
 }
 
 pub(super) fn record_stop(fixture: &Fixture, session: &str) {
@@ -250,4 +263,42 @@ pub(super) fn record_stop(fixture: &Fixture, session: &str) {
             }),
         )
         .unwrap();
+}
+
+#[test]
+fn attach_time_process_state_reports_lost_jobs() {
+    use plakous_host_protocol::SessionObservation;
+    use plakous_host_protocol::views::{ProcessStatus, ProcessView};
+    let view = |job: u32, status| ProcessView {
+        id: format!("session:branch:p{job}"),
+        command: "sleep 300".into(),
+        owner: "root".into(),
+        started_at: 0,
+        elapsed_ms: 0,
+        status,
+        output: String::new(),
+    };
+    let processes = SessionObservation::<PlakExtension>::Processes {
+        views: vec![
+            view(1, ProcessStatus::OutcomeUnknown),
+            view(2, ProcessStatus::Running),
+            view(3, ProcessStatus::Exited(Some(0))),
+        ],
+        running: 1,
+    };
+    assert_eq!(outcome_unknown_jobs(&processes), ["p1"]);
+    let terminal = |status: &str| SessionObservation::<PlakExtension>::JobTerminal {
+        job_id: "p4".into(),
+        owner: "root".into(),
+        status: status.into(),
+        exit_code: None,
+        stop_reason: None,
+        elapsed_ms: 0,
+        output: String::new(),
+    };
+    assert_eq!(outcome_unknown_jobs(&terminal("outcome_unknown")), ["p4"]);
+    assert_eq!(
+        outcome_unknown_jobs(&terminal("exited")),
+        Vec::<String>::new()
+    );
 }

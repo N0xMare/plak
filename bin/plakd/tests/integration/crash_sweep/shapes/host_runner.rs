@@ -168,7 +168,7 @@ pub(in super::super) fn after_kill(
     } else {
         Vec::new()
     };
-    let first = crate::host_skeleton::sweep::recover(fixture, session, FOLLOWUP, &unknown_jobs);
+    let unknown = crate::host_skeleton::sweep::recover(fixture, session, FOLLOWUP, &unknown_jobs);
     let after = summary::read_converged(fixture);
     assert!(starts(fixture) <= 1, "recovery started the job again");
     if shape == "host_crash_mid_stop" {
@@ -188,15 +188,7 @@ pub(in super::super) fn after_kill(
     if shape == "runner_restart_unknown_host" {
         for job in before.jobs.iter().filter(|job| job["terminal"] == false) {
             let id = format!("p{}", job["number"].as_u64().unwrap());
-            assert!(
-                first
-                    .records()
-                    .iter()
-                    .any(|row| row["kind"] == "job_terminal"
-                        && row["job_id"] == id
-                        && row["status"] == "outcome_unknown"),
-                "a lost job was not OutcomeUnknown"
-            );
+            assert!(unknown.contains(&id), "a lost job was not OutcomeUnknown");
         }
     }
     let once = invariants::dispatches(fixture).len();
