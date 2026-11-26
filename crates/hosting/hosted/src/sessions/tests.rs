@@ -766,7 +766,7 @@ fn product_transcript_projection_is_bounded_without_touching_locator() {
     let mut oversized = bound_session("/work/oversized");
     oversized.append_transcript(TranscriptRow::assistant(format!(
         "{}tail",
-        "x".repeat(MAX_TRANSCRIPT_BYTES + 128)
+        "\"\t🦀".repeat(MAX_TRANSCRIPT_BYTES / 6)
     )));
     assert_eq!(oversized.transcript.len(), 1);
     let row = &oversized.transcript[0];
@@ -776,6 +776,11 @@ fn product_transcript_projection_is_bounded_without_touching_locator() {
     };
     assert!(text.starts_with(TRANSCRIPT_TRUNCATION_MARKER));
     assert!(text.ends_with("tail"));
+    let mut snapshot = plakous_host_protocol::views::presentation::PresentationSnapshot::empty(1);
+    snapshot.items = oversized.transcript.items().clone();
+    let pages = plakous_host_protocol::wire::page_snapshot(snapshot, 1).unwrap();
+    assert_eq!(pages.len(), 1);
+    assert_eq!(pages[0].items[0].row, *row);
 }
 
 #[test]

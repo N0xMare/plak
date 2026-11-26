@@ -336,6 +336,7 @@ impl Driver {
         response: ModelResponse,
         last_round_usage: Option<Usage>,
         continuation_baton: Option<OperationId>,
+        segment: Option<HistorySegment>,
     ) -> Result<SettledRound, AgentError> {
         if matches!(disposition, HostedRoundDisposition::ServerPaused) {
             let (model_admission_reference, policy_reference) = self.continuation_bindings();
@@ -388,7 +389,7 @@ impl Driver {
                 },
                 continuation,
                 Some((
-                    &response,
+                    segment,
                     provider_artifact_transition(provider_plan, &response),
                 )),
             ))
@@ -408,6 +409,7 @@ impl Driver {
                 last_round_usage,
                 continuation_baton,
                 provider_artifact_transition(provider_plan, &response),
+                segment,
             ))
             .await?;
             let steering_pending = !self.steering.is_empty();
@@ -437,6 +439,7 @@ impl Driver {
             command.operation_id,
             TurnConsequence::Completed {
                 response: &response,
+                segment,
                 artifact: provider_artifact_transition(provider_plan, &response),
             },
             command.shared.usage(),

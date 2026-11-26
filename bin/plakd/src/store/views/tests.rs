@@ -91,6 +91,101 @@ fn queue_command_join_does_not_decode_transcript_rows() {
 }
 
 #[test]
+fn runner_probe_reads_stop_and_placement_without_decoding_history() {
+    use plakous_hosted::sessions::projector::{RootInterruptCause, RootStopAnchor};
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+
+    let root = tempdir().unwrap();
+    let (mut store, id) = store_with_session(root.path());
+    let mut views = views_at(1, &[]);
+    let locator: SessionLocator = format!("{}/{}/{}", uuid(1), uuid(2), uuid(3))
+        .parse()
+        .unwrap();
+    views.state.head = Some(plakous::sessions::feed::FeedLocator {
+        session_id: locator.session_id(),
+        branch_id: locator.branch_id(),
+        checkpoint_id: locator.checkpoint_id(),
+    });
+    store
+        .commit_projection_views(
+            &id,
+            &ViewWrites::between(&SessionViews::empty(), &views),
+            &views.state,
+        )
+        .unwrap();
+    store
+        .write_root_loss_at_cursor(
+            &id,
+            &plakous_hosted::sessions::projector::RootLossIntent::Interrupt(RootInterrupt {
+                anchor: RootStopAnchor::Turn {
+                    turn_id: "turn-1".to_owned(),
+                },
+                cause: RootInterruptCause::Stopped,
+            }),
+        )
+        .unwrap();
+    store
+        .connection
+        .authorizer(Some(|ctx: AuthContext<'_>| {
+            if matches!(
+                ctx.action,
+                AuthAction::Read {
+                    table_name: "transcript_rows" | "operator_notices" | "prompt_history",
+                    ..
+                }
+            ) {
+                Authorization::Deny
+            } else {
+                Authorization::Allow
+            }
+        }))
+        .unwrap();
+    assert!(
+        store.load(&id).is_err(),
+        "fixture blocks a full record read"
+    );
+    let placement = store.runner_placement_rows().unwrap();
+    assert_eq!(placement.len(), 1);
+    assert_eq!(placement[0].workspace, Path::new("/work"));
+    assert_eq!(placement[0].runner_id, "local");
+    assert!(placement[0].recorded_stop);
+    let stops = store.runner_stop_rows().unwrap();
+    assert_eq!(stops.len(), 1);
+    assert_eq!(stops[0].session_id, id);
+    assert_eq!(stops[0].root_stop, Some((locator, 1, 0)));
+}
+
+#[test]
+#[ignore = "times runner probe reads against a copy of a synthetic store"]
+fn measure_runner_probe_read_on_large_store() {
+    let home = std::env::var_os("PLAK_SYNTHETIC_PROBE_HOME").unwrap();
+    let paths = PlakPaths::explicit(PathBuf::from(home));
+    let mut store = ProductStore::open(&paths).unwrap();
+    let ids = store.session_ids().unwrap();
+    assert!(!ids.is_empty(), "expected a populated synthetic store");
+    let rows: i64 = store
+        .connection
+        .query_row("SELECT count(*) FROM transcript_rows", [], |row| row.get(0))
+        .unwrap();
+    let bytes = std::fs::metadata(paths.product_database()).unwrap().len();
+    let start = std::time::Instant::now();
+    for id in &ids {
+        std::hint::black_box(store.load(id).unwrap());
+    }
+    let full = start.elapsed();
+    let start = std::time::Instant::now();
+    for _ in 0..20 {
+        assert_eq!(store.runner_placement_rows().unwrap().len(), ids.len());
+        assert_eq!(store.runner_stop_rows().unwrap().len(), ids.len());
+    }
+    let metadata = start.elapsed() / 20;
+    eprintln!(
+        "{bytes} product bytes, {} sessions, {rows} transcript rows: full load {full:?}; placement and stop reads {metadata:?}",
+        ids.len()
+    );
+}
+
+#[test]
 fn projected_root_count_uses_the_committed_header_without_loading_details() {
     let root = tempdir().unwrap();
     let (mut store, id) = store_with_session(root.path());

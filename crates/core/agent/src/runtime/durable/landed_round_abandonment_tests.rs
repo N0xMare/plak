@@ -17,6 +17,7 @@ pub(in crate::runtime::durable) enum ExtraCall {
     LocalDuplicateRequested,
     /// A call the provider already ran: a terminal answer.
     HostedCompleted,
+    OversizedResponse,
 }
 
 #[tokio::test]
@@ -30,7 +31,7 @@ async fn root_turn_closure_for_test_keeps_the_landed_round_accept_set() -> TestR
         let cut = cut_text_turn(extra).await?;
         let closure = root_turn_closure_for_test(&cut);
         match extra {
-            ExtraCall::None | ExtraCall::HostedCompleted => {
+            ExtraCall::None | ExtraCall::HostedCompleted | ExtraCall::OversizedResponse => {
                 assert!(matches!(closure?, Some(RootClosure::Complete(_))));
             }
             ExtraCall::LocalRequested => assert!(matches!(
@@ -59,6 +60,36 @@ async fn root_turn_closure_for_test_keeps_the_landed_round_accept_set() -> TestR
             Some(RootClosure::Abandon { claim: actual, .. }) if actual == claim
         ));
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_landed_terminal_with_oversized_output_recovers_without_replaying_it() -> TestResult {
+    use super::super::turn_recovery::{RootClosure, closure_for_test, root_turn_closure_for_test};
+    use crate::runtime::terminal::{DurableTerminalOutcome, decode_pending_terminal_record};
+
+    let cut = cut_text_turn(ExtraCall::OversizedResponse).await?;
+    let loaded = RuntimeCheckpointCodec::bundle(&cut, None)?.validated_checkpoint()?;
+    let Some(RootClosure::Complete(fold)) = root_turn_closure_for_test(&loaded)? else {
+        return Err("oversized terminal must have a local finish".into());
+    };
+    let (_, evidence) = fold.synthesized.ok_or("missing synthesized terminal")?;
+    let terminal = decode_pending_terminal_record(evidence.bytes()).ok_or("missing result")?;
+    let DurableTerminalOutcome::Failed(error) = terminal.outcome else {
+        return Err("oversized terminal reported a different outcome".into());
+    };
+    assert_eq!(
+        error.into_error()?.model_kind(),
+        Some(ModelErrorKind::OutputLimit)
+    );
+    let (history, abandoned) = closure_for_test(&loaded)?;
+    assert!(abandoned.is_none());
+    assert!(
+        history
+            .segments()
+            .iter()
+            .all(|segment| segment.canonical_bytes().len() < 1024)
+    );
     Ok(())
 }
 
@@ -177,10 +208,17 @@ pub(in crate::runtime::durable) async fn cut_text_turn(
                     ToolCorrelation::default(),
                     "{}",
                 )?;
-                let mut blocks = vec![ContentBlock::ToolCall(call.clone())];
-                if matches!(extra, ExtraCall::LocalDuplicateRequested) {
-                    blocks.push(ContentBlock::ToolCall(call));
-                }
+                let blocks = match extra {
+                    ExtraCall::OversizedResponse => vec![ContentBlock::Text(TextBlock::new(
+                        "\0".repeat(3 * 1024 * 1024),
+                        None,
+                    )?)],
+                    ExtraCall::LocalDuplicateRequested => vec![
+                        ContentBlock::ToolCall(call.clone()),
+                        ContentBlock::ToolCall(call),
+                    ],
+                    _ => vec![ContentBlock::ToolCall(call)],
+                };
                 let mut output = vec![ConversationItem::new(
                     EntryId::try_from(uuid::Uuid::from_u128(0xE6C_1002))?,
                     Actor::Assistant,

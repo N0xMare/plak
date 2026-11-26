@@ -60,6 +60,7 @@ pub(super) enum TurnConsequence<'a> {
     /// The final response, committed with its artifact transition.
     Completed {
         response: &'a ModelResponse,
+        segment: Option<HistorySegment>,
         artifact: ArtifactTransition,
     },
     /// A cancellation or failure; an `OutcomeUnknown` error records

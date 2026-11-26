@@ -163,7 +163,9 @@ async fn stopped_runtime() -> StoppedLine {
 }
 
 async fn stopped_runtime_named(operation: &str) -> StoppedLine {
-    use plakous_hosted::sessions::projector::{RootInterrupt, RootLossIntent, RootStopAnchor};
+    use plakous_hosted::sessions::projector::{
+        RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
+    };
     use plakous_offline_crash_harness::protocol::CrashBoundary;
     use plakous_offline_crash_harness::{BoundaryController, runtime_binding};
     let (temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();

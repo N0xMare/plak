@@ -12,7 +12,7 @@ use crate::runtime::Sender;
 use crate::runtime::admission::commit_session_update;
 use crate::runtime::logging::log_event;
 use crate::runtime::tools::{harvest_assistant_text, stash_tool_subjects_from_response};
-use crate::runtime::turn::flush_assistant_delta;
+use crate::runtime::turn::{flush_assistant_delta, send_assistant_delta};
 use crate::runtime::usage::record_operation_prepared_input;
 use crate::session_log::{SessionEvent, SessionLog};
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -162,7 +162,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                     let harvested = harvest_assistant_text(response);
                     if !harvested.is_empty() {
                         assistant.push_str(&harvested);
-                        let _ = events.send(ContentEvent::AssistantDelta(harvested));
+                        send_assistant_delta(events, harvested);
                         let _ = events.send(ContentEvent::AssistantDone);
                     }
                 }

@@ -568,9 +568,8 @@ fn marker_bytes() -> usize {
 /// the runtime's escapes undone), a tool row's detail (redacted, then
 /// [`MAX_TOOL_ACTIVITY_DETAIL_BYTES`](super::MAX_TOOL_ACTIVITY_DETAIL_BYTES)),
 /// a thinking row's text ([`MAX_THINKING_ACTIVITY_BYTES`]). A single row still
-/// larger than the whole byte bound keeps the tail of its text, behind
-/// [`TRANSCRIPT_TRUNCATION_MARKER`], sized so the marker row and the row still
-/// fit together. Only text-bearing rows can grow that large.
+/// larger than the snapshot-row byte bound keeps the tail of its text behind
+/// [`TRANSCRIPT_TRUNCATION_MARKER`]. Only text-bearing rows can grow that large.
 ///
 /// A bounded row is a fixed point: a cut never leaves text a second redaction
 /// would change. [`ProductTranscript::stored`] bounds every stored row again
@@ -604,7 +603,8 @@ pub(crate) fn bound_row(mut row: TranscriptRow) -> TranscriptRow {
         }
         _ => {}
     }
-    let limit = MAX_TRANSCRIPT_BYTES.saturating_sub(marker_bytes());
+    // Leave room for the keyed item envelope, not just the row itself.
+    let limit = plakous_host_protocol::wire::MAX_SNAPSHOT_ROW_BYTES - 1024;
     let size = row_bytes(&row);
     if size <= limit {
         return row;
@@ -617,14 +617,27 @@ pub(crate) fn bound_row(mut row: TranscriptRow) -> TranscriptRow {
         TranscriptRow::Notice(notice) => &mut notice.text,
         _ => return row,
     };
-    let overhead = size.saturating_sub(text.len());
+    let overhead = size.saturating_sub(text.chars().map(json_char_bytes).sum::<usize>());
     let payload = limit
         .saturating_sub(overhead)
-        .saturating_sub(TRANSCRIPT_TRUNCATION_MARKER.len() + 1);
-    let mut start = text.len().saturating_sub(payload);
-    while !text.is_char_boundary(start) {
-        start += 1;
+        .saturating_sub(TRANSCRIPT_TRUNCATION_MARKER.len() + 2);
+    let mut remaining = payload;
+    let mut start = text.len();
+    for (offset, ch) in text.char_indices().rev() {
+        let Some(next) = remaining.checked_sub(json_char_bytes(ch)) else {
+            break;
+        };
+        remaining = next;
+        start = offset;
     }
     *text = format!("{TRANSCRIPT_TRUNCATION_MARKER}\n{}", &text[start..]);
     row
+}
+
+fn json_char_bytes(ch: char) -> usize {
+    match ch {
+        '"' | '\\' | '\n' | '\r' | '\t' | '\u{08}' | '\u{0c}' => 2,
+        '\u{00}'..='\u{1f}' => 6,
+        _ => ch.len_utf8(),
+    }
 }

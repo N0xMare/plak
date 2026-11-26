@@ -3,16 +3,15 @@ use super::{
     AwaitToolBatchV2, CommitPlan, ContentBlock, ContinuationBindingReference, ContinuationRoot,
     ContinuationSteering, ContinuationToolSlot, ConversationItem, Driver, DurableAgentConfig,
     DurableOperationKind, DurableOperationRecord, DurableOperationState,
-    DurableOperationTransition, EntryId, EventContext, HistorySegmentKind, HostedRoundDisposition,
-    ModelError, ModelErrorKind, ModelErrorPhase, ModelResponse, OPERATION_BUDGET_WRAP_UP_NOTE,
-    OperationId, PromptCommand, Provenance, ProviderOutcome, RoundClassificationError,
-    RoundClassificationInput, RoundDecision, RoundRequest, RuntimeComponentKind,
-    RuntimeContinuation, SessionStoreError, SettledRound, TextBlock, ToolCallBlock, TurnId,
-    TurnResult, Usage, ValidatedRequestPlan, WorkingProjection,
+    DurableOperationTransition, EntryId, EventContext, HistorySegment, HistorySegmentKind,
+    HostedRoundDisposition, ModelError, ModelErrorKind, ModelErrorPhase, ModelResponse,
+    OPERATION_BUDGET_WRAP_UP_NOTE, OperationId, PromptCommand, Provenance, ProviderOutcome,
+    RoundClassificationError, RoundClassificationInput, RoundDecision, RoundRequest,
+    RuntimeComponentKind, RuntimeContinuation, SessionStoreError, SettledRound, TextBlock,
+    ToolCallBlock, TurnId, TurnResult, Usage, ValidatedRequestPlan, WorkingProjection,
     apply_completed_model_round_occupancy, cancelled_error, classify_round, operation_turn_id,
     output_limit_retry_eligible, output_limit_retry_note, provider_artifact_transition,
-    resolve_model_operation, response_segment, round_failure_action, runtime_component,
-    runtime_manifest_error,
+    resolve_model_operation, round_failure_action, runtime_component, runtime_manifest_error,
 };
 
 impl Driver {
@@ -26,6 +25,7 @@ impl Driver {
         usage: Option<Usage>,
         continuation_baton: Option<OperationId>,
         artifact: ArtifactTransition,
+        segment: Option<HistorySegment>,
     ) -> Result<(), AgentError> {
         let outcome = self.provider_outcome(Ok(response), usage, RoundDecision::Continue)?;
         let mut plan = self.commit_plan()?;
@@ -38,7 +38,7 @@ impl Driver {
         )?;
         drop(outcome);
         plan.finalize.insert(provider_operation);
-        plan.segments.extend(response_segment(response)?);
+        plan.segments.extend(segment);
         plan.artifact = artifact;
         self.publish_commit_plan(turn_id, plan).await?;
         Ok(())
@@ -54,7 +54,7 @@ impl Driver {
         prior_continuation: Option<OperationId>,
         kind: DurableOperationKind,
         continuation: RuntimeContinuation,
-        history: Option<(&ModelResponse, ArtifactTransition)>,
+        history: Option<(Option<HistorySegment>, ArtifactTransition)>,
     ) -> Result<OperationId, AgentError> {
         let mut plan = self.commit_plan()?;
         let operation = self.stage_hosted_continuation(
@@ -67,9 +67,9 @@ impl Driver {
             &continuation,
         )?;
         drop((outcome, continuation));
-        if let Some((response, artifact)) = history {
+        if let Some((segment, artifact)) = history {
             plan.finalize.insert(provider_operation);
-            plan.segments.extend(response_segment(response)?);
+            plan.segments.extend(segment);
             plan.artifact = artifact;
         }
         self.publish_commit_plan(turn_id, plan).await?;
@@ -451,11 +451,16 @@ impl Driver {
                 over_budget,
                 wire_output_limit,
             });
+            let segment = match &classification {
+                Ok(HostedRoundDisposition::CustomerToolsRequested(_)) | Err(_) => Ok(None),
+                Ok(_) => crate::runtime::terminal::response_segment(&response),
+            };
             let _ = command.shared.events.publish(
                 EventContext::attempt(command.turn_id, attempt_id),
                 AgentEventKind::ResponseSettled {
-                    discardable: response.finish().reason() == plakous_model::FinishReason::Length
-                        && classification.is_err(),
+                    discardable: segment.is_err()
+                        || (response.finish().reason() == plakous_model::FinishReason::Length
+                            && classification.is_err()),
                 },
             );
             let disposition = match classification {
@@ -506,6 +511,25 @@ impl Driver {
                     .await?;
                     continuation_baton = None;
                     continue;
+                }
+            };
+            let segment = match segment {
+                Ok(segment) => segment,
+                Err(error) => {
+                    let error = error.model_error().cloned().map_or(error, |model| {
+                        self.project_model_error(model, ModelErrorPhase::Terminal)
+                    });
+                    let decision = self.fail_turn_decision(command.turn_id, &error).await?;
+                    self.record_provider_decision(
+                        command.turn_id,
+                        provider_operation,
+                        Err(&error),
+                        last_round_usage,
+                        decision,
+                        continuation_baton,
+                    )
+                    .await?;
+                    return Err(error);
                 }
             };
             // One retry per truncation, reset by a round that classified: a
@@ -569,6 +593,7 @@ impl Driver {
                     response,
                     last_round_usage,
                     continuation_baton,
+                    segment,
                 ))
                 .await?
                 {

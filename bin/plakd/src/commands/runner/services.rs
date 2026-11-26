@@ -6,7 +6,6 @@ use plakous::model::LineId;
 use plakous::runner::RunnerClient;
 use plakous::sessions::AgentSessions;
 use plakous_hosted::error::{CliFailure, CliResult};
-use plakous_hosted::sessions::projector::RootInterruptCause;
 
 use crate::shell::services::Services;
 
@@ -116,7 +115,12 @@ fn start_probes_with_dial(
                     return probe_local(registry, services, local, environment, handle, retries)
                         .await;
                 }
-                let remote = crate::commands::runner::registry::remote(&services, &id)?;
+                let remote = blocking_probe(plakous::runner::ProbePhase::Options, {
+                    let services = services.clone();
+                    let id = id.clone();
+                    move || super::registry::remote(&services, &id)
+                })
+                .await?;
                 let connected = transports
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -219,15 +223,44 @@ async fn ready_local(
     now: u64,
 ) -> Result<(), plakous::runner::PlacementFailure> {
     let connection = client.as_ref().map(RunnerClient::connection_revision);
-    tokio::task::spawn_blocking(move || match connection {
-        Some(connection) => registry.ready_local_daemon(catalog, connection, now),
-        None => registry.ready_local(catalog, now),
+    blocking_probe(
+        plakous::runner::ProbePhase::Discovery,
+        move || match connection {
+            Some(connection) => registry.ready_local_daemon(catalog, connection, now),
+            None => registry.ready_local(catalog, now),
+        },
+    )
+    .await
+}
+
+async fn blocking_probe<T: Send + 'static>(
+    phase: plakous::runner::ProbePhase,
+    run: impl FnOnce() -> Result<T, plakous::runner::PlacementFailure> + Send + 'static,
+) -> Result<T, plakous::runner::PlacementFailure> {
+    tokio::task::spawn_blocking(run).await.map_err(|_| {
+        plakous::runner::PlacementFailure::RunnerUnreachable {
+            phase,
+            timed_out: false,
+        }
+    })?
+}
+
+async fn confirm_remote(
+    services: &Services,
+    remote: &super::registry::Remote,
+    hello: &plakous::runner::protocol::Hello,
+    options: &plakous::runner::WorkspaceOptions,
+) -> Result<(), plakous::runner::PlacementFailure> {
+    let (services, remote, hello, options) = (
+        services.clone(),
+        remote.clone(),
+        hello.clone(),
+        options.clone(),
+    );
+    blocking_probe(plakous::runner::ProbePhase::Options, move || {
+        super::registry::confirm(&services, &remote, &hello, &options)
     })
     .await
-    .map_err(|_| plakous::runner::PlacementFailure::RunnerUnreachable {
-        phase: plakous::runner::ProbePhase::Discovery,
-        timed_out: false,
-    })?
 }
 
 #[derive(Clone)]
@@ -427,13 +460,7 @@ async fn stop_current_head(
     sessions: &AgentSessions,
     head: &plakous::sessions::LeaseOnlyHead,
 ) -> CliResult<()> {
-    let paths = services.paths()?;
-    let mut product = crate::store::ProductStore::open(paths)
-        .map_err(|error| CliFailure::new(error.to_string()))?;
-    let mut stops = BTreeMap::new();
-    for id in product.session_ids().map_err(CliFailure::new)? {
-        collect_stops(&mut product, paths, sessions, &id, &mut stops).await?;
-    }
+    let stops = recorded_stops(services.paths()?, sessions).await?;
     if let Some(intent) = stops.get(&head.line()) {
         plakous_hosted::runner_adoption::finish_recorded_stop_held(client, head, intent)
             .await
@@ -486,7 +513,7 @@ async fn refresh_existing(
         .workspace_options()
         .await
         .map_err(|_| unavailable(ProbePhase::Options))?;
-    crate::commands::runner::registry::confirm(services, remote, &hello, &options)?;
+    confirm_remote(services, remote, &hello, &options).await?;
     services
         .runners()
         .progress(&remote.id, ProbePhase::Discovery);
@@ -670,7 +697,7 @@ async fn finish_remote_bind(
         .await
         .map_err(|_| unavailable(ProbePhase::Options, true))?
         .map_err(|_| unavailable(ProbePhase::Options, false))?;
-    crate::commands::runner::registry::confirm(services, remote, &dialed.hello, &options)?;
+    confirm_remote(services, remote, &dialed.hello, &options).await?;
     services
         .runners()
         .progress(&remote.id, ProbePhase::Discovery);
@@ -706,13 +733,7 @@ async fn finish_stops(
     sessions: &AgentSessions,
     readopted: &[plakous_hosted::runner_adoption::Readopted],
 ) -> CliResult<Vec<LineId>> {
-    let paths = services.paths()?;
-    let mut product = crate::store::ProductStore::open(paths)
-        .map_err(|error| CliFailure::new(error.to_string()))?;
-    let mut stops = BTreeMap::new();
-    for id in product.session_ids().map_err(CliFailure::new)? {
-        collect_stops(&mut product, paths, sessions, &id, &mut stops).await?;
-    }
+    let stops = recorded_stops(services.paths()?, sessions).await?;
     let held = client.lines().await.map_err(|error| {
         CliFailure::new(format!(
             "the local runner's lines could not be read: {error:?}"
@@ -747,18 +768,32 @@ async fn finish_stops(
     Ok(pending)
 }
 
-async fn collect_stops(
-    product: &mut crate::store::ProductStore,
+async fn recorded_stops(
     paths: &crate::home::paths::PlakPaths,
     sessions: &AgentSessions,
-    id: &str,
-    stops: &mut BTreeMap<LineId, String>,
-) -> CliResult<()> {
-    let record = product.load(id).map_err(CliFailure::new)?;
-    if let Some(tree) =
-        crate::store::tree::load_tree(paths, &record.node.tree_id).map_err(CliFailure::new)?
-    {
-        for (locator, intent) in tree.recorded_process_stops() {
+) -> CliResult<BTreeMap<LineId, String>> {
+    let paths = paths.clone();
+    let rows = tokio::task::spawn_blocking(move || {
+        let product = crate::store::ProductStore::open(&paths)
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        product
+            .runner_stop_rows()
+            .map_err(CliFailure::new)?
+            .into_iter()
+            .map(|row| {
+                let children = crate::store::tree::load_tree(&paths, &row.tree_id)
+                    .map_err(CliFailure::new)?
+                    .map_or_else(Vec::new, |tree| tree.recorded_process_stops());
+                Ok((row, children))
+            })
+            .collect::<CliResult<Vec<_>>>()
+    })
+    .await
+    .map_err(|_| CliFailure::new("runner stop snapshot task failed"))??;
+    let mut stops = BTreeMap::new();
+    for (row, children) in rows {
+        let id = row.session_id;
+        for (locator, intent) in children {
             match child_stop_line(sessions, &locator).await {
                 Ok(line) => {
                     stops.insert(line, intent);
@@ -768,46 +803,22 @@ async fn collect_stops(
                 }
             }
         }
-    }
-    let intents = product.load_intents(id).map_err(CliFailure::new)?;
-    let views = product.load_views(id).map_err(CliFailure::new)?;
-    let Some(stop) = intents
-        .root_interrupts
-        .iter()
-        .max_by_key(|intent| (intent.anchor, intent.ordinal))
-        .filter(|intent| intent.value.cause == RootInterruptCause::Stopped)
-        .filter(|stop| {
-            !intents.submissions.iter().any(|submission| {
-                intents
-                    .submission_anchors
-                    .get(&submission.command_id)
-                    .is_some_and(|anchor| *anchor >= stop.anchor)
-                    && views.as_ref().is_some_and(|views| {
-                        matches!(
-                            views.state.deliveries.get(&submission.command_id),
-                            Some(plakous_hosted::sessions::projector::Delivery::Accepted)
-                        )
-                    })
-            })
-        })
-    else {
-        return Ok(());
-    };
-    let intent = format!("plak:stop:{id}:{}", stop.ordinal);
-    if let Some(locator) = record.plakous_locator {
-        if admitted_since(sessions, locator.session_id(), stop.anchor).await? {
-            return Ok(());
+        let Some((locator, anchor, ordinal)) = row.root_stop else {
+            continue;
+        };
+        if admitted_since(sessions, locator.session_id(), anchor).await? {
+            continue;
         }
         let head = sessions
             .line_head_of(locator)
             .await
             .map_err(|error| CliFailure::new(error.to_string()))?;
         if head.session_id() != locator.session_id() || head.branch_id() != locator.branch_id() {
-            return Ok(());
+            continue;
         }
-        stops.insert(head.line(), intent);
+        stops.insert(head.line(), format!("plak:stop:{id}:{ordinal}"));
     }
-    Ok(())
+    Ok(stops)
 }
 
 async fn child_stop_line(sessions: &AgentSessions, locator: &str) -> CliResult<LineId> {

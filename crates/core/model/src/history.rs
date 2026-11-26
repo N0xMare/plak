@@ -294,14 +294,14 @@ impl HistorySegment {
             items: &items,
         })
         .map_err(|error| HistoryError::Serialization(error.to_string()))?;
-        let canonical_bytes = canonicalize_prevalidated(&value, MAX_SEGMENT_BYTES)
-            .map_err(|error| HistoryError::Serialization(error.to_string()))?;
-        if canonical_bytes.len() > MAX_SEGMENT_BYTES {
-            return Err(HistoryError::LimitExceeded {
-                field: "history segment bytes",
-                maximum: MAX_SEGMENT_BYTES,
-            });
-        }
+        let canonical_bytes =
+            canonicalize_prevalidated(&value, MAX_SEGMENT_BYTES).map_err(|error| match error {
+                crate::SemanticJsonError::ResourceLimit => HistoryError::LimitExceeded {
+                    field: "history segment bytes",
+                    maximum: MAX_SEGMENT_BYTES,
+                },
+                _ => HistoryError::Serialization(error.to_string()),
+            })?;
         let identity = Digest::sha256(
             DigestDomain::CanonicalHistorySegment,
             2,

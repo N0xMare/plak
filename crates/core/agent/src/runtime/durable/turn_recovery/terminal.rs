@@ -11,6 +11,8 @@ use super::{
     require_readable_provider_records, root_turn_command, runtime_component,
     terminal_record_for_command, terminal_siblings, uncertain_process_state,
 };
+use crate::runtime::terminal::response_segment;
+use plakous_model::ModelErrorKind;
 
 pub(super) fn terminal_evidence_fold(
     checkpoint: &RuntimeCheckpoint,
@@ -316,13 +318,33 @@ fn landed_terminal_recovery_fold(
             response
                 .validate_for_commit()
                 .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-            let family_artifact = terminal_family_artifact(checkpoint, provider, &response)?;
-            (
-                DurableTerminalOutcome::Completed(response.clone()),
-                Some(response),
-                (false, None),
-                family_artifact,
-            )
+            if let Err(error) = response_segment(&response)
+                && error.model_kind() == Some(ModelErrorKind::OutputLimit)
+            {
+                // An earlier build could record Terminal before checking its segment.
+                let trailing = crate::runtime::driver::trailing_prompt(
+                    checkpoint.manifest().canonical().history(),
+                    None,
+                );
+                let tail = crate::runtime::driver::failure_prompt_tail(
+                    turn_id, &error, false, trailing, None,
+                )?
+                .into_commit()?;
+                (
+                    DurableTerminalOutcome::Failed(super::DurableAgentError::from_error(&error)?),
+                    None,
+                    tail,
+                    None,
+                )
+            } else {
+                let family_artifact = terminal_family_artifact(checkpoint, provider, &response)?;
+                (
+                    DurableTerminalOutcome::Completed(response.clone()),
+                    Some(response),
+                    (false, None),
+                    family_artifact,
+                )
+            }
         }
         RoundDecision::FailTurn(shape) => {
             let error = shape.failure.clone().into_error()?;

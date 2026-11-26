@@ -76,7 +76,6 @@ impl Fences {
     }
 
     fn inspect(
-        &self,
         head: SessionLocator,
         paths: &crate::home::paths::PlakPaths,
         activity: &mut SessionActivity,
@@ -85,13 +84,9 @@ impl Fences {
         // the exact head under that hold before reading its lifecycle.
         let mut head = head;
         let mut refreshed = false;
-        let quiescent = loop {
-            match self
-                .executor
-                .block_on(self.sessions.head_is_quiescent(head))
-                .map_err(|_| CliFailure::new("application execution failed"))?
-            {
-                Ok(quiescent) => break quiescent,
+        loop {
+            match AgentSessions::inspect_settled_revision_sqlite(paths.runtime_database(), head) {
+                Ok(_) => return Ok(()),
                 Err(error)
                     if !refreshed && error.kind() == AgentSessionsErrorKind::StaleLocator =>
                 {
@@ -100,23 +95,19 @@ impl Fences {
                         .ok_or_else(|| CliFailure::new("stale runtime head was not named"))?;
                     refreshed = true;
                 }
-                Err(error) => return Err(CliFailure::new(error.to_string()).into()),
-            }
-        };
-        activity.turn |= !quiescent;
-        if !quiescent {
-            return Ok(());
-        }
-        match AgentSessions::export_history_sqlite(paths.runtime_database(), head) {
-            Ok(_) => Ok(()),
-            Err(error) if error.kind() == AgentSessionsErrorKind::UnsettledProcesses => {
-                // The runtime ledger proves unresolved jobs. It does not expose
-                // their product process ids here; incomplete evidence is not idle.
-                activity.state_unknown = true;
-                Ok(())
-            }
-            Err(error) => {
-                Err(CliFailure::new(format!("archive activity read failed: {error}")).into())
+                Err(error) if error.kind() == AgentSessionsErrorKind::InvalidInput => {
+                    activity.turn = true;
+                    return Ok(());
+                }
+                Err(error) if error.kind() == AgentSessionsErrorKind::UnsettledProcesses => {
+                    activity.state_unknown = true;
+                    return Ok(());
+                }
+                Err(error) => {
+                    return Err(
+                        CliFailure::new(format!("archive activity read failed: {error}")).into(),
+                    );
+                }
             }
         }
     }
@@ -155,7 +146,7 @@ pub(super) fn archive(
     let mut fences = Fences::new(services)?;
     let head = fences.acquire(locator)?;
     inspect_product(records.as_ref(), &record, &mut activity)?;
-    fences.inspect(head, paths, &mut activity)?;
+    Fences::inspect(head, paths, &mut activity)?;
     let (_, inspected) = crate::topology_product::inspect_session_tree(paths, &record)?;
     if let TreeInspection::Tree(tree) = inspected {
         for node in tree
@@ -181,7 +172,7 @@ pub(super) fn archive(
                     processes: Vec::new(),
                     state_unknown: false,
                 };
-                fences.inspect(head, paths, &mut child_activity)?;
+                Fences::inspect(head, paths, &mut child_activity)?;
                 if child_activity.turn {
                     activity.children.push(node.agent_id.clone());
                 }

@@ -124,24 +124,6 @@ fn is_output_limit_retry_note(text: &str) -> bool {
             .is_some_and(|bound| output_limit_retry_note(Some(bound)) == text)
 }
 
-/// The history segment a completed response commits, if it has output.
-fn response_segment(response: &ModelResponse) -> Result<Option<HistorySegment>, AgentError> {
-    if response.output().is_empty() {
-        return Ok(None);
-    }
-    HistorySegment::new(
-        history_segment_kind(response.output()),
-        response.output().to_vec(),
-    )
-    .map(Some)
-    .map_err(|_| {
-        AgentError::new(
-            AgentErrorKind::Internal,
-            "canonical history rejected an atomic semantic group",
-        )
-    })
-}
-
 /// The retry a settled failed attempt leads to.
 enum AttemptRetry {
     ContentFilter,

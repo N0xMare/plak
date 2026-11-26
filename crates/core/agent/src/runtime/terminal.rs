@@ -22,7 +22,10 @@ use crate::{
     TelemetryObservationKind, TelemetryTerminalStatus, ToolAuditIdentity, ToolCallObservation,
     ToolCallerLineageView, TurnUsage,
 };
-use plakous_model::{CancellationToken, Digest, ModelError, ModelResponse, TurnId, Usage};
+use plakous_model::{
+    CancellationToken, Digest, HistoryError, HistorySegment, ModelError, ModelErrorKind,
+    ModelResponse, TurnId, Usage,
+};
 use plakous_tools::{ToolOutcome, ToolOutcomeKind, ToolRuntimeError, ToolRuntimeErrorKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::AssertUnwindSafe;
@@ -1342,6 +1345,37 @@ pub(crate) fn checkpoint_finalizes_root_turn(
         Err(error) if error.kind() == AgentErrorKind::OutcomeUnknown => Ok(false),
         Err(error) => Err(error),
     }
+}
+
+/// Build the exact history group before promising a terminal consequence.
+pub(in crate::runtime) fn response_segment(
+    response: &ModelResponse,
+) -> Result<Option<HistorySegment>, AgentError> {
+    let output = response.output();
+    if output.is_empty() {
+        return Ok(None);
+    }
+    let oversized = || {
+        AgentError::from_model(ModelError::new(
+            ModelErrorKind::OutputLimit,
+            "model response exceeds the checkpoint history segment limit",
+        ))
+    };
+    let segment = HistorySegment::new(
+        super::checkpoint::identity::history_segment_kind(output),
+        output.to_vec(),
+    )
+    .map_err(|error| match error {
+        HistoryError::LimitExceeded { .. } => oversized(),
+        _ => AgentError::new(
+            AgentErrorKind::Internal,
+            "canonical history rejected an atomic semantic group",
+        ),
+    })?;
+    if segment.canonical_bytes().len() > crate::manifest::MAX_CHECKPOINT_HISTORY_SEGMENT_BYTES {
+        return Err(oversized());
+    }
+    Ok(Some(segment))
 }
 
 pub(in crate::runtime) fn completed_terminal_evidence(

@@ -146,20 +146,15 @@ pub(crate) fn overlap_guard(
 fn admission_snapshot(
     paths: &crate::home::paths::PlakPaths,
 ) -> CliResult<plakous::runner::AdmissionSnapshot> {
-    let mut product = crate::store::ProductStore::open(paths)
+    let product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     let mut local = BTreeSet::new();
-    for id in product.session_ids().map_err(CliFailure::new)? {
-        let record = product.load(&id).map_err(CliFailure::new)?;
-        if record
-            .runner
-            .as_ref()
-            .is_none_or(|runner| runner.runner_id == "local")
-        {
-            local.insert(record.workspace_root);
+    for row in product.runner_placement_rows().map_err(CliFailure::new)? {
+        if row.runner_id == "local" {
+            local.insert(row.workspace);
         }
         if let Some(tree) =
-            crate::store::tree::load_tree(paths, &record.node.tree_id).map_err(CliFailure::new)?
+            crate::store::tree::load_tree(paths, &row.tree_id).map_err(CliFailure::new)?
         {
             for workspace in tree.workspaces().values() {
                 if tree.node(&workspace.owner_agent_id).is_ok_and(|node| {
@@ -211,38 +206,19 @@ pub(crate) fn prepare(
     startup: Option<&std::path::Path>,
 ) -> CliResult<Prepared> {
     let paths = services.paths()?;
-    let mut product = crate::store::ProductStore::open(paths)
+    let product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     let mut recents = Vec::new();
     let mut required = BTreeSet::new();
-    for id in product.session_ids().map_err(CliFailure::new)? {
-        let record = product.load(&id).map_err(CliFailure::new)?;
-        let runner_id = record
-            .runner
-            .as_ref()
-            .map_or("local", |runner| runner.runner_id.as_str())
-            .to_owned();
-        if product
-            .load_intents(&id)
-            .map_err(CliFailure::new)?
-            .root_interrupts
-            .iter()
-            .any(|intent| {
-                intent.value.cause
-                    == plakous_hosted::sessions::projector::RootInterruptCause::Stopped
-            })
-        {
-            required.insert(runner_id.clone());
+    for row in product.runner_placement_rows().map_err(CliFailure::new)? {
+        if row.recorded_stop {
+            required.insert(row.runner_id.clone());
         }
-        if record
-            .runner
-            .as_ref()
-            .is_none_or(|runner| runner.runner_id == "local")
-        {
-            recents.push((record.updated_at_unix, record.workspace_root));
+        if row.runner_id == "local" {
+            recents.push((row.updated_at, row.workspace));
         }
         if let Some(tree) =
-            crate::store::tree::load_tree(paths, &record.node.tree_id).map_err(CliFailure::new)?
+            crate::store::tree::load_tree(paths, &row.tree_id).map_err(CliFailure::new)?
         {
             for (locator, _) in tree.recorded_process_stops() {
                 if let Some(node) = tree

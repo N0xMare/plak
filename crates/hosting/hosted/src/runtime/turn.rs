@@ -701,8 +701,26 @@ pub(super) fn flush_assistant_delta<P: plakous_host_protocol::ProtocolExtension>
         return;
     }
     if force || last_flush.elapsed() >= ASSISTANT_DELTA_WINDOW {
-        let _ = events.send(ContentEvent::AssistantDelta(std::mem::take(delta_buf)));
+        send_assistant_delta(events, std::mem::take(delta_buf));
         *last_flush = Instant::now();
+    }
+}
+
+pub(super) fn send_assistant_delta<P: plakous_host_protocol::ProtocolExtension>(
+    events: &Sender<P>,
+    text: String,
+) {
+    // One UTF-8 byte can take six bytes in JSON. Leave room for the event envelope.
+    const CHUNK_BYTES: usize = 1024 * 1024;
+    if text.len() <= CHUNK_BYTES {
+        let _ = events.send(ContentEvent::AssistantDelta(text));
+        return;
+    }
+    let mut rest = text.as_str();
+    while !rest.is_empty() {
+        let (chunk, tail) = rest.split_at(rest.floor_char_boundary(CHUNK_BYTES.min(rest.len())));
+        let _ = events.send(ContentEvent::AssistantDelta(chunk.to_owned()));
+        rest = tail;
     }
 }
 

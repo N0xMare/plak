@@ -105,7 +105,8 @@ pub const MAX_SNAPSHOT_BYTES: usize = 2 * crate::views::presentation::MAX_PRESEN
 /// Target page payload: smaller frames allow control traffic at the next
 /// frame boundary. An indivisible row can use the old single-row limit.
 const PAGE_BUDGET_BYTES: usize = 1024 * 1024;
-const MAX_SNAPSHOT_ROW_BYTES: usize = 8 * 1024 * 1024;
+/// Maximum JSON-encoded size of one keyed transcript item on a snapshot page.
+pub const MAX_SNAPSHOT_ROW_BYTES: usize = 8 * 1024 * 1024;
 
 /// A request's id, chosen by the client and unique on its connection.
 pub type RequestId = u64;

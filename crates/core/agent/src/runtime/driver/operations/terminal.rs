@@ -4,14 +4,13 @@ use super::{
     DurableAgentError, DurableCommandDisposition, DurableCommandEnvelope, DurableCommandRecord,
     DurableOperationKind, DurableOperationRecord, DurableOperationState,
     DurableOperationTransition, DurableTerminalOutcome, DurableTerminalResultRecord, FailTurnShape,
-    FamilyArtifact, HistorySegment, ModelErrorKind, ModelOperationRoot, OperationId,
-    PendingTerminalResultRecord, ProviderOutcome, RoundDecision, RuntimeCheckpoint,
-    RuntimeComponentKind, RuntimeContextState, RuntimeLifecycle, RuntimeOperationLedger,
-    StoreAdmission, TERMINAL_RESULT_RECORD_VERSION, TerminalPromptTail, TurnConsequence, TurnId,
-    TurnUsage, cancelled_error, encode_pending_terminal_record, encode_terminal_result_record,
-    failure_preserves_artifact, failure_prompt_tail, finalized_operation_evidence,
-    history_segment_kind, operation_turn_id, provider_outcome, runtime_component,
-    runtime_manifest_error, trailing_prompt, working_lifecycle_for_root,
+    FamilyArtifact, ModelErrorKind, ModelOperationRoot, OperationId, PendingTerminalResultRecord,
+    ProviderOutcome, RoundDecision, RuntimeCheckpoint, RuntimeComponentKind, RuntimeContextState,
+    RuntimeLifecycle, RuntimeOperationLedger, StoreAdmission, TERMINAL_RESULT_RECORD_VERSION,
+    TerminalPromptTail, TurnConsequence, TurnId, TurnUsage, cancelled_error,
+    encode_pending_terminal_record, encode_terminal_result_record, failure_preserves_artifact,
+    failure_prompt_tail, finalized_operation_evidence, operation_turn_id, provider_outcome,
+    runtime_component, runtime_manifest_error, trailing_prompt, working_lifecycle_for_root,
 };
 
 impl Driver {
@@ -36,22 +35,13 @@ impl Driver {
             plan.finalize.insert(baton);
         }
         let bytes = match consequence {
-            TurnConsequence::Completed { response, artifact } => {
+            TurnConsequence::Completed {
+                response,
+                segment,
+                artifact,
+            } => {
                 plan.artifact = artifact;
-                if !response.output().is_empty() {
-                    plan.segments.push(
-                        HistorySegment::new(
-                            history_segment_kind(response.output()),
-                            response.output().to_vec(),
-                        )
-                        .map_err(|_| {
-                            AgentError::new(
-                                AgentErrorKind::Internal,
-                                "canonical history rejected an atomic semantic group",
-                            )
-                        })?,
-                    );
-                }
+                plan.segments.extend(segment);
                 crate::runtime::terminal::completed_terminal_evidence(
                     command_id,
                     turn_id,

@@ -685,6 +685,71 @@ fn lifecycle_real_product_archive_delete_releases_idle_actor_without_reopen() {
     stop(&mut host);
 }
 
+#[test]
+fn oversized_assistant_response_settles_with_typed_failure_and_can_be_archived() {
+    use plakous_host_protocol::{SessionObservation, TurnPhase};
+
+    let Some(fixture) = fixture() else { return };
+    // The block itself fits, but JSON escaping takes the history group over
+    // the checkpoint bound and the unsplit live event over the wire bound.
+    fixture.write_script(&json!({"version": 1, "steps": [
+        {"output": {"text": "\0".repeat(3 * 1024 * 1024)}}
+    ]}));
+    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("session not created");
+    };
+    let attachment = client.attach(2, &node);
+    assert_eq!(
+        client.request(
+            3,
+            Op::Intent {
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
+                attachment,
+                intent: SessionIntent::Prompt(Draft::from("oversized answer")),
+                blobs: Vec::new(),
+            }
+        ),
+        Outcome::Ok(Answer::Accepted { duplicate: false })
+    );
+    loop {
+        if let HostFrame::Event {
+            observation: SessionObservation::TurnLifecycle(lifecycle),
+            ..
+        } = client.next()
+            && lifecycle.phase != TurnPhase::Admitted
+        {
+            assert_eq!(lifecycle.phase, TurnPhase::Failed);
+            assert_eq!(lifecycle.model_error_kind.as_deref(), Some("OutputLimit"));
+            break;
+        }
+    }
+    let mut admin = Client::connect(&host);
+    admin.rows_until(5, |rows| {
+        rows.iter()
+            .any(|row| row.session == session && row.activity == SessionActivity::Idle)
+    });
+    assert_eq!(
+        admin.request(
+            6,
+            Op::ArchiveSession {
+                session: session.clone(),
+                archived: true
+            }
+        ),
+        Outcome::Ok(Answer::ArchiveUpdated {
+            session,
+            archived: true
+        })
+    );
+    drop(client);
+    drop(admin);
+    stop(&mut host);
+}
+
 fn new_session(workspace: &std::path::Path) -> Op<PlakExtension> {
     new_session_request(workspace, None, REQUEST)
 }

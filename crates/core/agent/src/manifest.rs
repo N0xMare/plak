@@ -119,7 +119,7 @@ pub(crate) const MAX_RUNTIME_COMPONENT_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const MAX_RUNTIME_OPERATION_COMPONENT_BYTES: usize = 64 * 1024 * 1024;
 /// History-segment object payload. Messages thinking+signature replay is stored
 /// in the segment body and can exceed a reconstructive-component bound.
-const MAX_CHECKPOINT_HISTORY_SEGMENT_BYTES: usize = MAX_RUNTIME_CHECKPOINT_BYTES;
+pub(crate) const MAX_CHECKPOINT_HISTORY_SEGMENT_BYTES: usize = MAX_RUNTIME_CHECKPOINT_BYTES;
 /// Maximum retained commands, operations, history segments, or obligations.
 pub(crate) const MAX_RUNTIME_RECORDS: usize = 4_096;
 /// Committed history segments at which a turn fence schedules a paid fold even
