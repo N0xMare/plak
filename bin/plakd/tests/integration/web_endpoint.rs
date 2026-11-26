@@ -378,15 +378,26 @@ fn response(socket: &mut WebSocket<UnixStream>, id: u64) -> Value {
     }
 }
 
+/// Attaches, retrying `backpressure` while a resident root reaches its first
+/// viewport cut.
 fn attach(socket: &mut WebSocket<UnixStream>, root: &NodeAddress, id: u64) -> u64 {
-    send(
-        socket,
-        &ClientFrame::Request {
-            id,
-            op: Op::Attach { node: root.clone() },
-        },
-    );
-    let outcome = response(socket, id);
+    let deadline = std::time::Instant::now() + WAIT;
+    let outcome = loop {
+        send(
+            socket,
+            &ClientFrame::Request {
+                id,
+                op: Op::Attach { node: root.clone() },
+            },
+        );
+        let outcome = response(socket, id);
+        if outcome != json!({"refused": {"refusal": "backpressure"}})
+            || std::time::Instant::now() >= deadline
+        {
+            break outcome;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
     assert_eq!(outcome["ok"]["answer"], "attached", "{outcome}");
     outcome["ok"]["attachment"]
         .as_u64()

@@ -11,17 +11,11 @@ use plakous_host_protocol::wire::{MAX_LINE_BYTES, MAX_SNAPSHOT_ROW_BYTES};
 
 use crate::runtime::{LiveRowReadError, LiveRowSlice};
 
-// JSON can spend six bytes per body byte. Leave room for the frame envelope
-// and other upserts at a live boundary, including a sealed reasoning row, and
-// keep the encoded row within a snapshot page so a baseline never cuts it.
-pub(super) const MAX_LIVE_ASSISTANT_BYTES: usize = min(
-    MAX_LINE_BYTES / 6 - 128 * 1024,
-    (MAX_SNAPSHOT_ROW_BYTES - 128 * 1024) / 6,
-);
-
-const fn min(left: usize, right: usize) -> usize {
-    if left < right { left } else { right }
-}
+// JSON can spend six bytes per body byte. Keep the encoded row within one
+// snapshot row (MAX_SNAPSHOT_ROW_BYTES) so a baseline never cuts it; that is
+// also well inside a frame line with room for the envelope and other upserts.
+pub(super) const MAX_LIVE_ASSISTANT_BYTES: usize = (MAX_SNAPSHOT_ROW_BYTES - 128 * 1024) / 6;
+const _: () = assert!(MAX_LIVE_ASSISTANT_BYTES <= MAX_LINE_BYTES / 6 - 128 * 1024);
 const ROW_SLICE_BYTES: usize = 64 * 1024;
 
 pub(super) fn live_body(key: RowKey, row: &TranscriptRow) -> Option<&str> {

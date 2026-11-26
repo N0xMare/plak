@@ -478,10 +478,20 @@ impl Client {
         }
     }
 
+    /// Attaches, retrying `backpressure` while a resident root reaches its
+    /// first viewport cut.
     fn attach(&mut self, id: RequestId, node: &NodeAddress) -> u64 {
-        match self.request(id, Op::Attach { node: node.clone() }) {
-            Outcome::Ok(Answer::Attached { attachment }) => attachment,
-            other => panic!("not attached: {other:?}"),
+        let deadline = std::time::Instant::now() + WAIT;
+        loop {
+            match self.request(id, Op::Attach { node: node.clone() }) {
+                Outcome::Ok(Answer::Attached { attachment }) => return attachment,
+                Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::Backpressure)
+                    if std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                other => panic!("not attached: {other:?}"),
+            }
         }
     }
 

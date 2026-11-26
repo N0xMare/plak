@@ -4918,6 +4918,8 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   answer control requests while it waits. One preparation runs at a time,
   with up to four more attaches queued per connection. Accepted attaches finish
   in request order; an attach beyond the queue limit receives `backpressure`.
+  A root attach is also refused with `backpressure` while a resident root
+  has not yet reached its first coherent viewport cut; clients retry it.
   If a lifecycle change retires the prepared actor before delivery, the host
   prepares the same attach one more time before serving the next queued request.
   If archive won, it serves the archived read-only view.

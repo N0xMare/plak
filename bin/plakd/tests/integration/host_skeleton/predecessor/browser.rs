@@ -66,8 +66,21 @@ impl Browser {
             .or_else(|| next(&mut self.socket, self.welcome.proto))
     }
 
+    /// Attaches, retrying `backpressure` while a resident root reaches its
+    /// first viewport cut.
     pub(super) fn attach(&mut self, node: &NodeAddress) {
-        let outcome = self.request(Op::Attach { node: node.clone() });
+        let deadline = Instant::now() + WAIT;
+        let outcome = loop {
+            let outcome = self.request(Op::Attach { node: node.clone() });
+            if !matches!(
+                outcome,
+                Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::Backpressure)
+            ) || Instant::now() >= deadline
+            {
+                break outcome;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
         let Outcome::Ok(Answer::Attached { attachment }) = outcome else {
             panic!("web attachment was refused: {outcome:?}");
         };

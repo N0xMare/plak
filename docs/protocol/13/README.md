@@ -83,7 +83,8 @@ Additions that don't replace a v12 tag or field:
 ## Reading the stream
 
 Attach starts with the newest whole-turn page (`snapshot`); rows inside a
-page are in ascending transcript order. Assemble all parts of a page before
+page are in ascending transcript order. A root attach can be refused with
+`backpressure` while a resident root reaches its first viewport cut; retry it. Assemble all parts of a page before
 applying it, then prepend each completed older page. Page totals and the
 next older cursor are the same on every part; the cursor is present exactly
 when `has_older` is true. The older-history cursor is opaque; repeat the
@@ -108,8 +109,8 @@ totals use UTF-8 bytes, not JavaScript string length or JSON wire size.
 Integers such as `host_generation` and provisional row anchors use the
 full unsigned 64-bit range and can exceed 2^53; a JavaScript client must
 decode and re-encode them exactly (for example as `BigInt` or the original
-text), never as `Number`. One frame is at most 16 MiB of JSON, so a single
-snapshot part can carry a row of several MiB.
+text), never as `Number`. One frame is at most 16 MiB of JSON, and one
+snapshot row is at most 8 MiB of encoded JSON.
 Assistant and reasoning deltas have the same shape; the row's type comes
 from its baseline or opening patch, before the host streams that row.
 The root gives each contiguous assistant or reasoning run a new provisional
@@ -125,7 +126,7 @@ Its `end` is exclusive, and `last` means the slice reaches the end available
 at read time, not that the row has stopped streaming. A non-boundary or
 out-of-range offset is malformed; a provisional row no longer in the scope
 returns `cursor_expired`. Use the settled key for omitted history after
-replacement. The live assistant preview stops at a framing-safe prefix;
+replacement. The live assistant preview stops at a snapshot-row-safe prefix;
 subsequent appends never move its start or skip to a later suffix.
 The row read returns a slice of the same rendered body whose bytes were
 counted; row metadata stays in the page. The resident reader caps body
