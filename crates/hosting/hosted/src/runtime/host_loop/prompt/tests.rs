@@ -62,6 +62,8 @@ mod preparation_fence_tests;
 #[cfg(test)]
 mod preparation_tests;
 #[cfg(test)]
+mod result_first_tests;
+#[cfg(test)]
 mod terminal_storage_tests;
 
 #[test]

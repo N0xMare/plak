@@ -25,6 +25,11 @@ impl<'a> RoundGates<'a> {
                 | "tree_conflict_resolver"
                 | "tree_revert"
                 | "tree_refresh"
+                | "handoff_resume_child"
+                | "handoff_resume_deaf_child"
+                | "owner_lost_child_continue"
+                | "ledger_retirement_live_child_process"
+                | "node_fenced_turn_child"
         ) {
             return None;
         }

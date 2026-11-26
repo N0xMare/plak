@@ -54,8 +54,11 @@ fn approval_handles_are_host_minted_and_single_use() {
 }
 
 #[test]
-fn result_first_race_terminalizes_from_result_and_reconciles_once() {
-    assert!(turn_finalization_ready(true, false));
+fn result_first_race_drains_delivered_events_and_reconciles_once() {
+    assert!(
+        !turn_finalization_ready(true, false),
+        "events delivered before the result are applied before the drive ends"
+    );
 
     let mut assistant = "queued ".to_owned();
     assert_eq!(

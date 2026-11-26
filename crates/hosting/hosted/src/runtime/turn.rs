@@ -665,8 +665,10 @@ pub(super) fn publish_cancel_window_tool_lines<P: plakous_host_protocol::Protoco
     }
 }
 
-pub(super) const fn turn_finalization_ready(result_done: bool, _events_done: bool) -> bool {
-    result_done
+/// The drive ends once the result came and the events delivered before it
+/// were applied: the stream's end, or no delivered event left waiting.
+pub(super) const fn turn_finalization_ready(result_done: bool, events_drained: bool) -> bool {
+    result_done && events_drained
 }
 
 /// Reconcile streamed presentation with the successful result's canonical text.

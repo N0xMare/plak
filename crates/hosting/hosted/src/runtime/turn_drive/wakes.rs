@@ -120,6 +120,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
     pub(super) fn serve_work(&mut self, wake: RootWake) {
         let state = &mut self.housekeeping;
         match wake {
+            RootWake::Drained => self.events_drained = true,
             RootWake::Intent | RootWake::Deferred => {
                 #[cfg(test)]
                 if matches!(wake, RootWake::Intent) {

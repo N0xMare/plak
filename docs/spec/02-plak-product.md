@@ -136,12 +136,15 @@ loop, with the child's port taking hub messages instead of intents (spec 03
 §16). Both roles share one turn loop: each turn is driven to its terminal and
 the role then decides what follows. Each admitted turn has one private
 `TurnDrive`: a biased loop that takes the turn's result first, then the
-role's urgent wake, then its events, then the role's other wakes. The root's
-port owns its control handle, observed live projection (including pending
-approvals), cancel settlement, and terminal result. A child's port takes the
-turn's result and folds the turn's events into the observation every face
-reads; the child's turn waiter, which its actor runs, drives it, so one drive
-owns a child turn's events and its result. Queue
+role's urgent wake, then its events, then the role's other wakes. Once the
+result came, either role's drive applies the events already delivered and then
+ends, so what those events author (such as a retry notice) does not depend on
+how far behind the runtime the host observed them. The root's port owns its
+control handle, observed live projection (including pending approvals),
+cancel settlement, and terminal result. A child's port takes the turn's result
+and folds the turn's events into the observation every face reads; the
+child's turn waiter, which its actor runs, drives it, so one drive owns a
+child turn's events and its result. Queue
 editing and intent writes belong to the session domain and share the record's
 one revision CAS; views are written only by the projector. Ending a host drive
 attempts canonical release even when the drive failed, and preserves both

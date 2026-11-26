@@ -138,6 +138,8 @@ struct RootTurn<'a, P: plakous_host_protocol::ProtocolExtension> {
     interrupted_status_pending: bool,
     abandoned_by_quit: bool,
     events_done: bool,
+    /// The result came and every event delivered before it was applied.
+    events_drained: bool,
     turn_result: Option<Result<TurnResult, AgentError>>,
     event_failure: Option<String>,
     compacted_mid_turn: bool,
@@ -251,6 +253,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootTurn<'a, P> {
             interrupted_status_pending: false,
             abandoned_by_quit: false,
             events_done: false,
+            events_drained: false,
             turn_result: None,
             event_failure: None,
             compacted_mid_turn: false,
@@ -297,6 +300,8 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootTurn<'a, P> {
 
 /// What wakes the root's turn besides its result and events.
 enum RootWake {
+    /// The result came and no delivered event is still waiting.
+    Drained,
     /// An intent arrived.
     Intent,
     /// A deferred intent is ready to take.
@@ -362,7 +367,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
         // The drive polls a ready result before the urgent quit deadline.
         // Checking elapsed time here would abandon an already-published
         // terminal when this pass was descheduled past that deadline.
-        if turn_finalization_ready(self.turn_result.is_some(), self.events_done) {
+        if turn_finalization_ready(
+            self.turn_result.is_some(),
+            self.events_done || self.events_drained,
+        ) {
             return crate::node::Pass::Done;
         }
         crate::node::Pass::Wait
@@ -426,9 +434,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
         let control = &self.control;
         let cancel_pending = self.cancel_pending && self.cancel_unsettled.is_none();
         let notice_ready = &self.host.events.notice_ready;
+        // Events outrank this whole wake, so `Drained` comes only once every
+        // event delivered before the result has been applied.
+        let drained = self.turn_result.is_some();
         async move {
             tokio::select! {
                 biased;
+                () = std::future::ready(()), if drained => RootWake::Drained,
                 () = actions.ready(), if accepts_intents => RootWake::Intent,
                 () = std::future::ready(()), if deferred_ready => RootWake::Deferred,
                 () = step_changed => RootWake::StepControl,
