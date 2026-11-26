@@ -771,7 +771,7 @@ fn version_prints_the_build_label_and_update_is_not_a_verb() {
 }
 
 #[test]
-fn version_caches_binary_id_in_existing_private_home_and_help_stays_read_only() {
+fn version_and_help_stay_read_only_and_never_write_binary_ids() {
     let help_dir = isolated_home_dir();
     let help_home = help_dir.path();
     let help_out = run_plak(help_home, &["--help"]);
@@ -794,13 +794,9 @@ fn version_caches_binary_id_in_existing_private_home_and_help_stays_read_only() 
         format!("plakd {}\n", expected_version_label())
     );
     assert!(
-        version_home.join("binary-ids").exists(),
-        "--version should cache binary-ids in an existing private 0700 home"
+        !version_home.join("binary-ids").exists(),
+        "--version is an inspection command and must never write binary-ids"
     );
-    // Warm --help in the same home reads the cached identity and matches verbatim.
-    let warm_help = run_plak(version_home, &["--help"]);
-    assert!(warm_help.status.success(), "stderr={}", stderr(&warm_help));
-    assert!(stdout(&warm_help).contains(&expected_version_label()));
 
     // Missing home must never be created by --version.
     let parent = isolated_home_dir();

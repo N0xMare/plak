@@ -115,6 +115,12 @@ selected bindings. MCP server definitions alone enable no tools. Admission
 does not substitute a composition. Doctor scans all templates for its config
 verdict.
 
+`plakd store backup` defaults its online SQLite backup step budget to `600`
+seconds (raised from `120` s for multi-gigabyte stores). Operators may override
+the budget per invocation with `--budget-secs <secs>` or the environment
+variable `PLAK_STORE_BACKUP_BUDGET_SECS` (positive integer seconds; invalid
+values exit 2). This is a command/environment bound, not a `config.toml` key.
+
 A plakd home holds one `config.toml` plus one file per agent template:
 
 ```
@@ -368,7 +374,7 @@ raised or enough data is reclaimed (spec 01 §5).
 | `web.files_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to inspect saved workspaces and Changes. Exact file bytes may contain secrets. Same-user sockets are trusted independently; default off and captured at host startup. |
 | `web.terminal` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed interactive operator shells as the runner user. Shells are not confined to the workspace. Same-user sockets are trusted independently; default off and captured at host startup. |
 | `gateway.address` | string | `(unset)` | Required for hosts; unix:<absolute path> or tcp:<ip>:<port>; loopback, tailnet or allow_non_tailnet; home-scoped; host restart required | Where the host sends account and relay calls. `plakd host install` sets the default Unix socket. Standalone account administration without host configuration targets the local gateway service; neither mode opens credentials in-process. |
-| `gateway.key_file` | string | `(unset)` | absolute path; mode 0600; home-scoped; host restart required | The caller key file for a configured gateway address. A tcp address defaults to the home secrets gateway.key; a unix address sends a key only when this is set, and a same-UID unix peer without one is the local administrator. Captured at host startup. |
+| `gateway.key_file` | string | `(unset)` | absolute path; single-link regular file owned by euid, mode 0600 (no symlink/hardlink, max 16 KiB); home-scoped; host restart required | The caller key file for a configured gateway address. A tcp address defaults to the home secrets gateway.key; a unix address sends a key only when this is set, and a same-UID unix peer without one is the local administrator. Captured at host startup. |
 | `gateway.allow_non_tailnet` | bool | `false` | true or false; home-scoped; host restart required | Admit a tcp gateway address outside loopback and the tailnet ranges. Default false. Captured at host startup. |
 
 The web listener and its capability switches come from one startup read of

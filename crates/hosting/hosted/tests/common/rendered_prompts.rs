@@ -1588,7 +1588,7 @@ pub(crate) mod suite {
         ),
         (
             "anthropic-api.py-sdk.root.single-agent",
-            "7b1f0a6ebdca22a40ff3d0570a77826cdf01fb12b7c0c1aaecb2c29edfdecb5a",
+            "cf218e001ab5c808f1017801f725072c8589d0086e93d102a05a395de0b68973",
         ),
         (
             "codex.direct.root.single-agent",
@@ -1656,51 +1656,51 @@ pub(crate) mod suite {
         ),
         (
             "grok.direct.root.single-agent",
-            "8d0801a989dc6f152de7252f10fa7192e0e1193b4d3e394d5ede2946f89e3f72",
+            "ecf167149bf4d7c0c4d1d241e78604bb8c5ee68e814e77d5dc5a40e03669f69b",
         ),
         (
             "grok.direct.root",
-            "1262c150a7977f725556d1f74e5a3392ffe2fb240bf3cc786fedcfa7d5e19f6c",
+            "a8438fb652de563b715788d9ff8946dc3702dedb89833ca23d6b0c93b1b9cc8c",
         ),
         (
             "grok.direct.nested-parent",
-            "2fad7a36e68a45e6bbdc32967b96efaed8019a56633da3df63a0048050654e00",
+            "6f9a52bcc97db1cc681cc03abaed98b54f58b6a6c0a2aea5d281f0b02ffeed9c",
         ),
         (
             "grok.direct.child",
-            "a2f69782091dcb5a6291ba9670b1044ede4d1867cfadff5b68d5e073bd6cf9a5",
+            "ef7d7892b77d94de8203c21e119c5add5d5793820ffbf4a68e526b93cb5735af",
         ),
         (
             "grok.js-ptc.root.single-agent",
-            "c19249b08fcc190904f9b04f0880cd69b87ea54f802273c27167c1a0f707d956",
+            "c64336a94ff191512fbb1e3bfef842520f86d8e9fffd1edf68e34ec6286f8c9b",
         ),
         (
             "grok.js-ptc.root",
-            "ed6bbb663da7c8d1ac1c8d54921b92c9705c7adc3c973e91d09ae5f1a1edc96b",
+            "0e2949c470c7f018088f94e1124b2aeaf02039d100a4d50ae54a73f6e9d66f19",
         ),
         (
             "grok.js-ptc.nested-parent",
-            "eb1cab72befcf9b67e3c39c78d37e93748208f1e12e8940163106dae0a586f44",
+            "ee6e0db42090e73f3d884b5e04660344d01040d9dd3d9f0842a142039b657d32",
         ),
         (
             "grok.js-ptc.child",
-            "ce402a04323f5e68b10faf5c6881356467c7749d32a382f1742eb303ab45b471",
+            "a665ea0d51893230cd17e0e4be20c8a579eaebdeb9f817d64715be2edb82b9b1",
         ),
         (
             "grok.py-ptc.root.single-agent",
-            "c40d1ab1a8cfa1a27ca72648622b76b2eae4832d40b3e1d594cf44f6bf214554",
+            "f4bb87abfab107af7f15798db6f0e4da17f2ef313d3679aa29e582dca3da46d2",
         ),
         (
             "grok.py-ptc.root",
-            "9e9702c9c8664179c2848aefcaaf651b45b9251c33b5aa4103e441a7bd0b7df5",
+            "d7fbba5a1699e79d63d23d7090b5acf0df18f2699c78d7521fe186253e631815",
         ),
         (
             "grok.py-ptc.nested-parent",
-            "5f2dbf85299f049430a3aacf4d5714e6239290471e76b86da52fd00ace5a40a7",
+            "54b9d76d5caefe16999a74404ae59f06a1cda424c8178c417fc52225e2ae2abb",
         ),
         (
             "grok.py-ptc.child",
-            "181066008ac03ac97347b1fcf808b894a5faa916e172d9b53580fb0f55449773",
+            "f5ac09529e099a72dbe2f802f817a976d4c9a01efd0d70105ba3124dddc71236",
         ),
         (
             "claude.direct.root.single-agent",
@@ -1912,27 +1912,27 @@ pub(crate) mod suite {
         ),
         (
             "xai-api.direct.root.single-agent",
-            "2abf10fbcbfef8700e031d1fe0fe512f29e3342553056dfa1db8a731d132d2e5",
+            "7c102b0b9b67a89e9634adf9746b872ac5f72a6ddaec947672a510bb662c4c90",
         ),
         (
             "xai-api.js-ptc.root.single-agent",
-            "3b00a5b567ce879db31f988ea6e2f94c041c089a098e3cfe36b69b0b281f317d",
+            "bafcc44e7f2d913b42c948158e2ce7b7495a8a7b93304f76a8e658ddce57cb4e",
         ),
         (
             "xai-api.py-ptc.root.single-agent",
-            "cd105407e61607953176b9fa9f70a72da68ee395f0e1edf7966392b1ea81115c",
+            "31beb75da18c4cd192e5cb6106743dfc2699749823459c93991f5a52c625abe0",
         ),
         (
             "anthropic-api.direct.root.single-agent",
-            "bb19313832c53fb590d40b63b6cd4dfc6a9050af25156015e445eae8d1d97a24",
+            "91e33da9e9e855b6d21ecd7c6988269d9a4b7a24c712c438156f008ced7d113c",
         ),
         (
             "anthropic-api.js-ptc.root.single-agent",
-            "34eb41d9743e5890738152a3d671e8c356a6a7717ccf2370c45d4b3911ecfbad",
+            "9ca7c2aa7dbfe970e20bd957840549e7c667a76e1111f226023236497762c27e",
         ),
         (
             "anthropic-api.py-ptc.root.single-agent",
-            "4fe1df8234128a215523e448794dbe5ea910d939f1ceb984a3ca2a52f0cffe45",
+            "fd5d6d41f02c80e80d48a4e048bf2f56b337167c98b1a9511af71c5877e0cf97",
         ),
     ];
 

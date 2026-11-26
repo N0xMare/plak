@@ -4,14 +4,14 @@ use std::collections::BTreeMap;
 use plakous_model::EntryId as TestEntryId;
 use plakous_model::TextBlock as TestTextBlock;
 use plakous_model::{
-    AttemptId, BranchId, CachePolicy, CanonicalHistory, Capability, CapabilityConstraints,
-    CapabilitySet, ConfiguredTool, ConversationItem, ConversationView, DataClassification,
-    FactProvenance, FactSource, FeatureSupport, HistorySegment, HistorySegmentKind,
-    ModelAdapterProfileId, ModelCacheAffinity, ModelFamilyId, ModelRequest, Provenance,
-    ReplayKindId, RequestMetadata, ResolvedModelDescriptor, RouteId, RunId, SessionId, Support,
-    Timestamp, ToolCallerDisposition, ToolConcurrency, ToolDefinition, ToolEffect,
-    ToolExecutionDisposition, ToolInputContract, ToolName, ToolOutputContract, TurnId,
-    ValidatedRequestPlan, ValidationMode, WorkingProjection, WorkingProjectionLimits,
+    AttemptId, BranchId, CanonicalHistory, Capability, CapabilityConstraints, CapabilitySet,
+    ConfiguredTool, ConversationItem, ConversationView, DataClassification, FactProvenance,
+    FactSource, FeatureSupport, HistorySegment, HistorySegmentKind, ModelAdapterProfileId,
+    ModelCacheAffinity, ModelFamilyId, ModelRequest, Provenance, ReplayKindId, RequestMetadata,
+    ResolvedModelDescriptor, RouteId, RunId, SessionId, Support, Timestamp, ToolCallerDisposition,
+    ToolConcurrency, ToolDefinition, ToolEffect, ToolExecutionDisposition, ToolInputContract,
+    ToolName, ToolOutputContract, TurnId, ValidatedRequestPlan, ValidationMode, WorkingProjection,
+    WorkingProjectionLimits,
 };
 use uuid::Uuid as TestUuid;
 
@@ -197,12 +197,6 @@ fn lowering_fixture_with_history(
 
 fn lowering_fixture_with_customer_tool() -> TestResult<(ValidatedRequestPlan, MessagesRequestPolicy)>
 {
-    lowering_fixture_with_customer_tool_and_cache(CachePolicy::Disabled)
-}
-
-fn lowering_fixture_with_customer_tool_and_cache(
-    cache: CachePolicy,
-) -> TestResult<(ValidatedRequestPlan, MessagesRequestPolicy)> {
     let selected = selected_id(b"selected-tool")?;
     let effective = effective_id(b"effective-tool")?;
     let provenance = FactProvenance::new(
@@ -210,23 +204,19 @@ fn lowering_fixture_with_customer_tool_and_cache(
         Timestamp::new(1_700_000_000, 0)?,
         None,
     );
-    let features = [
-        Capability::Streaming,
-        Capability::Tools,
-        Capability::Caching,
-    ]
-    .into_iter()
-    .map(|capability| {
-        (
-            capability,
-            FeatureSupport::new(
-                Support::Native,
-                CapabilityConstraints::default(),
-                provenance,
-            ),
-        )
-    })
-    .collect();
+    let features = [Capability::Streaming, Capability::Tools]
+        .into_iter()
+        .map(|capability| {
+            (
+                capability,
+                FeatureSupport::new(
+                    Support::Native,
+                    CapabilityConstraints::default(),
+                    provenance,
+                ),
+            )
+        })
+        .collect();
     let descriptor = ResolvedModelDescriptor::new_custom(
         ProtocolId::new("messages.test")?,
         RouteId::new("messages-test")?,
@@ -272,7 +262,6 @@ fn lowering_fixture_with_customer_tool_and_cache(
         ),
     )
     .tools(vec![tool])
-    .cache(cache)
     .build()?;
     let plan = descriptor.validate_request(request, ValidationMode::Strict)?;
     let policy = MessagesRequestPolicy::new(MessagesRequestPolicyInput {
@@ -314,22 +303,6 @@ fn lowering_fixture_with_tool_choice_and_history(
     limits: plakous_model::GenerationLimits,
     reasoning: ReasoningPolicy,
 ) -> TestResult<(ValidatedRequestPlan, MessagesRequestPolicy)> {
-    lowering_fixture_with_tool_choice_history_and_cache(
-        tool_choice,
-        history,
-        limits,
-        reasoning,
-        CachePolicy::Disabled,
-    )
-}
-
-fn lowering_fixture_with_tool_choice_history_and_cache(
-    tool_choice: ToolChoice,
-    history: Vec<ConversationItem>,
-    limits: plakous_model::GenerationLimits,
-    reasoning: ReasoningPolicy,
-    cache: CachePolicy,
-) -> TestResult<(ValidatedRequestPlan, MessagesRequestPolicy)> {
     let selected = selected_id(b"selected-tool-choice")?;
     let effective = effective_id(b"effective-tool-choice")?;
     let provenance = FactProvenance::new(
@@ -341,7 +314,6 @@ fn lowering_fixture_with_tool_choice_history_and_cache(
         Capability::Streaming,
         Capability::Tools,
         Capability::Reasoning,
-        Capability::Caching,
     ]
     .into_iter()
     .map(|capability| {
@@ -398,7 +370,6 @@ fn lowering_fixture_with_tool_choice_history_and_cache(
     .tool_choice(tool_choice)
     .limits(limits)
     .reasoning(reasoning)
-    .cache(cache)
     .build()?;
     let plan = descriptor.validate_request(request, ValidationMode::Strict)?;
     let policy = MessagesRequestPolicy::new(MessagesRequestPolicyInput {
@@ -450,7 +421,7 @@ fn summary_request_ends_on_the_cached_instruction_with_tools_kept() -> TestResul
         )
         .map_err(Into::<Box<dyn std::error::Error>>::into)
     };
-    let (plan, policy) = lowering_fixture_with_tool_choice_history_and_cache(
+    let (plan, policy) = lowering_fixture_with_tool_choice_and_history(
         ToolChoice::None,
         vec![
             text(4, Actor::User, "fix the parser", Provenance::UserInput)?,
@@ -464,9 +435,6 @@ fn summary_request_ends_on_the_cached_instruction_with_tools_kept() -> TestResul
         ],
         plakous_model::GenerationLimits::new(Some(bound), Vec::new())?,
         ReasoningPolicy::Disabled,
-        CachePolicy::Enabled {
-            requirement: CapabilityRequirement::Required,
-        },
     )?;
     let lowered = lower_request(
         &plan,
@@ -568,29 +536,8 @@ fn summary_request_manual_thinking_respects_the_configured_cap() -> TestResult {
 }
 
 #[test]
-fn cache_policy_disabled_omits_all_cache_control_markers() -> TestResult {
-    let (plan, policy) = lowering_fixture_with_customer_tool_and_cache(CachePolicy::Disabled)?;
-    let lowered = lower_request(
-        &plan,
-        &policy
-            .with_prompt_cache(true)
-            .with_top_level_prompt_cache(true)
-            .with_prompt_cache_ttl(Some("1h")),
-        ToolOwnership::default(),
-    )?;
-    let raw = std::str::from_utf8(lowered.body())?;
-    assert!(
-        !raw.contains("cache_control"),
-        "CachePolicy::Disabled must omit all cache_control markers: {raw}"
-    );
-    Ok(())
-}
-
-#[test]
 fn openrouter_gateway_session_emits_session_id_and_breakpoints_without_ttl() -> TestResult {
-    let (plan, policy) = lowering_fixture_with_customer_tool_and_cache(CachePolicy::Enabled {
-        requirement: CapabilityRequirement::Required,
-    })?;
+    let (plan, policy) = lowering_fixture_with_customer_tool()?;
     let session =
         Digest::sha256(DigestDomain::CacheAffinity, 1, &[b"openrouter-session"])?.to_string();
     let lowered = lower_request(

@@ -53,8 +53,8 @@ pub fn lower_request_with_active_artifact(
         ));
     }
     let prompt_cache = match request.cache() {
+        CachePolicy::Disabled | CachePolicy::Enabled { .. } if policy.prompt_cache => true,
         CachePolicy::Disabled => false,
-        CachePolicy::Enabled { .. } if policy.prompt_cache => true,
         CachePolicy::Enabled { requirement } => {
             return Err(match requirement {
                 CapabilityRequirement::Required => {

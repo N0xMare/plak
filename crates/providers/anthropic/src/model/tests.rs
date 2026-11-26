@@ -393,7 +393,7 @@ async fn production_api_key_admits_required_caching_and_emits_three_one_hour_bre
     let (head, body) = wire.split_once("\r\n\r\n").ok_or("request framing")?;
     assert!(!head.to_ascii_lowercase().contains("anthropic-beta:"));
     let body: serde_json::Value = serde_json::from_str(body)?;
-    let marker = serde_json::json!({"type":"ephemeral"});
+    let marker = serde_json::json!({"type":"ephemeral","ttl":"1h"});
     assert_eq!(body["tools"][0]["cache_control"], marker);
     assert_eq!(body["system"][0]["cache_control"], marker);
     assert_eq!(body["messages"][0]["content"][0]["cache_control"], marker);

@@ -1893,11 +1893,11 @@ the wrapper is a pure function of tree, parent, and label. The `-p` is omitted
 when HEAD does not resolve (an unborn branch). The working copy, the real
 index, and HEAD are never touched, and `change_id` is none.
 
-**Secret unstage.** Before `write-tree`, the staged path list
-(`git diff --cached --name-only`, falling back to `git ls-files --cached` on an
-unborn HEAD) is filtered and each secret path is removed from the temp index
-with `git reset -q -- <path>`, or `git rm --cached --force -q -- <path>` when
-that fails. A path is secret by basename: `.env` and any `.env.*` other than
+**Secret unstage.** Before `write-tree`, the NUL-delimited staged path list
+(`git diff --cached --name-only -z`, falling back to `git ls-files --cached -z`
+on an unborn HEAD) is filtered and each secret path is removed from the temp
+index with `git reset -q -- <path>`, or `git rm --cached --force -q -- <path>`
+when that fails. A path is secret by basename: `.env` and any `.env.*` other than
 `.env.example`; exactly `.netrc`, `.npmrc`, `credentials.json`, `id_rsa`,
 `id_ed25519`; and the extensions `pem`, `key`, `p12`, `pfx`. A candidate commit
 therefore cannot pin a secret the tool policy already excludes.
@@ -2004,7 +2004,10 @@ exactly, rather than copied in as loose files and merged afterwards.
 
 **Every `git` is bounded, neutral, and never prompts.** Each call drops the
 inherited `GIT_*` steering variables, runs with `-c core.fsmonitor=false -c
-core.hooksPath=/dev/null` so no repository hook or fsmonitor command runs, and
+core.hooksPath=/dev/null -c protocol.ext.allow=never -c core.pager=cat -c
+gc.auto=0 -c diff.external= -c core.sshCommand=false -c credential.helper=` so
+no repository hook, fsmonitor command, external diff, `ext::` helper, ssh
+helper, or credential helper runs, and
 writes its scratch files privately (chapter 04 §2.6). It runs with
 `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS` and, when the environment has
 no `EMAIL`, the fallback `EMAIL=plak@local` (a configured `user.email` still
@@ -2015,6 +2018,19 @@ runs in its own process group, under a ceiling: 30 s for a read (status, rev-par
 removes a copy. At the ceiling the whole group is killed and the step fails
 with the typed error it already had (a failed seal is a fault, §6.5), never a
 hang that holds the seal or the adopt.
+
+**Filtered repositories are refused.** Before `snapshot`, `mint`, or `adopt`,
+Plak inspects repository-local (and worktree-local, when
+`extensions.worktreeConfig` is enabled) `filter.*.(clean|smudge|process)`
+configuration and repository attribute sources (`info/attributes`, local
+`core.attributesFile`, working-tree `.gitattributes`, and committed
+`.gitattributes` in `HEAD` and any candidate tree) without invoking any filter.
+If any clean, smudge, or process filter driver or active `filter=<name>`
+attribute is present (including Git LFS or `git-crypt`), the operation refuses
+with a typed `mint_unavailable` / `Unavailable` error rather than executing
+repository-controlled filter code or silently blanking filters and corrupting
+LFS pointers or encrypted content. Standard non-filter attributes and unset
+`-filter`/`!filter` entries remain admitted.
 
 ### 6.2 JJ
 
@@ -3511,7 +3527,16 @@ from its owning session, or discard or close it and respawn`.
 
 Repo creation inside a copy is refused because a child re-initialising its copy
 turns it into a standalone repo the launch checkout cannot see, and its seal
-then faults.
+then faults. The Git shim runs with `set -f` (disabling pathname globbing),
+avoids word-splitting over refs, refuses `include.path` and `includeIf.*`
+configuration injections, resolves uncreated path arguments by canonicalizing
+their deepest existing ancestor while rejecting `..` segments and symlinks
+(across `-C`, `--work-tree`, `--git-dir`, `worktree`, and `clone`), and refuses
+`git clone` to any destination outside the occupancy copy. When inspecting
+`.plak/bin/git` for reclamation, `ignored_path_is_managed` accepts both the
+current shim render and the immediate predecessor release's render
+byte-for-byte so closed predecessor copies reclaim cleanly; `install` always
+writes the current shim.
 
 **What the shim cannot enforce.** It is basename-only. An absolute
 `/usr/bin/git` or `PATH=/usr/bin git` with an explicit repository path or

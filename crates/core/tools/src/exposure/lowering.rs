@@ -620,10 +620,10 @@ pub(super) fn lower_projection(
                     .filter(|value| !value.is_null())
                     .unwrap_or_else(|| Value::String(String::from("."))),
             );
-            let case_sensitive = !arguments
+            let case_sensitive = arguments
                 .get("-i")
                 .and_then(Value::as_bool)
-                .unwrap_or(false);
+                .is_some_and(|insensitive| !insensitive);
             search.insert("case_sensitive".to_owned(), Value::Bool(case_sensitive));
             search.insert("use_regex".to_owned(), Value::Bool(true));
             if let Some(glob) = arguments
@@ -661,24 +661,22 @@ pub(super) fn lower_projection(
         }
         ToolProjectionLoweringV2::GrokSearchReplace | ToolProjectionLoweringV2::ClaudeEdit => {
             let old_string = arguments.get("old_string").cloned().unwrap_or(Value::Null);
-            if old_string.as_str().is_some_and(str::is_empty) {
-                let message = match entry.lowering {
-                    ToolProjectionLoweringV2::ClaudeEdit => {
-                        "Edit requires a non-empty old_string; use Write to create a new file"
-                    }
-                    _ => {
-                        "search_replace requires a non-empty old_string; use write to create or overwrite a file"
-                    }
-                };
+            if entry.lowering == ToolProjectionLoweringV2::ClaudeEdit
+                && old_string.as_str().is_some_and(str::is_empty)
+            {
                 return Err(ToolRuntimeError::new(
                     ToolRuntimeErrorKind::InvalidArguments,
-                    message,
+                    "Edit requires a non-empty old_string; use Write to create a new file",
                 ));
             }
-            let replace_all = arguments
-                .get("replace_all")
-                .cloned()
-                .unwrap_or(Value::Bool(false));
+            let replace_all = if old_string.as_str() == Some("") {
+                Value::Bool(false)
+            } else {
+                arguments
+                    .get("replace_all")
+                    .cloned()
+                    .unwrap_or(Value::Bool(false))
+            };
             (
                 capability_operation(entry)?,
                 json!({
@@ -702,11 +700,7 @@ pub(super) fn lower_projection(
         ToolProjectionLoweringV2::GrokListDir => (
             capability_operation(entry)?,
             json!({
-                "path": arguments
-                    .get("target_directory")
-                    .cloned()
-                    .filter(|value| !value.is_null())
-                    .unwrap_or_else(|| Value::String(String::from("."))),
+                "path": arguments.get("target_directory").cloned().unwrap_or(Value::Null),
                 // `search_repository` requires `query` even when it only
                 // lists: a listing carries the empty needle.
                 "query": "",

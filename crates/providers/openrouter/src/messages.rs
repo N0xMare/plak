@@ -857,7 +857,7 @@ fn messages_capabilities(
     evidence: &OpenRouterChatModelEvidence,
 ) -> Result<CapabilitySet, plakous_model::IdentityError> {
     let provenance = FactProvenance::new(FactSource::BuiltIn, Timestamp::new(0, 0)?, None);
-    Ok(crate::wire::gateway_messages_capabilities(
+    Ok(crate::wire::gateway_capabilities(
         evidence,
         provenance,
         "Custom OpenRouter Messages dialect",

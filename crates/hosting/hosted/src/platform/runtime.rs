@@ -219,11 +219,10 @@ fn platform_behavior(
     tools: Vec<plakous::model::ConfiguredTool>,
 ) -> CliResult<plakous::model::ProviderBehaviorConfiguration> {
     use plakous::model::{
-        CachePolicy, CapabilityRequirement, ContextAdmissionRequirement,
-        LocalDurabilityDisposition, OutputBoundDisposition, OutputPolicy, ParallelToolDisposition,
-        ProcessingTierDisposition, ProviderBehaviorConfiguration, ReasoningEffortDisposition,
-        ReasoningIncludeDisposition, ReasoningSummaryDisposition, ResponseStateDisposition,
-        ToolChoice, ToolPresentationMode,
+        CachePolicy, ContextAdmissionRequirement, LocalDurabilityDisposition,
+        OutputBoundDisposition, OutputPolicy, ParallelToolDisposition, ProcessingTierDisposition,
+        ProviderBehaviorConfiguration, ReasoningEffortDisposition, ReasoningIncludeDisposition,
+        ReasoningSummaryDisposition, ResponseStateDisposition, ToolChoice, ToolPresentationMode,
     };
     Ok(ProviderBehaviorConfiguration {
         processing_tier: ProcessingTierDisposition::Standard,
@@ -248,12 +247,7 @@ fn platform_behavior(
             }
         },
         replay: ReplayDisposition::StrictEncrypted,
-        cache: match provider {
-            PlatformProvider::Anthropic => CachePolicy::Enabled {
-                requirement: CapabilityRequirement::Required,
-            },
-            PlatformProvider::OpenAi | PlatformProvider::Xai => CachePolicy::Disabled,
-        },
+        cache: CachePolicy::Disabled,
         tools,
         hosted_tools: Vec::new(),
         tool_choice: ToolChoice::Auto,

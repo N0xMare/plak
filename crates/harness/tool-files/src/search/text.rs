@@ -11,7 +11,7 @@ pub const PLAKOUS_GROK_GREP_DESCRIPTION: &str = "Search file contents with regul
 - Paths matched by .gitignore or .ignore are not searched, nor is .git; other dotfiles are. Files over 1 MiB and binary files are skipped, scanned text is bounded at 256 MiB and traversal at 10,000 entries. The first result line reports skipped counts or an early stop, names the bound and suggests narrowing path or pattern only for an early stop.";
 
 /// Grok OAuth list_dir tool description.
-pub const PLAKOUS_GROK_LIST_DIR_DESCRIPTION: &str = "Lists files and directories in a given path.\nThe optional target_directory parameter is workspace-relative or absolute inside the workspace (omit it or pass `.` for the workspace root); paths outside the workspace and `..` are refused. A missing path fails with `path does not exist: <path>`.\n\nOther details:\n    - The result does not display dot-files and dot-directories.\n    - Paths matched by .gitignore or .ignore are not listed, nor are symlinks.";
+pub const PLAKOUS_GROK_LIST_DIR_DESCRIPTION: &str = "Lists files and directories in a given path.\nThe target_directory parameter is workspace-relative or absolute inside the workspace (omit `.` for the root); paths outside the workspace and `..` are refused. A missing path fails with `path does not exist: <path>`.\n\nOther details:\n    - The result does not display dot-files and dot-directories.\n    - .gitignore filtering is not applied; all non-dot entries under the directory are listed.";
 
 /// search_repository tool, returned when paths_only is set without filename_glob.
 pub const PLAKOUS_TOOL_SEARCH_REQUIRES_GLOB: &str = "glob search requires filename_glob";

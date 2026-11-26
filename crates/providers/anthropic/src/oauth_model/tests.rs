@@ -781,7 +781,7 @@ fn enrolled_oauth_descriptor_uses_route_evidence_and_pin_expiry() {
         CapacityRule::ProviderReservedInput {
             reported_context_window: Some(1_000_000),
             maximum_projected_input: 1_000_000,
-            auto_compact_input: Some(CLAUDE_LARGE_WINDOW_AUTO_COMPACT_INPUT),
+            auto_compact_input: None,
         }
     );
     assert_eq!(
@@ -915,7 +915,7 @@ fn oauth_complete_wire_boundary_preserves_typed_context_denial() {
         CapacityRule::ProviderReservedInput {
             reported_context_window: Some(limit),
             maximum_projected_input: limit,
-            auto_compact_input: Some(CLAUDE_LARGE_WINDOW_AUTO_COMPACT_INPUT),
+            auto_compact_input: None,
         }
     );
     for wire_size in [limit - 1, limit, limit + 1] {
@@ -1374,50 +1374,12 @@ fn haiku_5_5_is_enrolled_on_oauth_with_the_shared_window() {
         CapacityRule::ProviderReservedInput {
             reported_context_window: Some(1_000_000),
             maximum_projected_input: 1_000_000,
-            auto_compact_input: Some(CLAUDE_LARGE_WINDOW_AUTO_COMPACT_INPUT),
+            auto_compact_input: None,
         }
     );
     assert_eq!(
         resolved.dialect().beta_header().as_deref(),
         Some(crate::claude_oauth_beta_header("claude-haiku-5-5"))
-    );
-}
-
-#[test]
-fn claude_oauth_auto_compact_input_applies_only_above_large_window_threshold() {
-    let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).expect("reviewed at");
-    let expires_at = pin_expires_at(now).expect("pin expiry");
-    let large = reference_client_context_contract(
-        "claude-sonnet-5",
-        1_000_000,
-        test_context_authority(),
-        now,
-        expires_at,
-    )
-    .expect("1M contract");
-    assert_eq!(
-        large.capacity().rule(),
-        CapacityRule::ProviderReservedInput {
-            reported_context_window: Some(1_000_000),
-            maximum_projected_input: 1_000_000,
-            auto_compact_input: Some(250_000),
-        }
-    );
-    let standard = reference_client_context_contract(
-        "claude-sonnet-5",
-        200_000,
-        test_context_authority(),
-        now,
-        expires_at,
-    )
-    .expect("200k contract");
-    assert_eq!(
-        standard.capacity().rule(),
-        CapacityRule::ProviderReservedInput {
-            reported_context_window: Some(200_000),
-            maximum_projected_input: 200_000,
-            auto_compact_input: None,
-        }
     );
 }
 
@@ -2281,4 +2243,87 @@ fn oauth_access_token_rebind_keeps_prepared_target_binding() {
         binding.validate_route(&independently_wrapped).is_err(),
         "independently wrapping the rotated token must not reuse prepared authority"
     );
+}
+
+/// Golden pin over every real enrolled Claude OAuth model so any change to
+/// capabilities, context contract, or `auto_compact_input` that alters
+/// `semantic_binding_digest()` (and would therefore break exact reopen of live
+/// Claude roots and children) fails a unit test immediately.
+#[test]
+fn enrolled_claude_oauth_models_pin_semantic_binding_digests() {
+    const EXPECTED: &[(&str, &str)] = &[
+        (
+            "claude-sonnet-5",
+            "5259c7be5bd0667a948dfbb717ee26c97046cc41502d9542d0382a826a4818e0",
+        ),
+        (
+            "claude-sonnet-5-5",
+            "a15039859bedc80f9b306afc7fcc9947698bf75187d8e516460e8f2e7d660011",
+        ),
+        (
+            "claude-haiku-5-5",
+            "7546c3db037447122f7416b56bfacfc3f2b3a275d1f06ee37bddf57f468b84ad",
+        ),
+        (
+            "claude-fable-5-1",
+            "e49b28ad4e5818b44a2bea2ca7930b28cdb4ca2ca59ee85bfccf1b66a14c4531",
+        ),
+        (
+            "claude-fable-5-2",
+            "021ff3fce06ea9f1ff0c4cd04ad5ead6619ae68ebaa6d7e4b7490eaa064063f4",
+        ),
+        (
+            "claude-opus-5",
+            "09abe3e475b0ac948ae3b8378ad823217ea8d1cb570274ad498ef012384f705c",
+        ),
+        (
+            "claude-opus-5-5",
+            "e8298295665769a4b1f92de120e08fd2d077752774acf4516fd33747d4d9226c",
+        ),
+    ];
+
+    let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).expect("reviewed at");
+    let expires_at = pin_expires_at(now).expect("pin expiry");
+    let route = AnthropicPlatformRoute::claude_oauth(
+        ApiKey::new("oauth-pin-access-token").expect("key"),
+        AnthropicAccountIdentity::new(TEST_GRANT_BINDING).expect("account"),
+    )
+    .expect("route");
+    let authority = test_context_authority();
+    let actual: Vec<(&'static str, String)> = crate::CLAUDE_ENROLLMENTS
+        .iter()
+        .filter(|entry| entry.oauth)
+        .map(|entry| {
+            let resolved =
+                oauth_resolved_target(route.clone(), entry.model, authority, now, expires_at)
+                    .unwrap_or_else(|error| {
+                        panic!("enrolled {} must resolve: {error}", entry.model)
+                    });
+            let descriptor = resolved.descriptor();
+            assert_eq!(
+                descriptor
+                    .context_contract()
+                    .expect("context contract")
+                    .capacity()
+                    .rule(),
+                CapacityRule::ProviderReservedInput {
+                    reported_context_window: Some(entry.context_window),
+                    maximum_projected_input: entry.context_window,
+                    auto_compact_input: None,
+                },
+                "unexpected capacity rule for {}",
+                entry.model
+            );
+            let digest = descriptor
+                .semantic_binding_digest()
+                .expect("semantic binding digest")
+                .to_string();
+            (entry.model, digest)
+        })
+        .collect();
+    let expected: Vec<(&str, String)> = EXPECTED
+        .iter()
+        .map(|(model, digest)| (*model, (*digest).to_owned()))
+        .collect();
+    assert_eq!(actual, expected);
 }

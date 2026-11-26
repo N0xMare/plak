@@ -122,23 +122,6 @@ pub(crate) fn gateway_capabilities(
     provenance: plakous_model::FactProvenance,
     constraint: &str,
 ) -> plakous_model::CapabilitySet {
-    gateway_capabilities_inner(evidence, provenance, constraint, false)
-}
-
-pub(crate) fn gateway_messages_capabilities(
-    evidence: &crate::OpenRouterChatModelEvidence,
-    provenance: plakous_model::FactProvenance,
-    constraint: &str,
-) -> plakous_model::CapabilitySet {
-    gateway_capabilities_inner(evidence, provenance, constraint, true)
-}
-
-fn gateway_capabilities_inner(
-    evidence: &crate::OpenRouterChatModelEvidence,
-    provenance: plakous_model::FactProvenance,
-    constraint: &str,
-    prompt_cache: bool,
-) -> plakous_model::CapabilitySet {
     use plakous_model::{
         Capability, CapabilityConstraints, CapabilitySet, FeatureSupport, Support,
     };
@@ -156,12 +139,6 @@ fn gateway_capabilities_inner(
         )
     })
     .collect::<std::collections::BTreeMap<_, _>>();
-    if prompt_cache {
-        features.insert(
-            Capability::Caching,
-            FeatureSupport::new(Support::Native, constraints, provenance),
-        );
-    }
     if let Some(image) = crate::chat::image_input_fact(evidence) {
         features.insert(Capability::ImageInput, image);
     }

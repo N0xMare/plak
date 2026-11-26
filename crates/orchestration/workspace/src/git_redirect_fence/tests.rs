@@ -2318,6 +2318,21 @@ fn reclamation_accepts_the_regenerated_guarded_shim() {
     std::fs::write(&exclude, ".plak/bin/\n").unwrap();
     install(&child).unwrap();
     assert!(crate::occupancy_vcs::maintenance::check_reclaimable(&child, None).is_ok());
+
+    // Copies minted by the predecessor release (cut 9k) carry `git_shim_prev.sh`
+    // bytes; reclamation must still recognize them as managed without requiring
+    // a child reopen first, while rejecting any tampered bytes.
+    let canonical = std::fs::canonicalize(&child).unwrap();
+    let prev = super::prev_shim_script(
+        &canonical,
+        &super::discover_real_git().unwrap(),
+        &super::own_branch(&canonical),
+    );
+    std::fs::write(child.join(".plak/bin/git"), &prev).unwrap();
+    assert!(crate::occupancy_vcs::maintenance::check_reclaimable(&child, None).is_ok());
+    std::fs::write(child.join(".plak/bin/git"), format!("{prev}# tampered\n")).unwrap();
+    assert!(crate::occupancy_vcs::maintenance::check_reclaimable(&child, None).is_err());
+
     std::fs::write(child.join(".plak/bin/git"), "#!/bin/sh\nexit 0\n").unwrap();
     assert!(crate::occupancy_vcs::maintenance::check_reclaimable(&child, None).is_err());
 }

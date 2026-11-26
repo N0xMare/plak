@@ -98,8 +98,10 @@ pub(super) fn git_worktree_registered(launch: &Path, path: &Path) -> Result<bool
 /// Repository-controlled code never runs inside Plak's own git steps: the
 /// inherited `GIT_*` steering variables are dropped (a caller re-adds only the
 /// ones it sets deliberately), hooks resolve under `/dev/null` and so never exist,
-/// fsmonitor, ext protocol, external diff, credential helpers, ssh helpers, and
-/// repo clean/smudge/process filters are disabled, and auto-gc/pagers are off.
+/// fsmonitor, ext protocol, external diff, credential helpers, and ssh helpers
+/// are disabled, and auto-gc/pagers are off. Repositories configuring clean,
+/// smudge, or process filters (such as Git LFS or git-crypt) are refused before
+/// snapshot, mint, or adopt rather than silently blanking their filters.
 /// `git` never prompts: no terminal prompt and no askpass helper, so a remote
 /// or credential question fails instead of waiting for input nobody can give.
 pub(super) fn git_command(cwd: &Path) -> Command {
@@ -124,32 +126,9 @@ pub(super) fn git_command(cwd: &Path) -> Command {
             "core.sshCommand=false",
             "-c",
             "credential.helper=",
-            "-c",
-            "core.attributesFile=/dev/null",
-            "-c",
-            "filter.lfs.clean=",
-            "-c",
-            "filter.lfs.smudge=",
-            "-c",
-            "filter.lfs.process=",
-            "-c",
-            "filter.lfs.required=false",
         ])
-        .env("GIT_ATTR_NOSYSTEM", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "");
-    for filter_name in repo_configured_filters(cwd) {
-        command.args([
-            "-c",
-            &format!("filter.{filter_name}.clean="),
-            "-c",
-            &format!("filter.{filter_name}.smudge="),
-            "-c",
-            &format!("filter.{filter_name}.process="),
-            "-c",
-            &format!("filter.{filter_name}.required=false"),
-        ]);
-    }
     // Without this, an unconfigured identity makes git resolve the host's
     // FQDN for every reflog entry; musl's resolver waits out its full timeout
     // when there is no network. Configured `user.email` still takes precedence.
@@ -159,85 +138,287 @@ pub(super) fn git_command(cwd: &Path) -> Command {
     command
 }
 
-/// Scans the nearest repo `.git/config` (and worktree commondir `config`) for
-/// `[filter "<name>"]` sections so `git_command` can blank their clean, smudge
-/// and process drivers without spawning a subprocess.
-fn repo_configured_filters(cwd: &Path) -> Vec<String> {
-    const MAX_CONFIG_BYTES: u64 = 256 * 1024;
-    let Some(config_path) = nearest_git_config_path(cwd) else {
-        return Vec::new();
-    };
-    let Ok(file) = std::fs::File::open(config_path) else {
-        return Vec::new();
-    };
-    let mut raw = Vec::new();
-    if Read::take(file, MAX_CONFIG_BYTES)
-        .read_to_end(&mut raw)
-        .is_err()
-    {
-        return Vec::new();
+/// Refuses snapshot, mint, and adopt in repositories with configured clean,
+/// smudge, or process filters (including Git LFS, `git-crypt`, and custom
+/// repo-configured filter drivers) without executing any filter.
+///
+/// Blanking filters silently would corrupt LFS pointers or store `git-crypt`
+/// plaintext in snapshot commits; executing repo-configured filters would run
+/// repository-controlled code. Refusal preserves both integrity and safety.
+pub(super) fn reject_configured_git_filters(
+    path: &Path,
+    tree_ref: Option<&str>,
+) -> Result<(), VcsError> {
+    reject_config_filter_drivers(path, "--local")?;
+    if worktree_config_enabled(path) {
+        reject_config_filter_drivers(path, "--worktree")?;
     }
-    let text = String::from_utf8_lossy(&raw);
-    let mut names = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        let Some(inner) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) else {
-            continue;
-        };
-        let inner = inner.trim();
-        let Some((section, rest)) = inner.split_once(|ch: char| ch.is_ascii_whitespace()) else {
-            continue;
-        };
-        if !section.eq_ignore_ascii_case("filter") {
-            continue;
-        }
-        let rest = rest.trim();
-        let Some(name) = rest.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
-            continue;
-        };
-        if !name.is_empty()
-            && !name.eq_ignore_ascii_case("lfs")
-            && !name.contains(['\0', '\n', '\r', '='])
-            && !names.iter().any(|existing| existing == name)
-        {
-            names.push(name.to_owned());
-        }
-    }
-    names
+    reject_attribute_filters(path, tree_ref)
 }
 
-fn nearest_git_config_path(cwd: &Path) -> Option<std::path::PathBuf> {
-    for ancestor in cwd.ancestors() {
-        let dot_git = ancestor.join(".git");
-        if dot_git.is_dir() {
-            return Some(dot_git.join("config"));
+fn worktree_config_enabled(path: &Path) -> bool {
+    git_query(
+        path,
+        &[
+            "config",
+            "--local",
+            "--includes",
+            "--bool",
+            "--get",
+            "extensions.worktreeConfig",
+        ],
+    )
+    .is_ok_and(|output| {
+        output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true"
+    })
+}
+
+fn reject_config_filter_drivers(path: &Path, scope: &str) -> Result<(), VcsError> {
+    let output = git_query(
+        path,
+        &[
+            "config",
+            scope,
+            "--includes",
+            "--null",
+            "--get-regexp",
+            r"^filter\..*\.(clean|smudge|process)$",
+        ],
+    )
+    .map_err(|_| VcsError::mint_unavailable("could not inspect git filter configuration"))?;
+    if output.status.code() == Some(1) {
+        return Ok(());
+    }
+    if !output.status.success() {
+        return Err(VcsError::mint_unavailable(
+            "could not inspect repository git filter configuration",
+        ));
+    }
+    for entry in output.stdout.split(|byte| *byte == 0) {
+        if entry.is_empty() {
+            continue;
         }
-        if dot_git.is_file() {
-            let text = std::fs::read_to_string(&dot_git).ok()?;
-            let raw = text
-                .lines()
-                .find_map(|line| line.strip_prefix("gitdir:"))?
-                .trim();
-            if raw.is_empty() {
-                return None;
-            }
-            let git_dir = if Path::new(raw).is_absolute() {
-                std::path::PathBuf::from(raw)
-            } else {
-                ancestor.join(raw)
-            };
-            if let Ok(commondir) = std::fs::read_to_string(git_dir.join("commondir")) {
-                let common = commondir.trim();
-                if !common.is_empty() {
-                    let common_path = if Path::new(common).is_absolute() {
-                        std::path::PathBuf::from(common)
-                    } else {
-                        git_dir.join(common)
-                    };
-                    return Some(common_path.join("config"));
+        let (key_bytes, value_bytes) = match entry.iter().position(|byte| *byte == b'\n') {
+            Some(pos) => (&entry[..pos], &entry[pos + 1..]),
+            None => (entry, &[][..]),
+        };
+        let value = String::from_utf8_lossy(value_bytes);
+        if value.trim().is_empty() {
+            continue;
+        }
+        let key = String::from_utf8_lossy(key_bytes);
+        return Err(VcsError::mint_unavailable(format!(
+            "git repository configures clean/smudge/process filter `{key}`; \
+             plak refuses snapshot, mint, and adopt in filtered repositories \
+             (such as git-lfs or git-crypt) rather than executing or bypassing filters"
+        )));
+    }
+    Ok(())
+}
+
+fn reject_attribute_filters(path: &Path, tree_ref: Option<&str>) -> Result<(), VcsError> {
+    if let Ok(common_out) = git_query(
+        path,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    ) && common_out.status.success()
+    {
+        let common = String::from_utf8_lossy(&common_out.stdout)
+            .trim()
+            .to_owned();
+        if !common.is_empty() {
+            scan_attributes_file(
+                "info/attributes",
+                &Path::new(&common).join("info/attributes"),
+            )?;
+        }
+    }
+    for scope in ["--local", "--worktree"] {
+        if scope == "--worktree" && !worktree_config_enabled(path) {
+            continue;
+        }
+        if let Ok(attr_out) = git_query(
+            path,
+            &[
+                "config",
+                scope,
+                "--includes",
+                "--path",
+                "--null",
+                "--get-all",
+                "core.attributesFile",
+            ],
+        ) && attr_out.status.success()
+        {
+            for entry in attr_out.stdout.split(|byte| *byte == 0) {
+                let raw = String::from_utf8_lossy(entry).trim().to_owned();
+                if raw.is_empty() {
+                    continue;
                 }
+                let attr_path = Path::new(&raw);
+                let resolved = if attr_path.is_absolute() {
+                    attr_path.to_path_buf()
+                } else {
+                    path.join(attr_path)
+                };
+                scan_attributes_file("core.attributesFile", &resolved)?;
             }
-            return Some(git_dir.join("config"));
+        }
+    }
+    let toplevel_out = git_query(path, &["rev-parse", "--show-toplevel"])
+        .map_err(|_| VcsError::mint_unavailable("could not resolve git repository root"))?;
+    if !toplevel_out.status.success() {
+        return Err(VcsError::mint_unavailable(
+            "could not resolve git repository root",
+        ));
+    }
+    let toplevel = std::path::PathBuf::from(
+        String::from_utf8_lossy(&toplevel_out.stdout)
+            .trim()
+            .to_owned(),
+    );
+    let listed = git_query(
+        &toplevel,
+        &[
+            "ls-files",
+            "--cached",
+            "--others",
+            "-z",
+            "--",
+            ".gitattributes",
+            "**/.gitattributes",
+        ],
+    )
+    .map_err(|_| VcsError::mint_unavailable("could not inspect repository .gitattributes"))?;
+    if !listed.status.success() {
+        return Err(VcsError::mint_unavailable(
+            "could not inspect repository .gitattributes",
+        ));
+    }
+    for entry in listed.stdout.split(|byte| *byte == 0) {
+        if entry.is_empty() {
+            continue;
+        }
+        let rel = String::from_utf8_lossy(entry);
+        scan_attributes_file(&rel, &toplevel.join(rel.as_ref()))?;
+    }
+    for rev in ["HEAD"].into_iter().chain(tree_ref) {
+        scan_tree_gitattributes(&toplevel, rev)?;
+    }
+    Ok(())
+}
+
+fn scan_tree_gitattributes(toplevel: &Path, rev: &str) -> Result<(), VcsError> {
+    let verify = git_query(
+        toplevel,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{rev}^{{tree}}"),
+        ],
+    );
+    let Ok(verify) = verify else {
+        return Ok(());
+    };
+    if !verify.status.success() {
+        return Ok(());
+    }
+    let listed = git_query(
+        toplevel,
+        &[
+            "ls-tree",
+            "-r",
+            "-z",
+            "--name-only",
+            rev,
+            "--",
+            ".gitattributes",
+            "**/.gitattributes",
+        ],
+    )
+    .map_err(|_| VcsError::mint_unavailable("could not inspect committed .gitattributes"))?;
+    if !listed.status.success() {
+        return Err(VcsError::mint_unavailable(
+            "could not inspect committed .gitattributes",
+        ));
+    }
+    for entry in listed.stdout.split(|byte| *byte == 0) {
+        if entry.is_empty() {
+            continue;
+        }
+        let rel = String::from_utf8_lossy(entry);
+        let spec = format!("{rev}:{rel}");
+        let blob = git_query(toplevel, &["cat-file", "blob", &spec])
+            .map_err(|_| VcsError::mint_unavailable("could not read committed .gitattributes"))?;
+        if !blob.status.success() {
+            return Err(VcsError::mint_unavailable(
+                "could not read committed .gitattributes",
+            ));
+        }
+        scan_attributes_bytes(&spec, &blob.stdout)?;
+    }
+    Ok(())
+}
+
+fn scan_attributes_file(source: &str, file_path: &Path) -> Result<(), VcsError> {
+    const MAX_ATTRIBUTES_BYTES: u64 = 4 * 1024 * 1024;
+    let meta = match std::fs::symlink_metadata(file_path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => {
+            return Err(VcsError::mint_unavailable(format!(
+                "could not inspect git attributes `{source}`"
+            )));
+        }
+    };
+    if !meta.file_type().is_file() {
+        return Err(VcsError::mint_unavailable(format!(
+            "git attributes `{source}` is not a regular file"
+        )));
+    }
+    let file = std::fs::File::open(file_path).map_err(|_| {
+        VcsError::mint_unavailable(format!("could not read git attributes `{source}`"))
+    })?;
+    let mut raw = Vec::new();
+    Read::take(file, MAX_ATTRIBUTES_BYTES + 1)
+        .read_to_end(&mut raw)
+        .map_err(|_| {
+            VcsError::mint_unavailable(format!("could not read git attributes `{source}`"))
+        })?;
+    if u64::try_from(raw.len()).unwrap_or(u64::MAX) > MAX_ATTRIBUTES_BYTES {
+        return Err(VcsError::mint_unavailable(format!(
+            "git attributes `{source}` exceeds the inspection size limit"
+        )));
+    }
+    scan_attributes_bytes(source, &raw)
+}
+
+fn scan_attributes_bytes(source: &str, bytes: &[u8]) -> Result<(), VcsError> {
+    if let Some(filter_name) = first_active_filter_attr(bytes) {
+        return Err(VcsError::mint_unavailable(format!(
+            "git attributes `{source}` enable `filter={filter_name}`; \
+             plak refuses snapshot, mint, and adopt in filtered repositories \
+             (such as git-lfs or git-crypt) rather than executing or bypassing filters"
+        )));
+    }
+    Ok(())
+}
+
+fn first_active_filter_attr(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let mut tokens = trimmed.split_ascii_whitespace();
+        let _pattern = tokens.next()?;
+        for token in tokens {
+            if let Some(value) = token.strip_prefix("filter=")
+                && !value.is_empty()
+            {
+                return Some(value.to_owned());
+            }
         }
     }
     None
@@ -410,6 +591,7 @@ pub(super) fn git_snapshot(path: &Path, label: &str) -> Result<VcsSnapshot, VcsE
     if reported.is_empty() {
         return Err(mint_error("git index path was empty"));
     }
+    reject_configured_git_filters(path, None)?;
     let index_source = {
         let reported = Path::new(&reported);
         if reported.is_absolute() {
@@ -513,6 +695,8 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
         }
         None => (base_commit, candidate.commit.as_str()),
     };
+    reject_configured_git_filters(target_path, Some(candidate_commit))
+        .map_err(|error| AdoptFailure::Unavailable(error.detail))?;
     let target = git_snapshot(target_path, "adopt-target")
         .map_err(|error| AdoptFailure::Unavailable(error.detail))?;
     if let Some(expected) = expected_target

@@ -1782,9 +1782,7 @@ fn a_stalled_git_is_killed_at_its_ceiling() {
         "prompt=0 askpass=[] \
          -c core.fsmonitor=false -c core.hooksPath=/dev/null \
          -c protocol.ext.allow=never -c core.pager=cat -c gc.auto=0 \
-         -c diff.external= -c core.sshCommand=false -c credential.helper= \
-         -c core.attributesFile=/dev/null -c filter.lfs.clean= \
-         -c filter.lfs.smudge= -c filter.lfs.process= -c filter.lfs.required=false fast"
+         -c diff.external= -c core.sshCommand=false -c credential.helper= fast"
     );
 }
 
@@ -2516,47 +2514,149 @@ fn git_snapshot_unstages_non_ascii_secret_paths_with_nul_delimiters() {
     );
 }
 
-/// Host `git_command` neutralizes hostile repo config: clean/smudge/process
-/// filters, `diff.external`, and `protocol.ext.allow`.
+/// Host `git_command` neutralizes `diff.external` and `protocol.ext.allow`,
+/// while snapshot, mint, and adopt refuse repositories configuring clean,
+/// smudge, or process filters (hostile filters, `git-crypt`, or Git LFS)
+/// without executing any filter or corrupting filtered content.
 #[test]
-fn git_command_neutralizes_repo_filters_external_diff_and_ext_protocol() {
-    let repo = git_repo();
-    let marker = repo.path().join("PWNED");
+fn git_command_neutralizes_external_diff_and_ext_protocol_and_refuses_filtered_repos() {
+    let clean_repo = git_repo();
+    let marker = clean_repo.path().join("PWNED");
     let evil_cmd = format!("sh -c 'touch {} && cat'", marker.display());
     for args in [
-        vec!["config", "filter.evil.clean", &evil_cmd],
-        vec!["config", "filter.evil.smudge", &evil_cmd],
-        vec!["config", "filter.evil.process", &evil_cmd],
         vec!["config", "diff.external", &evil_cmd],
         vec!["config", "protocol.ext.allow", "always"],
     ] {
-        assert!(
-            Command::new("git")
-                .args(&args)
-                .current_dir(repo.path())
-                .status()
-                .unwrap()
-                .success()
-        );
+        git_in(clean_repo.path(), &args);
     }
-    std::fs::write(repo.path().join(".gitattributes"), "*.txt filter=evil\n").unwrap();
-    std::fs::write(repo.path().join("hello.txt"), "hello\n").unwrap();
-
-    // Snapshotting must not execute the clean/smudge/process filter.
-    let _snap = git_snapshot(repo.path(), "filter-test").unwrap();
-    assert!(!marker.exists(), "repo filter executed during git_snapshot");
-
-    // `git diff` via git_query must not execute `diff.external`.
-    let diff = git_query(repo.path(), &["diff", "HEAD"]).unwrap();
+    // Standard non-filter attributes (and unset -filter / !filter) remain admitted.
+    std::fs::write(
+        clean_repo.path().join(".gitattributes"),
+        "* text=auto eol=lf\n*.bin -filter !filter\n",
+    )
+    .unwrap();
+    std::fs::write(clean_repo.path().join("hello.txt"), "hello\n").unwrap();
+    let base = git_snapshot(clean_repo.path(), "clean-base").unwrap();
+    let diff = git_query(clean_repo.path(), &["diff", "HEAD"]).unwrap();
     assert!(diff.status.success());
     assert!(!marker.exists(), "diff.external executed during git_query");
-
-    // `protocol.ext.allow` must resolve to `never`.
     let proto = git_text(
-        repo.path(),
+        clean_repo.path(),
         &["config", "--get", "protocol.ext.allow"],
         "ext",
     )
     .unwrap();
     assert_eq!(proto, "never");
+
+    // 1) Hostile repo-configured clean/smudge/process filters (like git-crypt or
+    //    malicious `.git/config`) are refused on snapshot, mint, and adopt with
+    //    zero filter execution.
+    let hostile = git_repo();
+    let hostile_marker = hostile.path().join("PWNED");
+    let hostile_cmd = format!("sh -c 'touch {} && cat'", hostile_marker.display());
+    let clean_seed = git_snapshot(hostile.path(), "seed").unwrap();
+    for args in [
+        vec!["config", "filter.evil.clean", &hostile_cmd],
+        vec!["config", "filter.evil.smudge", &hostile_cmd],
+        vec!["config", "filter.evil.process", &hostile_cmd],
+    ] {
+        git_in(hostile.path(), &args);
+    }
+    std::fs::write(hostile.path().join(".gitattributes"), "*.txt filter=evil\n").unwrap();
+    std::fs::write(hostile.path().join("secret.txt"), "plaintext\n").unwrap();
+
+    let snap_err = git_snapshot(hostile.path(), "filter-test").unwrap_err();
+    assert_eq!(snap_err.kind, VcsErrorKind::MintUnavailable);
+    assert!(snap_err.detail.contains("filter"), "{}", snap_err.detail);
+    assert!(
+        !hostile_marker.exists(),
+        "repo filter executed during git_snapshot"
+    );
+
+    let mint_err = mint_git_worktree(&MintRequest {
+        launch: hostile.path(),
+        namespace: "1111111122222222",
+        agent_id: "c1",
+        parent_cwd: hostile.path(),
+        mode: WorkspaceMode::Fork,
+        base: Some(&clean_seed),
+    })
+    .unwrap_err();
+    assert_eq!(mint_err.kind, VcsErrorKind::MintUnavailable);
+    assert!(mint_err.detail.contains("filter"), "{}", mint_err.detail);
+    assert!(
+        !hostile_marker.exists(),
+        "repo filter executed during mint_git_worktree"
+    );
+
+    let adopt_err = git_adopt(&AdoptRequest {
+        resolution_refusal: None,
+        revert: None,
+        accept_conflicts: false,
+        conflict_pin: None,
+        resolver_paths: &[],
+        resolved_source: None,
+        target_path: hostile.path(),
+        child_path: hostile.path(),
+        source_agent_id: None,
+        base_commit: &clean_seed.commit,
+        base_change_id: None,
+        candidate: &clean_seed,
+        expected_target: None,
+        namespace: "1111111122222222",
+        candidate_id: "cand-1",
+    })
+    .unwrap_err();
+    assert!(
+        matches!(adopt_err, AdoptFailure::Unavailable(ref msg) if msg.contains("filter")),
+        "expected filter refusal on git_adopt, got {adopt_err:?}"
+    );
+    assert!(
+        !hostile_marker.exists(),
+        "repo filter executed during git_adopt"
+    );
+
+    // 2) Git LFS repo (`.gitattributes` `filter=lfs` even without local
+    //    `filter.lfs.*` config) is refused on snapshot, mint, and adopt so LFS
+    //    pointers are never replaced by raw blobs.
+    let lfs_repo = git_repo();
+    let lfs_seed = git_snapshot(lfs_repo.path(), "lfs-seed").unwrap();
+    std::fs::write(
+        lfs_repo.path().join(".gitattributes"),
+        "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+    )
+    .unwrap();
+    std::fs::write(lfs_repo.path().join("blob.bin"), b"\x00\x01\x02").unwrap();
+    let lfs_err = git_snapshot(lfs_repo.path(), "lfs-snap").unwrap_err();
+    assert_eq!(lfs_err.kind, VcsErrorKind::MintUnavailable);
+    assert!(lfs_err.detail.contains("filter=lfs"), "{}", lfs_err.detail);
+    let lfs_mint_err = mint_git_worktree(&MintRequest {
+        launch: lfs_repo.path(),
+        namespace: "3333333344444444",
+        agent_id: "c1",
+        parent_cwd: lfs_repo.path(),
+        mode: WorkspaceMode::Fork,
+        base: Some(&lfs_seed),
+    })
+    .unwrap_err();
+    assert_eq!(lfs_mint_err.kind, VcsErrorKind::MintUnavailable);
+    assert!(
+        lfs_mint_err.detail.contains("filter=lfs"),
+        "{}",
+        lfs_mint_err.detail
+    );
+
+    // 3) `.git/info/attributes` enabling a filter is also refused.
+    let info_attr_repo = git_repo();
+    let info_attr = info_attr_repo.path().join(".git/info/attributes");
+    std::fs::create_dir_all(info_attr.parent().unwrap()).unwrap();
+    std::fs::write(&info_attr, "*.dat filter=git-crypt\n").unwrap();
+    let info_err = git_snapshot(info_attr_repo.path(), "info-attr").unwrap_err();
+    assert_eq!(info_err.kind, VcsErrorKind::MintUnavailable);
+    assert!(
+        info_err.detail.contains("filter=git-crypt"),
+        "{}",
+        info_err.detail
+    );
+    let _ = base;
 }

@@ -178,6 +178,21 @@ fn git_fence_body(copy: &Path) -> String {
     )
 }
 
+/// Exact shim bodies recognized as Plak-managed on disk when reclaiming or
+/// inspecting an occupancy copy: the current hardened shim plus the immediate
+/// predecessor (cut 9k) shim so closed predecessor copies reclaim cleanly
+/// without leaking or requiring a child reopen first. `install()` always
+/// writes the current shim.
+fn accepted_git_fence_bodies(copy: &Path) -> Vec<String> {
+    let mut bodies = vec![git_fence_body(copy)];
+    if !is_minted_jj_copy(copy)
+        && let Ok(real_git) = discover_real_git()
+    {
+        bodies.push(prev_shim_script(copy, &real_git, &own_branch(copy)));
+    }
+    bodies
+}
+
 fn jj_fence_body(copy: &Path, base: &str) -> String {
     discover_real_jj().ok().as_deref().map_or_else(
         || "#!/bin/sh\nprintf 'JJ CLI is not installed; native workspace operations remain available\\n' >&2\nexit 127\n".to_owned(),
@@ -210,20 +225,24 @@ pub(crate) fn ignored_path_is_managed(copy: &Path, relative: &Path, base: Option
     let Ok(canonical) = std::fs::canonicalize(copy) else {
         return false;
     };
-    let expected = if relative == bin.join(GIT_SHIM_NAME) {
-        git_fence_body(&canonical)
+    let accepted = if relative == bin.join(GIT_SHIM_NAME) {
+        accepted_git_fence_bodies(&canonical)
     } else if relative == bin.join(JJ_SHIM_NAME) {
         let Some(base) = base else {
             return false;
         };
-        jj_fence_body(&canonical, base)
+        vec![jj_fence_body(&canonical, base)]
     } else {
         return false;
     };
     let path = copy.join(relative);
-    std::fs::symlink_metadata(&path)
-        .is_ok_and(|metadata| metadata.is_file() && metadata.len() == expected.len() as u64)
-        && std::fs::read(path).is_ok_and(|bytes| bytes == expected.as_bytes())
+    std::fs::symlink_metadata(&path).is_ok_and(|metadata| {
+        metadata.is_file()
+            && accepted
+                .iter()
+                .any(|expected| metadata.len() == expected.len() as u64)
+    }) && std::fs::read(path)
+        .is_ok_and(|bytes| accepted.iter().any(|expected| bytes == expected.as_bytes()))
 }
 
 /// True when `{root}/.plak/bin/git` or `{root}/.plak/bin/jj` exists so the process
@@ -593,6 +612,15 @@ fn git_dir_of(copy: &Path) -> Option<PathBuf> {
 fn shim_script(allowed: &Path, real_git: &Path, own_branch: &str) -> String {
     format!(
         include_str!("git_redirect_fence/git_shim.sh"),
+        allowed = sh_single_quote(&allowed.display().to_string()),
+        real_git = sh_single_quote(&real_git.display().to_string()),
+        own_branch = sh_single_quote(own_branch),
+    )
+}
+
+fn prev_shim_script(allowed: &Path, real_git: &Path, own_branch: &str) -> String {
+    format!(
+        include_str!("git_redirect_fence/git_shim_prev.sh"),
         allowed = sh_single_quote(&allowed.display().to_string()),
         real_git = sh_single_quote(&real_git.display().to_string()),
         own_branch = sh_single_quote(own_branch),

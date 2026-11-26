@@ -216,7 +216,7 @@ reload_requests = false
 # address = "unix:/run/user/1000/plak/gateway.sock"
 
 # The caller key file for a configured gateway address. A tcp address defaults to the home secrets gateway.key; a unix address sends a key only when this is set, and a same-UID unix peer without one is the local administrator. Captured at host startup.
-# type: string · default: (unset) · absolute path; mode 0600; home-scoped; host restart required
+# type: string · default: (unset) · absolute path; single-link regular file owned by euid, mode 0600 (no symlink/hardlink, max 16 KiB); home-scoped; host restart required
 # key_file = "/home/user/.plak/secrets/gateway.key"
 
 # Admit a tcp gateway address outside loopback and the tailnet ranges. Default false. Captured at host startup.

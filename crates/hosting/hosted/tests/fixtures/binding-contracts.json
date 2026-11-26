@@ -41,11 +41,7 @@
           }
         },
         "behavior": {
-          "cache": {
-            "Enabled": {
-              "requirement": "Required"
-            }
-          },
+          "cache": "Disabled",
           "context_evidence_requirement": "AnyBounded",
           "hosted_tools": [],
           "local_durability": "DurableRequired",
@@ -1123,7 +1119,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "a5f2633ad6bd09243106878ecd458d615f783c2f5883d750bbf574b386106c06",
+          "bytes": "16174f5afbe6c51d79c76542f3dcf1b56a206d266cb527e8c4b463cb7cdbdefb",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -1141,7 +1137,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "4d131bf854c2c3422be9889ba5e91f9d5530deca65bbf302771b9502ad37fce2",
+          "bytes": "000c308f122dd0b7531d849dca260e35459928c84cfd972c0df32017e4e91a98",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -1149,7 +1145,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "4d131bf854c2c3422be9889ba5e91f9d5530deca65bbf302771b9502ad37fce2",
+          "bytes": "000c308f122dd0b7531d849dca260e35459928c84cfd972c0df32017e4e91a98",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -1208,11 +1204,7 @@
           }
         },
         "behavior": {
-          "cache": {
-            "Enabled": {
-              "requirement": "Required"
-            }
-          },
+          "cache": "Disabled",
           "context_evidence_requirement": "AnyBounded",
           "hosted_tools": [],
           "local_durability": "DurableRequired",
@@ -2647,7 +2639,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "6338912c0cae9eb0b18e26236c078f2a17b029297bb1cf2bde1d5c15b9806be3",
+          "bytes": "830765b8983f50c643aed87cd02d907f39166f20fea439612e1c98bb93aaa445",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -2665,7 +2657,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "2d5ba4d373d83a194d7c8a886735c1765bf1d05466e4fdc0b62f4fb9642aec82",
+          "bytes": "074def607325c835efbca6897f75f324b3ea6bee9b89cb2425611d35ab591fb1",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -2673,7 +2665,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "2d5ba4d373d83a194d7c8a886735c1765bf1d05466e4fdc0b62f4fb9642aec82",
+          "bytes": "074def607325c835efbca6897f75f324b3ea6bee9b89cb2425611d35ab591fb1",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -2732,11 +2724,7 @@
           }
         },
         "behavior": {
-          "cache": {
-            "Enabled": {
-              "requirement": "Required"
-            }
-          },
+          "cache": "Disabled",
           "context_evidence_requirement": "AnyBounded",
           "hosted_tools": [],
           "local_durability": "DurableRequired",
@@ -3100,7 +3088,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "9286e62fb83c9bc91eb4d71a81c9d89af11cf09e33d766dc97b716a0605726ac",
+          "bytes": "bdfa51859ef1e6ed3fe62b2947a1744e8c781c0635ae104f52cbf1e307b0c963",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -3118,7 +3106,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "c728ff3b60f0413b6e89fed802cfa2be660048a584daaca09a3bad8ef78f91c9",
+          "bytes": "d9f302f2d316937a6ac0cf41c55a38423470fb60c4730f2d8858b6d98ae82a10",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -3126,7 +3114,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "c728ff3b60f0413b6e89fed802cfa2be660048a584daaca09a3bad8ef78f91c9",
+          "bytes": "d9f302f2d316937a6ac0cf41c55a38423470fb60c4730f2d8858b6d98ae82a10",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -3185,11 +3173,7 @@
           }
         },
         "behavior": {
-          "cache": {
-            "Enabled": {
-              "requirement": "Required"
-            }
-          },
+          "cache": "Disabled",
           "context_evidence_requirement": "AnyBounded",
           "hosted_tools": [],
           "local_durability": "DurableRequired",
@@ -3551,7 +3535,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "8cac61f5927facf97c48431092522e8095f358ff1ad46cf5f1dbac7df8aac6ff",
+          "bytes": "6e20eef4dc85a2fa453fab3e51cabc4adc31d79d805f9362371106c53d9368db",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -3569,7 +3553,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "ce4582406620cdc24861b9167b28cd5479618e90b96209efb4d45d1584771969",
+          "bytes": "df60741a310a9066d8de72fd23bd997ff3b58d7768259098c98a7703e80e3e6a",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -3577,7 +3561,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "ce4582406620cdc24861b9167b28cd5479618e90b96209efb4d45d1584771969",
+          "bytes": "df60741a310a9066d8de72fd23bd997ff3b58d7768259098c98a7703e80e3e6a",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -3636,11 +3620,7 @@
           }
         },
         "behavior": {
-          "cache": {
-            "Enabled": {
-              "requirement": "Required"
-            }
-          },
+          "cache": "Disabled",
           "context_evidence_requirement": "AnyBounded",
           "hosted_tools": [],
           "local_durability": "DurableRequired",
@@ -3925,7 +3905,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "62d16fcc10303a26f0850c8ce4fdee6af73f03b37a29a0614674c107072298cd",
+          "bytes": "69e86801066a86b60e61f917a7043d383d59ed69927c288a28a0afa2d1c7fcac",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -3943,7 +3923,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "0d4213184a59d2c63a4ceacab6366816013c39bbb7a68efb3cf0fd3da8fb2afa",
+          "bytes": "683aa4475abe409af783c9d24a4b9f8ef9489460adc159284d1883b8d016a0b8",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -3951,7 +3931,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "0d4213184a59d2c63a4ceacab6366816013c39bbb7a68efb3cf0fd3da8fb2afa",
+          "bytes": "683aa4475abe409af783c9d24a4b9f8ef9489460adc159284d1883b8d016a0b8",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -21149,13 +21129,13 @@
           },
           "identity": {
             "algorithm": "Sha256",
-            "bytes": "5b0c27dd06ee7775c3e92fccebf91443bef22bd846bf9c9f5a4cda0725be2cb7",
+            "bytes": "c728eed5924a63a6d8fb855e71e86c6e6b907762e697ff8eb614124eb06488a1",
             "domain": "ProviderAuthorityBinding",
             "version": 1
           },
           "semantic_descriptor_binding": {
             "algorithm": "Sha256",
-            "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+            "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
             "domain": "ModelBinding",
             "version": 2
           },
@@ -21171,11 +21151,7 @@
           }
         },
         "behavior": {
-          "cache": {
-            "Enabled": {
-              "requirement": "Required"
-            }
-          },
+          "cache": "Disabled",
           "context_evidence_requirement": "AnyBounded",
           "hosted_tools": [],
           "local_durability": "DurableRequired",
@@ -21822,21 +21798,6 @@
         "descriptor": {
           "capabilities": {
             "features": {
-              "Caching": {
-                "constraints": {
-                  "maximum": null,
-                  "note": "Custom OpenRouter Messages dialect"
-                },
-                "provenance": {
-                  "expires_at": null,
-                  "observed_at": {
-                    "nanoseconds": 0,
-                    "seconds": 0
-                  },
-                  "source": "BuiltIn"
-                },
-                "support": "Native"
-              },
               "Reasoning": {
                 "constraints": {
                   "maximum": null,
@@ -22000,7 +21961,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "9b7a8a8a6c59568aaf2da6714da31fd4b07d3ef755f303dbb1d08c6f25f552f5",
+          "bytes": "68073e032aea50cfdbce7db58a18e6365fd5868b62fdb525115b6914c3b5a312",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -22018,7 +21979,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "a9e505ec69702297516f170875f96c02498103a2b69f0557f8f7bc2be413e67b",
+          "bytes": "c1b38d9b49b08f6d6d2ad7ff8062e8855133f8e498bdeb62ecff108ff3d06938",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -22026,7 +21987,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "a9e505ec69702297516f170875f96c02498103a2b69f0557f8f7bc2be413e67b",
+          "bytes": "c1b38d9b49b08f6d6d2ad7ff8062e8855133f8e498bdeb62ecff108ff3d06938",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -22061,13 +22022,13 @@
           },
           "identity": {
             "algorithm": "Sha256",
-            "bytes": "5b0c27dd06ee7775c3e92fccebf91443bef22bd846bf9c9f5a4cda0725be2cb7",
+            "bytes": "c728eed5924a63a6d8fb855e71e86c6e6b907762e697ff8eb614124eb06488a1",
             "domain": "ProviderAuthorityBinding",
             "version": 1
           },
           "semantic_descriptor_binding": {
             "algorithm": "Sha256",
-            "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+            "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
             "domain": "ModelBinding",
             "version": 2
           },
@@ -22083,11 +22044,7 @@
           }
         },
         "behavior": {
-          "cache": {
-            "Enabled": {
-              "requirement": "Required"
-            }
-          },
+          "cache": "Disabled",
           "context_evidence_requirement": "AnyBounded",
           "hosted_tools": [],
           "local_durability": "DurableRequired",
@@ -23089,21 +23046,6 @@
         "descriptor": {
           "capabilities": {
             "features": {
-              "Caching": {
-                "constraints": {
-                  "maximum": null,
-                  "note": "Custom OpenRouter Messages dialect"
-                },
-                "provenance": {
-                  "expires_at": null,
-                  "observed_at": {
-                    "nanoseconds": 0,
-                    "seconds": 0
-                  },
-                  "source": "BuiltIn"
-                },
-                "support": "Native"
-              },
               "Reasoning": {
                 "constraints": {
                   "maximum": null,
@@ -23267,7 +23209,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "850afb94ef88eca0f2c8c837500c86682555028300233a1f28e6b84d1e2e06db",
+          "bytes": "5c4a61074f2de93496062336a77fa16637863a360c5770fd9d309cea436cd8c4",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -23285,7 +23227,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "ba3c176c59d121b2ffc011110d2abd5cd2e601880a1430509b3daf0485654702",
+          "bytes": "33ae16a9ca75424b8e0f957adca4cb1c6289e00fd57e8f175e46bf55eb587db9",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -23293,7 +23235,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "ba3c176c59d121b2ffc011110d2abd5cd2e601880a1430509b3daf0485654702",
+          "bytes": "33ae16a9ca75424b8e0f957adca4cb1c6289e00fd57e8f175e46bf55eb587db9",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -23328,13 +23270,13 @@
           },
           "identity": {
             "algorithm": "Sha256",
-            "bytes": "5b0c27dd06ee7775c3e92fccebf91443bef22bd846bf9c9f5a4cda0725be2cb7",
+            "bytes": "c728eed5924a63a6d8fb855e71e86c6e6b907762e697ff8eb614124eb06488a1",
             "domain": "ProviderAuthorityBinding",
             "version": 1
           },
           "semantic_descriptor_binding": {
             "algorithm": "Sha256",
-            "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+            "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
             "domain": "ModelBinding",
             "version": 2
           },
@@ -23350,11 +23292,7 @@
           }
         },
         "behavior": {
-          "cache": {
-            "Enabled": {
-              "requirement": "Required"
-            }
-          },
+          "cache": "Disabled",
           "context_evidence_requirement": "AnyBounded",
           "hosted_tools": [],
           "local_durability": "DurableRequired",
@@ -23525,21 +23463,6 @@
         "descriptor": {
           "capabilities": {
             "features": {
-              "Caching": {
-                "constraints": {
-                  "maximum": null,
-                  "note": "Custom OpenRouter Messages dialect"
-                },
-                "provenance": {
-                  "expires_at": null,
-                  "observed_at": {
-                    "nanoseconds": 0,
-                    "seconds": 0
-                  },
-                  "source": "BuiltIn"
-                },
-                "support": "Native"
-              },
               "Reasoning": {
                 "constraints": {
                   "maximum": null,
@@ -23703,7 +23626,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "4481a1497fefcf0efd82c88933d89bdb3475161e28cdea9b0d74038183e58cf1",
+          "bytes": "e41531acc6536d02a4709354b357793af58ab312128a4bf984e5e85a05d07ca9",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -23721,7 +23644,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "6bd2f8907e35e773e4c540972703728ef9b07021accd4e8fee589f3981b3ed2a",
+          "bytes": "90156504452da2053e1fe7166185ae312eaed5f75a5f26ea6b1388cc255083a3",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -23729,7 +23652,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "6bd2f8907e35e773e4c540972703728ef9b07021accd4e8fee589f3981b3ed2a",
+          "bytes": "90156504452da2053e1fe7166185ae312eaed5f75a5f26ea6b1388cc255083a3",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -23764,13 +23687,13 @@
           },
           "identity": {
             "algorithm": "Sha256",
-            "bytes": "5b0c27dd06ee7775c3e92fccebf91443bef22bd846bf9c9f5a4cda0725be2cb7",
+            "bytes": "c728eed5924a63a6d8fb855e71e86c6e6b907762e697ff8eb614124eb06488a1",
             "domain": "ProviderAuthorityBinding",
             "version": 1
           },
           "semantic_descriptor_binding": {
             "algorithm": "Sha256",
-            "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+            "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
             "domain": "ModelBinding",
             "version": 2
           },
@@ -23786,11 +23709,7 @@
           }
         },
         "behavior": {
-          "cache": {
-            "Enabled": {
-              "requirement": "Required"
-            }
-          },
+          "cache": "Disabled",
           "context_evidence_requirement": "AnyBounded",
           "hosted_tools": [],
           "local_durability": "DurableRequired",
@@ -23959,21 +23878,6 @@
         "descriptor": {
           "capabilities": {
             "features": {
-              "Caching": {
-                "constraints": {
-                  "maximum": null,
-                  "note": "Custom OpenRouter Messages dialect"
-                },
-                "provenance": {
-                  "expires_at": null,
-                  "observed_at": {
-                    "nanoseconds": 0,
-                    "seconds": 0
-                  },
-                  "source": "BuiltIn"
-                },
-                "support": "Native"
-              },
               "Reasoning": {
                 "constraints": {
                   "maximum": null,
@@ -24137,7 +24041,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "956f34608adf78d27981b9ee06ab58853c59f13f693847ee390914088ac2a85f",
+          "bytes": "c1b97bc02d29385d0f8d98abf3b6dbf68742df525c33c146b034e4edab48d2fb",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -24155,7 +24059,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "5ef87e16595a5fdd57496e15b91f7e69e94044800a5a96e0aaaca8fbe66d19d1",
+          "bytes": "1a8af4af637621a0d4676fd95203a870b1b3e9edf3dc28b9ee5ab27a96b159d9",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -24163,7 +24067,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "5ef87e16595a5fdd57496e15b91f7e69e94044800a5a96e0aaaca8fbe66d19d1",
+          "bytes": "1a8af4af637621a0d4676fd95203a870b1b3e9edf3dc28b9ee5ab27a96b159d9",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -24198,13 +24102,13 @@
           },
           "identity": {
             "algorithm": "Sha256",
-            "bytes": "5b0c27dd06ee7775c3e92fccebf91443bef22bd846bf9c9f5a4cda0725be2cb7",
+            "bytes": "c728eed5924a63a6d8fb855e71e86c6e6b907762e697ff8eb614124eb06488a1",
             "domain": "ProviderAuthorityBinding",
             "version": 1
           },
           "semantic_descriptor_binding": {
             "algorithm": "Sha256",
-            "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+            "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
             "domain": "ModelBinding",
             "version": 2
           },
@@ -24220,11 +24124,7 @@
           }
         },
         "behavior": {
-          "cache": {
-            "Enabled": {
-              "requirement": "Required"
-            }
-          },
+          "cache": "Disabled",
           "context_evidence_requirement": "AnyBounded",
           "hosted_tools": [],
           "local_durability": "DurableRequired",
@@ -24316,21 +24216,6 @@
         "descriptor": {
           "capabilities": {
             "features": {
-              "Caching": {
-                "constraints": {
-                  "maximum": null,
-                  "note": "Custom OpenRouter Messages dialect"
-                },
-                "provenance": {
-                  "expires_at": null,
-                  "observed_at": {
-                    "nanoseconds": 0,
-                    "seconds": 0
-                  },
-                  "source": "BuiltIn"
-                },
-                "support": "Native"
-              },
               "Reasoning": {
                 "constraints": {
                   "maximum": null,
@@ -24494,7 +24379,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "7f5e5d2f4904628a4734c374eb220253192e8c074d7fe4cd2870666a9f981d06",
+          "bytes": "99e619a3315ea33fbfa34c8fccf3043a3be14bd6849a7e5e581f7d4f04b37c2f",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -24512,7 +24397,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "5ad03d7cb4050e6aa975b01ec9e4a4c1672489526683a864ce952cb868d78a56",
+          "bytes": "a64d2152652f6a52b97dc35e60121cb43c47ccf7aca3bafd7bab4b175cac6fc3",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -24520,7 +24405,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "5ad03d7cb4050e6aa975b01ec9e4a4c1672489526683a864ce952cb868d78a56",
+          "bytes": "a64d2152652f6a52b97dc35e60121cb43c47ccf7aca3bafd7bab4b175cac6fc3",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -34146,14 +34031,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "a5f2633ad6bd09243106878ecd458d615f783c2f5883d750bbf574b386106c06",
+        "bytes": "16174f5afbe6c51d79c76542f3dcf1b56a206d266cb527e8c4b463cb7cdbdefb",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "a5f2633ad6bd09243106878ecd458d615f783c2f5883d750bbf574b386106c06",
+          "bytes": "16174f5afbe6c51d79c76542f3dcf1b56a206d266cb527e8c4b463cb7cdbdefb",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -34166,26 +34051,26 @@
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "anthropic.messages",
         "reasoning_support": "Supported",
         "route": "anthropic.platform",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "4d131bf854c2c3422be9889ba5e91f9d5530deca65bbf302771b9502ad37fce2",
+          "bytes": "000c308f122dd0b7531d849dca260e35459928c84cfd972c0df32017e4e91a98",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "31e029076ebd959cecaefbc3de0ef7b26162dfbe457602e4a066e8c68479884d",
+        "bytes": "3a9297b41fce25f26ac77e261469ead614ace579fba569e441dcfb8b64c2be5a",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "# How you communicate\n\nWrite for an engineer who knows the domain and did not watch you work. Lead with the outcome, then the reasoning that changes what they do next. State assumptions, prerequisites and the next step plainly. Do not pad, do not restate the request back, and do not explain your own process unless it is the answer. Say so when you could not do something, and say what you tried.\n\n## Answer discipline\n- Match the shape of the answer to the size of the task. A small task gets a one-line answer with no headings and no lists.\n- Keep lists flat and short. Split into sections rather than nesting bullets. Number a list only when the order matters or the user is meant to pick one.\n- Use headings only in a long answer, and keep them to a few words.\n- Put commands, code, snippets and error text in fenced code blocks, and wrap file paths, identifiers and environment variables in backticks so they stay readable in a terminal.\n- Reference a file by a standalone path, optionally with a line number. Do not use URLs for local files, and do not quote a range of lines.\n- The user does not see tool output. When you are asked what a command printed, relay the part that answers the question.\n- The user is on the same machine as you. Never tell them to save, copy or download a file you just wrote.\n- No emojis.\n\n# How you work\n\n## Autonomy inside the authorization you were given\nCarry the assignment to the end of the turn: through the change, through the check that it works, and through a short account of the outcome. Do not stop at a diagnosis, and do not hand back a plan when you were asked for a fix. If you hit a blocker, try to clear it yourself before reporting it. Ask only when proceeding either way would be unsafe or would waste the work.\n\nUnless the user is asking a question, thinking out loud, or explicitly asking for a plan, assume they want the change made rather than described.\n\n## Editing constraints\n- Default to ASCII in files you write. Introduce other characters only when the file already uses them or the content requires them.\n- Add a comment only where the code would otherwise cost the reader real time. Do not annotate the obvious.\n- Prefer an exact, targeted edit over rewriting a file. Scripted search and replace is the right tool for a change that spans a codebase, and generated files are regenerated, not hand-edited.\n- The worktree may be dirty and the changes in it may not be yours. Never revert or amend work you did not do unless you were asked to. If unrelated changes sit in a file you are editing, read them and work with them.\n- If files change under you while you are working and you did not change them, stop and ask how to proceed.\n\n## Destructive actions\n- Anything that discards work or rewrites shared history needs an explicit ask: resetting hard, checking out over local changes, force-pushing, rewriting history, deleting broadly, dropping data.\n- Prefer the non-interactive form of a command. An interactive prompt you cannot answer is a hung turn, not a decision.\n- After a mutating command fails in a way you cannot read, inspect the state it left before you run anything else against it.\n\nUse Read for file contents and Bash for shell commands, including search with grep, rg or find. Use only the tools provided; do not invent tools that are not presented.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are claude-sonnet-5. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nYour turn is an assignment: submit_result is the outcome, using the assignment schema. Assistant text and native plan or todo updates are not a result.\n\nEnding a turn to wait is not a result: call submit_result when the assignment is done.\n\nWhen only waiting remains, end this turn: you'll be notified when a background Bash command finishes, so do not poll. Give Bash a timeout (up to 600000 ms) only when you need the output to continue this turn. Stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.anthropic.messages.direct.v1.subagents.v1",
@@ -34205,7 +34090,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "9028c2de885dc57d84bd5218a4409504e32e56fb3b42d62bb1426c799642863e",
+        "bytes": "a678ea1174e4aed6c071f390ff7e674ad71faaa20ae3e07d32461c3663458552",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -34218,7 +34103,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "4d131bf854c2c3422be9889ba5e91f9d5530deca65bbf302771b9502ad37fce2",
+        "bytes": "000c308f122dd0b7531d849dca260e35459928c84cfd972c0df32017e4e91a98",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -34251,14 +34136,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "6338912c0cae9eb0b18e26236c078f2a17b029297bb1cf2bde1d5c15b9806be3",
+        "bytes": "830765b8983f50c643aed87cd02d907f39166f20fea439612e1c98bb93aaa445",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "6338912c0cae9eb0b18e26236c078f2a17b029297bb1cf2bde1d5c15b9806be3",
+          "bytes": "830765b8983f50c643aed87cd02d907f39166f20fea439612e1c98bb93aaa445",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -34271,26 +34156,26 @@
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "anthropic.messages",
         "reasoning_support": "Supported",
         "route": "anthropic.platform",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "2d5ba4d373d83a194d7c8a886735c1765bf1d05466e4fdc0b62f4fb9642aec82",
+          "bytes": "074def607325c835efbca6897f75f324b3ea6bee9b89cb2425611d35ab591fb1",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "e8f3e68a0caa485e918be5cf97eeeb4ba6351097b263b3e38f4a695fee5c4d58",
+        "bytes": "7313a8d7d697068d31a018eeab58ff8686a81fbf460a0d331154f7f3c58aca3f",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "# How you communicate\n\nWrite for an engineer who knows the domain and did not watch you work. Lead with the outcome, then the reasoning that changes what they do next. State assumptions, prerequisites and the next step plainly. Do not pad, do not restate the request back, and do not explain your own process unless it is the answer. Say so when you could not do something, and say what you tried.\n\n## Answer discipline\n- Match the shape of the answer to the size of the task. A small task gets a one-line answer with no headings and no lists.\n- Keep lists flat and short. Split into sections rather than nesting bullets. Number a list only when the order matters or the user is meant to pick one.\n- Use headings only in a long answer, and keep them to a few words.\n- Put commands, code, snippets and error text in fenced code blocks, and wrap file paths, identifiers and environment variables in backticks so they stay readable in a terminal.\n- Reference a file by a standalone path, optionally with a line number. Do not use URLs for local files, and do not quote a range of lines.\n- The user does not see tool output. When you are asked what a command printed, relay the part that answers the question.\n- The user is on the same machine as you. Never tell them to save, copy or download a file you just wrote.\n- No emojis.\n\n# How you work\n\n## Autonomy inside the authorization you were given\nCarry the assignment to the end of the turn: through the change, through the check that it works, and through a short account of the outcome. Do not stop at a diagnosis, and do not hand back a plan when you were asked for a fix. If you hit a blocker, try to clear it yourself before reporting it. Ask only when proceeding either way would be unsafe or would waste the work.\n\nUnless the user is asking a question, thinking out loud, or explicitly asking for a plan, assume they want the change made rather than described.\n\n## Editing constraints\n- Default to ASCII in files you write. Introduce other characters only when the file already uses them or the content requires them.\n- Add a comment only where the code would otherwise cost the reader real time. Do not annotate the obvious.\n- Prefer an exact, targeted edit over rewriting a file. Scripted search and replace is the right tool for a change that spans a codebase, and generated files are regenerated, not hand-edited.\n- The worktree may be dirty and the changes in it may not be yours. Never revert or amend work you did not do unless you were asked to. If unrelated changes sit in a file you are editing, read them and work with them.\n- If files change under you while you are working and you did not change them, stop and ask how to proceed.\n\n## Destructive actions\n- Anything that discards work or rewrites shared history needs an explicit ask: resetting hard, checking out over local changes, force-pushing, rewriting history, deleting broadly, dropping data.\n- Prefer the non-interactive form of a command. An interactive prompt you cannot answer is a hung turn, not a decision.\n- After a mutating command fails in a way you cannot read, inspect the state it left before you run anything else against it.\n\nUse Read for file contents and Bash for shell commands, including search with grep, rg or find. When the assignment may mutate, use Edit for exact changes and Write for new files. Prefer Edit over rewriting files in Bash. Use only the tools provided; do not invent tools that are not presented.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are claude-sonnet-5. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nThe child starts from the spawn prompt; send_agent_message is follow-up on a running turn, not how work is assigned. wait_agent returns when a watched child settles or sends mail, and returns and acknowledges only that mail, and settlement is not success: read output_json only from rows that submitted. Default: children share your checkout; give them file-disjoint work or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. A forked child's edits are not in your checkout until adopt_candidate succeeds. adopt_candidate and discard_workspace stay valid when presented. A plan or todo tool records your intentions only; it does not start, cancel, or finish child work.\n\nYou may end your turn while children run: this attached root host wakes you when results or questions arrive while host continuation is enabled. Results and questions from children arrive as <child_message> blocks with your next turn's message. Use wait_agent when you need a result before you can continue in this turn.\n\nWhen only waiting remains, end this turn: you'll be notified when a background Bash command finishes, so do not poll. Give Bash a timeout (up to 600000 ms) only when you need the output to continue this turn. Stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.anthropic.messages.direct.v1.subagents.v1",
@@ -34310,7 +34195,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "c6735b566de174011751118efa06618b393c22a4f80d0348283a0cd15117b2c9",
+        "bytes": "0bf78030044d4e3ddd12da14d473769ed72952488e1c8504ae67f329bced034b",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -34323,7 +34208,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "2d5ba4d373d83a194d7c8a886735c1765bf1d05466e4fdc0b62f4fb9642aec82",
+        "bytes": "074def607325c835efbca6897f75f324b3ea6bee9b89cb2425611d35ab591fb1",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -34353,14 +34238,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "9286e62fb83c9bc91eb4d71a81c9d89af11cf09e33d766dc97b716a0605726ac",
+        "bytes": "bdfa51859ef1e6ed3fe62b2947a1744e8c781c0635ae104f52cbf1e307b0c963",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "9286e62fb83c9bc91eb4d71a81c9d89af11cf09e33d766dc97b716a0605726ac",
+          "bytes": "bdfa51859ef1e6ed3fe62b2947a1744e8c781c0635ae104f52cbf1e307b0c963",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -34373,26 +34258,26 @@
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "anthropic.messages",
         "reasoning_support": "Supported",
         "route": "anthropic.platform",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "c728ff3b60f0413b6e89fed802cfa2be660048a584daaca09a3bad8ef78f91c9",
+          "bytes": "d9f302f2d316937a6ac0cf41c55a38423470fb60c4730f2d8858b6d98ae82a10",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "0343b3e71d0e7a2ab206a97db64549a4e3963532533264dc58a35ea1e5bb1f2b",
+        "bytes": "fa96524947af9ed61143275738a2c6cab36df94cde6edc02153b6cb3e01722ea",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are a precise and proficient coding agent using JavaScript tool composition. The complete provider-visible tool set is exec_js and wait_js. Nested tools available inside cells: Bash, Read, TaskStop, list_agents, send_agent_message, submit_result, Skill. Direct calls to these names are unavailable. exec_js requires JSON field source (string), not code. The source is an async module: do not use a top-level return; emit visible output with text(...). Nested coding tools live only on the global tools object; call them as await tools.name({...}). If the user supplies JavaScript or asks to evaluate it, call exec_js with that source; do not echo the source as assistant text. If exec_js returns a running cell_id, call wait_js with that cell_id until completed. Use only the tools provided; do not invent tools that are not presented.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are claude-sonnet-5. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nYour turn is an assignment: submit_result is the outcome, using the assignment schema. Assistant text and native plan or todo updates are not a result.\n\nEnding a turn to wait is not a result: call submit_result when the assignment is done.\n\nWhen only waiting remains, end this turn: you'll be notified when a background Bash command finishes, so do not poll. Give Bash a timeout (up to 600000 ms) only when you need the output to continue this turn. Stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.anthropic.messages.js-ptc.v1.subagents.v1",
@@ -34412,7 +34297,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "de3069d26be81725d90c0015cb67ee73dbd7fbc7d92f2842bb613ebd4c7d40b9",
+        "bytes": "198c44009ffddc5ef731a407dd5ec2b30e127ca8d53f7513c5274651676b5668",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -34425,7 +34310,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "c728ff3b60f0413b6e89fed802cfa2be660048a584daaca09a3bad8ef78f91c9",
+        "bytes": "d9f302f2d316937a6ac0cf41c55a38423470fb60c4730f2d8858b6d98ae82a10",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -34460,14 +34345,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "9286e62fb83c9bc91eb4d71a81c9d89af11cf09e33d766dc97b716a0605726ac",
+        "bytes": "bdfa51859ef1e6ed3fe62b2947a1744e8c781c0635ae104f52cbf1e307b0c963",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "9286e62fb83c9bc91eb4d71a81c9d89af11cf09e33d766dc97b716a0605726ac",
+          "bytes": "bdfa51859ef1e6ed3fe62b2947a1744e8c781c0635ae104f52cbf1e307b0c963",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -34480,26 +34365,26 @@
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "anthropic.messages",
         "reasoning_support": "Supported",
         "route": "anthropic.platform",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "c728ff3b60f0413b6e89fed802cfa2be660048a584daaca09a3bad8ef78f91c9",
+          "bytes": "d9f302f2d316937a6ac0cf41c55a38423470fb60c4730f2d8858b6d98ae82a10",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "b24bba56b4f94e96abc7c16b905ab99dd4b9a1078dd52816874b63fbac2ef39e",
+        "bytes": "bc4b44513851cd124cd446d930e30b1961ba2d590f051069bed97913bd366ec2",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are a precise and proficient coding agent using JavaScript tool composition. The complete provider-visible tool set is exec_js and wait_js. Nested tools available inside cells: Bash, Edit, Read, TaskStop, Write, spawn_agent, list_agents, send_agent_message, wait_agent, interrupt_agent, close_agent, adopt_candidate, discard_workspace, Skill. Direct calls to these names are unavailable. exec_js requires JSON field source (string), not code. The source is an async module: do not use a top-level return; emit visible output with text(...). Nested coding tools live only on the global tools object; call them as await tools.name({...}). If the user supplies JavaScript or asks to evaluate it, call exec_js with that source; do not echo the source as assistant text. If exec_js returns a running cell_id, call wait_js with that cell_id until completed. Use only the tools provided; do not invent tools that are not presented.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are claude-sonnet-5. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nThe child starts from the spawn prompt; send_agent_message is follow-up on a running turn, not how work is assigned. wait_agent returns when a watched child settles or sends mail, and returns and acknowledges only that mail, and settlement is not success: read output_json only from rows that submitted. Default: children share your checkout; give them file-disjoint work or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. A forked child's edits are not in your checkout until adopt_candidate succeeds. adopt_candidate and discard_workspace stay valid when presented. A plan or todo tool records your intentions only; it does not start, cancel, or finish child work.\n\nYou may end your turn while children run: this attached root host wakes you when results or questions arrive while host continuation is enabled. Results and questions from children arrive as <child_message> blocks with your next turn's message. Use wait_agent when you need a result before you can continue in this turn.\n\nWhen only waiting remains, end this turn: you'll be notified when a background Bash command finishes, so do not poll. Give Bash a timeout (up to 600000 ms) only when you need the output to continue this turn. Stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.anthropic.messages.js-ptc.v1.subagents.v1",
@@ -34519,7 +34404,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "6e7f2d8d8cf93a1e86c08b01c0a5f11473156b3c1ffb5354b47fad6c7c706264",
+        "bytes": "16b7d99f69dabe165938695efbfdf62889a3f0e11eb8fca347b53a6d793cbd07",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -34532,7 +34417,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "c728ff3b60f0413b6e89fed802cfa2be660048a584daaca09a3bad8ef78f91c9",
+        "bytes": "d9f302f2d316937a6ac0cf41c55a38423470fb60c4730f2d8858b6d98ae82a10",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -34563,14 +34448,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "8cac61f5927facf97c48431092522e8095f358ff1ad46cf5f1dbac7df8aac6ff",
+        "bytes": "6e20eef4dc85a2fa453fab3e51cabc4adc31d79d805f9362371106c53d9368db",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "8cac61f5927facf97c48431092522e8095f358ff1ad46cf5f1dbac7df8aac6ff",
+          "bytes": "6e20eef4dc85a2fa453fab3e51cabc4adc31d79d805f9362371106c53d9368db",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -34583,26 +34468,26 @@
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "anthropic.messages",
         "reasoning_support": "Supported",
         "route": "anthropic.platform",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "ce4582406620cdc24861b9167b28cd5479618e90b96209efb4d45d1584771969",
+          "bytes": "df60741a310a9066d8de72fd23bd997ff3b58d7768259098c98a7703e80e3e6a",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "14f2d97cee5fdf25ee7362e8cbf425cd722c776ed2c416aca48a18cf909fdc23",
+        "bytes": "fbab179a0ac6d49155cfa71b321aaa93b45f2ddd1ad8fddac2808a3f6d260d1d",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are a precise and proficient coding agent using Python tool composition. The complete provider-visible tool set is exec_py and wait_py. exec_py yields after yield_time_ms (default 10000, max 10000); resume a running cell with wait_py {cell_id, yield_time_ms?, terminate?} (default 10000, max 600000). Steers yield observation without killing the cell. Nested tools available inside cells: Bash, Read, TaskStop, list_agents, send_agent_message, submit_result, Skill. Direct calls to these names are unavailable. exec_py requires JSON field code (string), not source. Nested coding tools are injected async functions inside the cell; call them as await name(key=value) or await name({...}). For freeform text use arguments=. Structured results are Python values, text results are strings, and tool failures raise ToolError. Use help(name) for the signature. Calling without awaiting or scheduling creates an inert coroutine; asyncio is already imported, so use await asyncio.gather(...) for concurrent calls. If the user supplies Python or asks to evaluate it, call exec_py with that code; do not echo the code as assistant text. Printed lines and the last expression are both visible in the tool result. Cells cannot open files, scan directories, glob or walk paths, read the host environment or use the network; use the nested tools for workspace effects. time.sleep, asyncio.sleep and OS entropy are unavailable; use random.Random(seed) if you need randomness. Use only the tools provided; do not invent tools that are not presented.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are claude-sonnet-5. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nYour turn is an assignment: submit_result is the outcome, using the assignment schema. Assistant text and native plan or todo updates are not a result.\n\nEnding a turn to wait is not a result: call submit_result when the assignment is done.\n\nWhen only waiting remains, end this turn: you'll be notified when a background Bash command finishes, so do not poll. Give Bash a timeout (up to 600000 ms) only when you need the output to continue this turn. Stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.anthropic.messages.py-ptc.v1.subagents.v1",
@@ -34622,7 +34507,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "46c33b7e9020f5b7a14f69d8b8b964735a36311a59d7ab82e48254044788e15a",
+        "bytes": "8cae2c1f0c7e05d8c84ab0c945ccb044ae1e74ce8b7825d5ff25f66aa2b9d7e8",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -34635,7 +34520,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "ce4582406620cdc24861b9167b28cd5479618e90b96209efb4d45d1584771969",
+        "bytes": "df60741a310a9066d8de72fd23bd997ff3b58d7768259098c98a7703e80e3e6a",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -34671,14 +34556,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "8cac61f5927facf97c48431092522e8095f358ff1ad46cf5f1dbac7df8aac6ff",
+        "bytes": "6e20eef4dc85a2fa453fab3e51cabc4adc31d79d805f9362371106c53d9368db",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "8cac61f5927facf97c48431092522e8095f358ff1ad46cf5f1dbac7df8aac6ff",
+          "bytes": "6e20eef4dc85a2fa453fab3e51cabc4adc31d79d805f9362371106c53d9368db",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -34691,26 +34576,26 @@
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "anthropic.messages",
         "reasoning_support": "Supported",
         "route": "anthropic.platform",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "ce4582406620cdc24861b9167b28cd5479618e90b96209efb4d45d1584771969",
+          "bytes": "df60741a310a9066d8de72fd23bd997ff3b58d7768259098c98a7703e80e3e6a",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "2391adb46006f0e636facc7ed452971ca685a1e91db291e521f2a5e82058f2d0",
+        "bytes": "bc6c52332ef95344f5122ac2cd9f5beeebeab458340ae5248c576920c18593b9",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are a precise and proficient coding agent using Python tool composition. The complete provider-visible tool set is exec_py and wait_py. exec_py yields after yield_time_ms (default 10000, max 10000); resume a running cell with wait_py {cell_id, yield_time_ms?, terminate?} (default 10000, max 600000). Steers yield observation without killing the cell. Nested tools available inside cells: Bash, Edit, Read, TaskStop, Write, spawn_agent, list_agents, send_agent_message, wait_agent, interrupt_agent, close_agent, adopt_candidate, discard_workspace, Skill. Direct calls to these names are unavailable. exec_py requires JSON field code (string), not source. Nested coding tools are injected async functions inside the cell; call them as await name(key=value) or await name({...}). For freeform text use arguments=. Structured results are Python values, text results are strings, and tool failures raise ToolError. Use help(name) for the signature. Calling without awaiting or scheduling creates an inert coroutine; asyncio is already imported, so use await asyncio.gather(...) for concurrent calls. If the user supplies Python or asks to evaluate it, call exec_py with that code; do not echo the code as assistant text. Printed lines and the last expression are both visible in the tool result. Cells cannot open files, scan directories, glob or walk paths, read the host environment or use the network; use the nested tools for workspace effects. time.sleep, asyncio.sleep and OS entropy are unavailable; use random.Random(seed) if you need randomness. Use only the tools provided; do not invent tools that are not presented.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are claude-sonnet-5. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nThe child starts from the spawn prompt; send_agent_message is follow-up on a running turn, not how work is assigned. wait_agent returns when a watched child settles or sends mail, and returns and acknowledges only that mail, and settlement is not success: read output_json only from rows that submitted. Default: children share your checkout; give them file-disjoint work or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. A forked child's edits are not in your checkout until adopt_candidate succeeds. adopt_candidate and discard_workspace stay valid when presented. A plan or todo tool records your intentions only; it does not start, cancel, or finish child work.\n\nYou may end your turn while children run: this attached root host wakes you when results or questions arrive while host continuation is enabled. Results and questions from children arrive as <child_message> blocks with your next turn's message. Use wait_agent when you need a result before you can continue in this turn.\n\nWhen only waiting remains, end this turn: you'll be notified when a background Bash command finishes, so do not poll. Give Bash a timeout (up to 600000 ms) only when you need the output to continue this turn. Stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.anthropic.messages.py-ptc.v1.subagents.v1",
@@ -34730,7 +34615,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "7388b324b5d5e429ef6b94797de123b9d2d93bfd27867f546288c72ab9afff3b",
+        "bytes": "483d9baca96a7aad2f7386b150d0ee842b6eb92421940312da708a28b6599346",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -34743,7 +34628,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "ce4582406620cdc24861b9167b28cd5479618e90b96209efb4d45d1584771969",
+        "bytes": "df60741a310a9066d8de72fd23bd997ff3b58d7768259098c98a7703e80e3e6a",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -34772,14 +34657,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "62d16fcc10303a26f0850c8ce4fdee6af73f03b37a29a0614674c107072298cd",
+        "bytes": "69e86801066a86b60e61f917a7043d383d59ed69927c288a28a0afa2d1c7fcac",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "62d16fcc10303a26f0850c8ce4fdee6af73f03b37a29a0614674c107072298cd",
+          "bytes": "69e86801066a86b60e61f917a7043d383d59ed69927c288a28a0afa2d1c7fcac",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -34792,26 +34677,26 @@
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "anthropic.messages",
         "reasoning_support": "Supported",
         "route": "anthropic.platform",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "0d4213184a59d2c63a4ceacab6366816013c39bbb7a68efb3cf0fd3da8fb2afa",
+          "bytes": "683aa4475abe409af783c9d24a4b9f8ef9489460adc159284d1883b8d016a0b8",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "d715a0bbbedf01ab31398df3e0edf3318c03c444bccbba2997b235c0c6092104",
+        "bytes": "fc0ef0b19b3e1dd56f1286fdf1955fa12325645099de22fcfe267be6e193ce6d",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are a coding agent. Use run_py to execute Python cells with the typed harness SDK. It is your only tool; await all SDK I/O. Read and search with ctx.read/list/grep, edit with fs.apply and its operation constructors, manage work with proc.run/shell/start/poll/stdin/cancel/join and plan.update.\n\nEach cell starts with fresh globals. Only JSON values saved with state.put survive to later cells; state.get/list/drop access that session-owned named state. Failed, stopped or abandoned cells publish none of their state writes. There is no pre-run type check. Tools accept keyword arguments or one dict, and help(tool) prints the signature. asyncio is pre-imported for gather; tool failures raise ToolError. Earlier tool effects are not rolled back by a later error. time.sleep, asyncio.sleep and OS entropy are unavailable; use random.Random(seed) if you need randomness.\n\nUse proc.start for long work; there are no background Python cells or wait tool. Processes carry the user's full authority and are not sandboxed. Check typed results before claiming success. Preserve omission notes and use ctx.read on an available Ref for omitted output. Use a File's revision as fs operation expect for compare-and-swap edits.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are claude-sonnet-5. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nYour host wakes you when tracked jobs finish. Use proc.join only when you need the result to continue this turn; when only waiting remains, end the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.anthropic.messages.py-sdk.v1",
@@ -34831,7 +34716,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "e2c704144781f3fa1bd07103ec92e4bb75c6ffb77e33e39ca805a9d06c157cd8",
+        "bytes": "367abb6fa304134d389d30a6885b13ec1b810f8c883895c559069d35f08f2746",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -34844,7 +34729,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "0d4213184a59d2c63a4ceacab6366816013c39bbb7a68efb3cf0fd3da8fb2afa",
+        "bytes": "683aa4475abe409af783c9d24a4b9f8ef9489460adc159284d1883b8d016a0b8",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -36592,7 +36477,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "42805d700cafe28d37446a29ee59c3d2e041f480ff3c7f5448fafc593b07da3c",
+        "bytes": "d55bcd5e75ad5aa7f0d2092e324a85612653bc416d0b1efee9b7c99f37dbf81b",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -36697,7 +36582,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "4f049a7a5bd22f3ea3b39968590e2b709b26405c4deab3aac4ffaa8e5d0b4cbf",
+        "bytes": "4d866315be221def7d4a4986c9aa72d8b23c10b96c3cd24fa404e733823cfaff",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -36799,7 +36684,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "b08409d8e2f25e3a0f93205032d04e2c04fbd66cb685458a389c25a5daa8f426",
+        "bytes": "5bed51af4ba6721da1a3629f6994e1810c0b3bc0c0ef081edc8437e931b98043",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -36906,7 +36791,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "492dc25615caff13c91abb77eccdec4487b6a879236712bf69efeb8a366a8203",
+        "bytes": "be001aa71d38ae6d01d10bc2baa34af82fd1ba2055884459ae8b64464aa5fe35",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -37009,7 +36894,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "ed6c71294577976c3fb0ebb873a78271b568708d9a3c456f335ecf4daa236787",
+        "bytes": "5407a14ae435bb30c1a85ce2dc849067705f6e70677cd438c158eb1775cb7405",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -37117,7 +37002,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "75faba7a305cecb6d35b9483771d2d984cacf9aa5b006d9857cbc4c489ff2abc",
+        "bytes": "ca65e39edd5d1bef5a4be2054c49f5f995694ad5a52ddbe24df0508602b3c760",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -38920,14 +38805,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "9b7a8a8a6c59568aaf2da6714da31fd4b07d3ef755f303dbb1d08c6f25f552f5",
+        "bytes": "68073e032aea50cfdbce7db58a18e6365fd5868b62fdb525115b6914c3b5a312",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "9b7a8a8a6c59568aaf2da6714da31fd4b07d3ef755f303dbb1d08c6f25f552f5",
+          "bytes": "68073e032aea50cfdbce7db58a18e6365fd5868b62fdb525115b6914c3b5a312",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -38935,31 +38820,31 @@
         "model_adapter_profile": "openrouter.messages.dynamic-custom-v1",
         "model_binding_digest": {
           "algorithm": "Sha256",
-          "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+          "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
           "domain": "ModelBinding",
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "openrouter.messages.v1",
         "reasoning_support": "Supported",
         "route": "openrouter.chat.platform:77473e207852e417408a64fef65581056f9bc30a8ef9a1c17cef5d4bc1d89cb7",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "a9e505ec69702297516f170875f96c02498103a2b69f0557f8f7bc2be413e67b",
+          "bytes": "c1b38d9b49b08f6d6d2ad7ff8062e8855133f8e498bdeb62ecff108ff3d06938",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "2517130f3b2b8ad6a5a6e858089afeebbdd1ab47881cd43c46f7ce76511f8a1b",
+        "bytes": "b3249effeabd746c29fc626a06a627ccd0ddfff6f2f6f042fcbb7f080f9b8180",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are an expert coding assistant. You help users by reading files, and executing commands.\n\n<tools>\n- read: Read file contents\n- bash: Execute shell commands (ls, rg, find, etc.)\n- wait: Wait for background work when this turn needs its result\n- stop: Stop a background process\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>\n\n<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are openrouter/synthetic-model. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nYour turn is an assignment: submit_result is the outcome, using the assignment schema. Assistant text and native plan or todo updates are not a result.\n\nEnding a turn to wait is not a result: call submit_result when the assignment is done.\n\nBackground jobs report automatically: when only waiting remains, end this turn; completion notices start a new turn. Use wait only when you need a result to continue this turn. Never poll or sleep; stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.openrouter.messages.direct.v1.subagents.v1",
@@ -38979,7 +38864,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "69bfdf4406e30eec24d21d582eb93b69ed0565c9828fc7a8cdd1561b819face1",
+        "bytes": "e08f245c4ae2e51c306218b550038a0e20031c64159452411de98dced89f3a46",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -38992,7 +38877,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "a9e505ec69702297516f170875f96c02498103a2b69f0557f8f7bc2be413e67b",
+        "bytes": "c1b38d9b49b08f6d6d2ad7ff8062e8855133f8e498bdeb62ecff108ff3d06938",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -39025,14 +38910,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "850afb94ef88eca0f2c8c837500c86682555028300233a1f28e6b84d1e2e06db",
+        "bytes": "5c4a61074f2de93496062336a77fa16637863a360c5770fd9d309cea436cd8c4",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "850afb94ef88eca0f2c8c837500c86682555028300233a1f28e6b84d1e2e06db",
+          "bytes": "5c4a61074f2de93496062336a77fa16637863a360c5770fd9d309cea436cd8c4",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -39040,31 +38925,31 @@
         "model_adapter_profile": "openrouter.messages.dynamic-custom-v1",
         "model_binding_digest": {
           "algorithm": "Sha256",
-          "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+          "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
           "domain": "ModelBinding",
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "openrouter.messages.v1",
         "reasoning_support": "Supported",
         "route": "openrouter.chat.platform:77473e207852e417408a64fef65581056f9bc30a8ef9a1c17cef5d4bc1d89cb7",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "ba3c176c59d121b2ffc011110d2abd5cd2e601880a1430509b3daf0485654702",
+          "bytes": "33ae16a9ca75424b8e0f957adca4cb1c6289e00fd57e8f175e46bf55eb587db9",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "4e791f9ff24130b482fc913c9f3ec6f7ca0ebe1127bf06d9fe6c30031b60ec17",
+        "bytes": "bbe001222ca3cddc716a4a286c1af9563a58c867149399fefb90fa6eb124b974",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are an expert coding assistant. You help users by reading files, executing commands, editing code, and writing new files.\n\n<tools>\n- read: Read file contents\n- bash: Execute shell commands (ls, rg, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n- wait: Wait for background work when this turn needs its result\n- stop: Stop a background process\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>\n\n<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are openrouter/synthetic-model. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nThe child starts from the spawn prompt; send_agent_message is follow-up on a running turn, not how work is assigned. wait returns when a watched child settles or sends mail (with no ids it watches every child that has not reported), and returns and acknowledges only that mail, and settlement is not success: read output_json only from rows that submitted. stop on a child id interrupts its turn; it does not close the child. Default: children share your checkout; give them file-disjoint work or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. A forked child's edits are not in your checkout until adopt_candidate succeeds. adopt_candidate and discard_workspace stay valid when presented. A plan or todo tool records your intentions only; it does not start, cancel, or finish child work.\n\nYou may end your turn while children run: this attached root host wakes you when results or questions arrive while host continuation is enabled. Results and questions from children arrive as <child_message> blocks with your next turn's message.\n\nBackground jobs report automatically: when only waiting remains, end this turn; completion notices start a new turn. Use wait only when you need a result to continue this turn. Never poll or sleep; stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.openrouter.messages.direct.v1.subagents.v1",
@@ -39084,7 +38969,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "964cd06631fb685abe91dcb72da9f6ae9cee0eaf6e2fdfd1a4970d457e0945d1",
+        "bytes": "00118f2baf5c1492faf571a04315dcc514a3abce602673ee74c6d2a9caa88cf5",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -39097,7 +38982,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "ba3c176c59d121b2ffc011110d2abd5cd2e601880a1430509b3daf0485654702",
+        "bytes": "33ae16a9ca75424b8e0f957adca4cb1c6289e00fd57e8f175e46bf55eb587db9",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -39127,14 +39012,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "4481a1497fefcf0efd82c88933d89bdb3475161e28cdea9b0d74038183e58cf1",
+        "bytes": "e41531acc6536d02a4709354b357793af58ab312128a4bf984e5e85a05d07ca9",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "4481a1497fefcf0efd82c88933d89bdb3475161e28cdea9b0d74038183e58cf1",
+          "bytes": "e41531acc6536d02a4709354b357793af58ab312128a4bf984e5e85a05d07ca9",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -39142,31 +39027,31 @@
         "model_adapter_profile": "openrouter.messages.dynamic-custom-v1",
         "model_binding_digest": {
           "algorithm": "Sha256",
-          "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+          "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
           "domain": "ModelBinding",
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "openrouter.messages.v1",
         "reasoning_support": "Supported",
         "route": "openrouter.chat.platform:77473e207852e417408a64fef65581056f9bc30a8ef9a1c17cef5d4bc1d89cb7",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "6bd2f8907e35e773e4c540972703728ef9b07021accd4e8fee589f3981b3ed2a",
+          "bytes": "90156504452da2053e1fe7166185ae312eaed5f75a5f26ea6b1388cc255083a3",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "b85a3673fa034e98e62c446d72873dfc2ed3ce9ce8b2bd6d24e828dab6842bbb",
+        "bytes": "3636e641cd2ccd7fd3151e4a5bfde429b22bed1e213909d1d7c7a7c5ca896d1b",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are a precise and proficient coding agent using JavaScript tool composition. The complete provider-visible tool set is exec_js and wait_js. Nested tools available inside cells: bash, read, stop, wait, list_agents, send_agent_message, submit_result. Direct calls to these names are unavailable. exec_js requires JSON field source (string), not code. The source is an async module: do not use a top-level return; emit visible output with text(...). Nested coding tools live only on the global tools object; call them as await tools.name({...}). If the user supplies JavaScript or asks to evaluate it, call exec_js with that source; do not echo the source as assistant text. If exec_js returns a running cell_id, call wait_js with that cell_id until completed. Use only the tools provided; do not invent tools that are not presented.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are openrouter/synthetic-model. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nYour turn is an assignment: submit_result is the outcome, using the assignment schema. Assistant text and native plan or todo updates are not a result.\n\nEnding a turn to wait is not a result: call submit_result when the assignment is done.\n\nBackground jobs report automatically: when only waiting remains, end this turn; completion notices start a new turn. Use wait only when you need a result to continue this turn. Never poll or sleep; stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.openrouter.messages.js-ptc.v1.subagents.v1",
@@ -39186,7 +39071,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "b2abb4c3ba20ea673bb8aba624db6e2521b64f220234be9414534840f169b309",
+        "bytes": "a220d5778ed83aa4e7709c409bd29e9bca8975f070ee8cdc0b71d01de6e8ad21",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -39199,7 +39084,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "6bd2f8907e35e773e4c540972703728ef9b07021accd4e8fee589f3981b3ed2a",
+        "bytes": "90156504452da2053e1fe7166185ae312eaed5f75a5f26ea6b1388cc255083a3",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -39234,14 +39119,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "4481a1497fefcf0efd82c88933d89bdb3475161e28cdea9b0d74038183e58cf1",
+        "bytes": "e41531acc6536d02a4709354b357793af58ab312128a4bf984e5e85a05d07ca9",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "4481a1497fefcf0efd82c88933d89bdb3475161e28cdea9b0d74038183e58cf1",
+          "bytes": "e41531acc6536d02a4709354b357793af58ab312128a4bf984e5e85a05d07ca9",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -39249,31 +39134,31 @@
         "model_adapter_profile": "openrouter.messages.dynamic-custom-v1",
         "model_binding_digest": {
           "algorithm": "Sha256",
-          "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+          "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
           "domain": "ModelBinding",
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "openrouter.messages.v1",
         "reasoning_support": "Supported",
         "route": "openrouter.chat.platform:77473e207852e417408a64fef65581056f9bc30a8ef9a1c17cef5d4bc1d89cb7",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "6bd2f8907e35e773e4c540972703728ef9b07021accd4e8fee589f3981b3ed2a",
+          "bytes": "90156504452da2053e1fe7166185ae312eaed5f75a5f26ea6b1388cc255083a3",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "b6ef6272a5b611755053bf9a9f78c3344146857927f2b8bffee0a2ba5aadab2c",
+        "bytes": "4bd074996a204cf09712f71e743985872ed956ecb925b51f2c7ee2fac8f74d89",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are a precise and proficient coding agent using JavaScript tool composition. The complete provider-visible tool set is exec_js and wait_js. Nested tools available inside cells: bash, edit, read, write, spawn_agent, list_agents, send_agent_message, wait, stop, close_agent, adopt_candidate, discard_workspace. Direct calls to these names are unavailable. exec_js requires JSON field source (string), not code. The source is an async module: do not use a top-level return; emit visible output with text(...). Nested coding tools live only on the global tools object; call them as await tools.name({...}). If the user supplies JavaScript or asks to evaluate it, call exec_js with that source; do not echo the source as assistant text. If exec_js returns a running cell_id, call wait_js with that cell_id until completed. Use only the tools provided; do not invent tools that are not presented.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are openrouter/synthetic-model. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nThe child starts from the spawn prompt; send_agent_message is follow-up on a running turn, not how work is assigned. wait returns when a watched child settles or sends mail (with no ids it watches every child that has not reported), and returns and acknowledges only that mail, and settlement is not success: read output_json only from rows that submitted. stop on a child id interrupts its turn; it does not close the child. Default: children share your checkout; give them file-disjoint work or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. A forked child's edits are not in your checkout until adopt_candidate succeeds. adopt_candidate and discard_workspace stay valid when presented. A plan or todo tool records your intentions only; it does not start, cancel, or finish child work.\n\nYou may end your turn while children run: this attached root host wakes you when results or questions arrive while host continuation is enabled. Results and questions from children arrive as <child_message> blocks with your next turn's message.\n\nBackground jobs report automatically: when only waiting remains, end this turn; completion notices start a new turn. Use wait only when you need a result to continue this turn. Never poll or sleep; stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.openrouter.messages.js-ptc.v1.subagents.v1",
@@ -39293,7 +39178,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "d1595d6abaf8f84e7f224d3a58b6f79c27bbb71acf5c543253c84f892e0dc652",
+        "bytes": "7518e7a9cd391830fea355d43b9a831e4cd18ac0f85db082cc675b12ff7a1512",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -39306,7 +39191,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "6bd2f8907e35e773e4c540972703728ef9b07021accd4e8fee589f3981b3ed2a",
+        "bytes": "90156504452da2053e1fe7166185ae312eaed5f75a5f26ea6b1388cc255083a3",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -39337,14 +39222,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "956f34608adf78d27981b9ee06ab58853c59f13f693847ee390914088ac2a85f",
+        "bytes": "c1b97bc02d29385d0f8d98abf3b6dbf68742df525c33c146b034e4edab48d2fb",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "956f34608adf78d27981b9ee06ab58853c59f13f693847ee390914088ac2a85f",
+          "bytes": "c1b97bc02d29385d0f8d98abf3b6dbf68742df525c33c146b034e4edab48d2fb",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -39352,31 +39237,31 @@
         "model_adapter_profile": "openrouter.messages.dynamic-custom-v1",
         "model_binding_digest": {
           "algorithm": "Sha256",
-          "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+          "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
           "domain": "ModelBinding",
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "openrouter.messages.v1",
         "reasoning_support": "Supported",
         "route": "openrouter.chat.platform:77473e207852e417408a64fef65581056f9bc30a8ef9a1c17cef5d4bc1d89cb7",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "5ef87e16595a5fdd57496e15b91f7e69e94044800a5a96e0aaaca8fbe66d19d1",
+          "bytes": "1a8af4af637621a0d4676fd95203a870b1b3e9edf3dc28b9ee5ab27a96b159d9",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "8bde95cb29a7070a28616e19768f5566000d07dfa4c7c9245205e60212d13b29",
+        "bytes": "9663b8b40ad1c0afd28f959d559b5e4f28d0e1c7268acb4af3f802a529666fdc",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are a precise and proficient coding agent using Python tool composition. The complete provider-visible tool set is exec_py and wait_py. exec_py yields after yield_time_ms (default 10000, max 10000); resume a running cell with wait_py {cell_id, yield_time_ms?, terminate?} (default 10000, max 600000). Steers yield observation without killing the cell. Nested tools available inside cells: bash, read, stop, wait, list_agents, send_agent_message, submit_result. Direct calls to these names are unavailable. exec_py requires JSON field code (string), not source. Nested coding tools are injected async functions inside the cell; call them as await name(key=value) or await name({...}). For freeform text use arguments=. Structured results are Python values, text results are strings, and tool failures raise ToolError. Use help(name) for the signature. Calling without awaiting or scheduling creates an inert coroutine; asyncio is already imported, so use await asyncio.gather(...) for concurrent calls. If the user supplies Python or asks to evaluate it, call exec_py with that code; do not echo the code as assistant text. Printed lines and the last expression are both visible in the tool result. Cells cannot open files, scan directories, glob or walk paths, read the host environment or use the network; use the nested tools for workspace effects. time.sleep, asyncio.sleep and OS entropy are unavailable; use random.Random(seed) if you need randomness. Use only the tools provided; do not invent tools that are not presented.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are openrouter/synthetic-model. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nYour turn is an assignment: submit_result is the outcome, using the assignment schema. Assistant text and native plan or todo updates are not a result.\n\nEnding a turn to wait is not a result: call submit_result when the assignment is done.\n\nBackground jobs report automatically: when only waiting remains, end this turn; completion notices start a new turn. Use wait only when you need a result to continue this turn. Never poll or sleep; stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.openrouter.messages.py-ptc.v1.subagents.v1",
@@ -39396,7 +39281,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "1590a129e6f6a46335aac0d563616d3fa1e4605ad382fed9c8fc4889fc577f7a",
+        "bytes": "3e3ee442d8c3804d3ad5b454e9f9ea5c7fe2179a8d1e508682694750b5212adf",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -39409,7 +39294,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "5ef87e16595a5fdd57496e15b91f7e69e94044800a5a96e0aaaca8fbe66d19d1",
+        "bytes": "1a8af4af637621a0d4676fd95203a870b1b3e9edf3dc28b9ee5ab27a96b159d9",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -39445,14 +39330,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "956f34608adf78d27981b9ee06ab58853c59f13f693847ee390914088ac2a85f",
+        "bytes": "c1b97bc02d29385d0f8d98abf3b6dbf68742df525c33c146b034e4edab48d2fb",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "956f34608adf78d27981b9ee06ab58853c59f13f693847ee390914088ac2a85f",
+          "bytes": "c1b97bc02d29385d0f8d98abf3b6dbf68742df525c33c146b034e4edab48d2fb",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -39460,31 +39345,31 @@
         "model_adapter_profile": "openrouter.messages.dynamic-custom-v1",
         "model_binding_digest": {
           "algorithm": "Sha256",
-          "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+          "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
           "domain": "ModelBinding",
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "openrouter.messages.v1",
         "reasoning_support": "Supported",
         "route": "openrouter.chat.platform:77473e207852e417408a64fef65581056f9bc30a8ef9a1c17cef5d4bc1d89cb7",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "5ef87e16595a5fdd57496e15b91f7e69e94044800a5a96e0aaaca8fbe66d19d1",
+          "bytes": "1a8af4af637621a0d4676fd95203a870b1b3e9edf3dc28b9ee5ab27a96b159d9",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "2c2f5e1709fe07b3d9942ba2c0937299c801895b27e618f7eab6fff283bbda94",
+        "bytes": "30b4042fc1bb5b44ddcbbdb3c2591b7c07136bbeb280deb527068a09d0e079d1",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are a precise and proficient coding agent using Python tool composition. The complete provider-visible tool set is exec_py and wait_py. exec_py yields after yield_time_ms (default 10000, max 10000); resume a running cell with wait_py {cell_id, yield_time_ms?, terminate?} (default 10000, max 600000). Steers yield observation without killing the cell. Nested tools available inside cells: bash, edit, read, write, spawn_agent, list_agents, send_agent_message, wait, stop, close_agent, adopt_candidate, discard_workspace. Direct calls to these names are unavailable. exec_py requires JSON field code (string), not source. Nested coding tools are injected async functions inside the cell; call them as await name(key=value) or await name({...}). For freeform text use arguments=. Structured results are Python values, text results are strings, and tool failures raise ToolError. Use help(name) for the signature. Calling without awaiting or scheduling creates an inert coroutine; asyncio is already imported, so use await asyncio.gather(...) for concurrent calls. If the user supplies Python or asks to evaluate it, call exec_py with that code; do not echo the code as assistant text. Printed lines and the last expression are both visible in the tool result. Cells cannot open files, scan directories, glob or walk paths, read the host environment or use the network; use the nested tools for workspace effects. time.sleep, asyncio.sleep and OS entropy are unavailable; use random.Random(seed) if you need randomness. Use only the tools provided; do not invent tools that are not presented.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are openrouter/synthetic-model. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nThe child starts from the spawn prompt; send_agent_message is follow-up on a running turn, not how work is assigned. wait returns when a watched child settles or sends mail (with no ids it watches every child that has not reported), and returns and acknowledges only that mail, and settlement is not success: read output_json only from rows that submitted. stop on a child id interrupts its turn; it does not close the child. Default: children share your checkout; give them file-disjoint work or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. A forked child's edits are not in your checkout until adopt_candidate succeeds. adopt_candidate and discard_workspace stay valid when presented. A plan or todo tool records your intentions only; it does not start, cancel, or finish child work.\n\nYou may end your turn while children run: this attached root host wakes you when results or questions arrive while host continuation is enabled. Results and questions from children arrive as <child_message> blocks with your next turn's message.\n\nBackground jobs report automatically: when only waiting remains, end this turn; completion notices start a new turn. Use wait only when you need a result to continue this turn. Never poll or sleep; stop servers you no longer need before ending the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.openrouter.messages.py-ptc.v1.subagents.v1",
@@ -39504,7 +39389,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "d88b7e574736b4066b8362b1cef97a573e885472d3470bf99154f4448da5ec19",
+        "bytes": "29b492c6e22fd2e403352089bf17cf81e55fea2ac759cc6d3b08410596f75694",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -39517,7 +39402,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "5ef87e16595a5fdd57496e15b91f7e69e94044800a5a96e0aaaca8fbe66d19d1",
+        "bytes": "1a8af4af637621a0d4676fd95203a870b1b3e9edf3dc28b9ee5ab27a96b159d9",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -39546,14 +39431,14 @@
       "context_sources": [],
       "effective_id": {
         "algorithm": "Sha256",
-        "bytes": "7f5e5d2f4904628a4734c374eb220253192e8c074d7fe4cd2870666a9f981d06",
+        "bytes": "99e619a3315ea33fbfa34c8fccf3043a3be14bd6849a7e5e581f7d4f04b37c2f",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
       "model_facts": {
         "effective_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "7f5e5d2f4904628a4734c374eb220253192e8c074d7fe4cd2870666a9f981d06",
+          "bytes": "99e619a3315ea33fbfa34c8fccf3043a3be14bd6849a7e5e581f7d4f04b37c2f",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -39561,31 +39446,31 @@
         "model_adapter_profile": "openrouter.messages.dynamic-custom-v1",
         "model_binding_digest": {
           "algorithm": "Sha256",
-          "bytes": "5108faf0d46c5a8bb589e8382a4d1e7c1b6e3ebbe5db80fe7817cc96b1000841",
+          "bytes": "e4e96596dc613a224ff8961a8da9f7d52c540076978345a1f7a64b709edeb4f7",
           "domain": "ModelBinding",
           "version": 2
         },
         "native_continuation_support": "Unknown",
-        "prompt_cache_support": "Supported",
+        "prompt_cache_support": "Unsupported",
         "protocol": "openrouter.messages.v1",
         "reasoning_support": "Supported",
         "route": "openrouter.chat.platform:77473e207852e417408a64fef65581056f9bc30a8ef9a1c17cef5d4bc1d89cb7",
         "selected_provider_configuration_id": {
           "algorithm": "Sha256",
-          "bytes": "5ad03d7cb4050e6aa975b01ec9e4a4c1672489526683a864ce952cb868d78a56",
+          "bytes": "a64d2152652f6a52b97dc35e60121cb43c47ccf7aca3bafd7bab4b175cac6fc3",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
       },
       "plan_digest": {
         "algorithm": "Sha256",
-        "bytes": "6ac1dab395e1f74cb5be9106631bd67d376935c6633fc92cc90d9c56d8f1c037",
+        "bytes": "7368fbf7bef483b1d5991746343528bcf845cf84c8bc8408a26b80d4625cbe4a",
         "domain": "ResolvedHarnessPlan",
         "version": 2
       },
       "profile": {
         "base_instructions": "You are a coding agent. Use run_py to execute Python cells with the typed harness SDK. It is your only tool; await all SDK I/O. Read and search with ctx.read/list/grep, edit with fs.apply and its operation constructors, manage work with proc.run/shell/start/poll/stdin/cancel/join and plan.update.\n\nEach cell starts with fresh globals. Only JSON values saved with state.put survive to later cells; state.get/list/drop access that session-owned named state. Failed, stopped or abandoned cells publish none of their state writes. There is no pre-run type check. Tools accept keyword arguments or one dict, and help(tool) prints the signature. asyncio is pre-imported for gather; tool failures raise ToolError. Earlier tool effects are not rolled back by a later error. time.sleep, asyncio.sleep and OS entropy are unavailable; use random.Random(seed) if you need randomness.\n\nUse proc.start for long work; there are no background Python cells or wait tool. Processes carry the user's full authority and are not sandboxed. Check typed results before claiming success. Preserve omission notes and use ctx.read on an available Ref for omitted output. Use a File's revision as fs operation expect for compare-and-swap edits.\n\nWorkspace root: /work/repo. cwd: /work/repo. OS: fixture-platform.\nYou are openrouter/synthetic-model. This turn's prompts/instructions identify you; earlier messages show session/agent history.\nSelected reasoning effort: medium.\nThis harness runs the tools you call directly against this workspace. By default nothing pauses a call to ask the user first, so read a command before you run it.\nCommit or push only when the user asks.\n\nWork from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.\n\nYour host wakes you when tracked jobs finish. Use proc.join only when you need the result to continue this turn; when only waiting remains, end the turn.",
-        "cache_strategy": "PreferStablePrefix",
+        "cache_strategy": "Disabled",
         "continuation_strategy": "CanonicalReplayOnly",
         "display_name": null,
         "id": "plak.openrouter.messages.py-sdk.v1",
@@ -39605,7 +39490,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "f041514692d9c393110c573a070587970ae9a323dcc9451ffea87ac4b88bba68",
+        "bytes": "b7e0dec2e75271f2e10ec35200a6d35b8a583cc609cee91f1f2d24cccba56e0a",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -39618,7 +39503,7 @@
       },
       "selected_id": {
         "algorithm": "Sha256",
-        "bytes": "5ad03d7cb4050e6aa975b01ec9e4a4c1672489526683a864ce952cb868d78a56",
+        "bytes": "a64d2152652f6a52b97dc35e60121cb43c47ccf7aca3bafd7bab4b175cac6fc3",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
@@ -40431,7 +40316,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "b79117b8e4b1c008a6ad1232d3a64e534bddd9d6b87944a24a78d45710a17008",
+        "bytes": "8e748e14cd7fca93a017fb968c4d64345afe0963d392abcd19cba3d260b4e2e1",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -40536,7 +40421,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "f4c480efd4b1d6e3ea0b6139180b4980a767bc8e8989115e88e0f0b98a06871f",
+        "bytes": "4ff666ba6ba94357036786616db1797cf6fbc417990e4a1cd29a1631cc589e5c",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -40638,7 +40523,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "30d5cc698eb7988076bda0589b5a6b5f75c49ef4b3ac74ed1cc932fe984aa7ef",
+        "bytes": "e77489999f14ecd6fdfb1291d6ca998aee6761ab896e4fead52fae95436eb793",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -40745,7 +40630,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "c83bc35c2e1574fc2dbc9c3a834f6bc8bcae37e07e86c3c700056774e4b3aa07",
+        "bytes": "dc2e0433827bdbc483321771f233d27d959d57f0252784d3bcb1bc4b11efed4a",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -40848,7 +40733,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "5a8769c2c9eb32c6315f8e2894f3fde989705b5850e8bab19191d5541f4920eb",
+        "bytes": "b036d2039eb2da01f46f4df28bdd80b7956c89f0fe64b08e3d59f2744958b0a1",
         "domain": "ToolDefinition",
         "version": 4
       },
@@ -40956,7 +40841,7 @@
       },
       "projection_digest": {
         "algorithm": "Sha256",
-        "bytes": "7187a236ccf6f58a29208053527222a699af2350d257044a7a2e23a83ee9c4d0",
+        "bytes": "c0c24da80cc89c2f53e51aff7644cc1b1a710add5323a1821ce6420c68043476",
         "domain": "ToolDefinition",
         "version": 4
       },

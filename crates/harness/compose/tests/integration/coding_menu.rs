@@ -29,7 +29,7 @@ use plakous_tools::{
     RegisteredToolId, ToolContext, ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorId,
     ToolFuture, ToolInvocation, ToolInvocationRequest, ToolOutcome, ToolOutcomeKind,
     ToolProjectionExposureV2, ToolProjectionMap, ToolProjectionRaisingV2, ToolRegistration,
-    ToolRegistryBuilder, ToolRuntimeErrorKind, menu_names, object_schema, register_packs,
+    ToolRegistryBuilder, menu_names, object_schema, register_packs,
 };
 use serde_json::json;
 
@@ -396,116 +396,18 @@ fn claude_read_prepare_defaults_limit_to_2000() -> Result<(), Box<dyn std::error
 }
 
 #[test]
-fn grok_search_replace_rejects_empty_old_string() -> Result<(), Box<dyn std::error::Error>> {
+fn grok_search_replace_empty_old_string_stays_create_only() -> Result<(), Box<dyn std::error::Error>>
+{
     let projection = grok_projection()?;
-    for (call_id, replace_all) in [
-        ("00000000-0000-0000-0000-000000000109", false),
-        ("00000000-0000-0000-0000-00000000010a", true),
-    ] {
-        let Err(error) = projection.prepare(request(
-            call_id,
-            "search_replace",
-            &json!({
-                "file_path": "a.txt",
-                "old_string": "",
-                "new_string": "created",
-                "replace_all": replace_all,
-            })
-            .to_string(),
-        )?) else {
-            return Err("empty old_string must be refused".into());
-        };
-        assert_eq!(error.kind(), ToolRuntimeErrorKind::InvalidArguments);
-        assert!(
-            error.to_string().contains("write"),
-            "error should direct the model to write: {error}"
-        );
-    }
-    Ok(())
-}
-
-#[test]
-fn grok_grep_defaults_case_sensitive_and_omits_dead_multiline_schema()
--> Result<(), Box<dyn std::error::Error>> {
-    let projection = grok_projection()?;
-    let view = projection.compile_request_view_v2()?;
-    let grep_def = view
-        .definitions()
-        .iter()
-        .find(|definition| definition.exposed_name().as_str() == "grep")
-        .ok_or("missing grok grep definition")?;
-    let schema = grep_def
-        .input_schema()
-        .ok_or("grok grep must have structured schema")?
-        .document()
-        .value();
-    assert!(
-        schema["properties"].get("multiline").is_none(),
-        "dead multiline parameter must not be advertised in grok grep schema"
-    );
-
-    let default_call = projection.prepare(request(
-        "00000000-0000-0000-0000-00000000010b",
-        "grep",
-        r#"{"pattern":"Needle"}"#,
+    let prepared = projection.prepare(request(
+        "00000000-0000-0000-0000-000000000109",
+        "search_replace",
+        r#"{"file_path":"a.txt","old_string":"","new_string":"created","replace_all":true}"#,
     )?)?;
+    assert_eq!(prepared.invocation().arguments().value()["old_string"], "");
     assert_eq!(
-        default_call.invocation().arguments().value()["case_sensitive"],
-        true,
-        "omitted -i must default to case-sensitive"
-    );
-
-    let explicit_sensitive = projection.prepare(request(
-        "00000000-0000-0000-0000-00000000010c",
-        "grep",
-        r#"{"pattern":"Needle","-i":false}"#,
-    )?)?;
-    assert_eq!(
-        explicit_sensitive.invocation().arguments().value()["case_sensitive"],
-        true
-    );
-
-    let explicit_insensitive = projection.prepare(request(
-        "00000000-0000-0000-0000-00000000010d",
-        "grep",
-        r#"{"pattern":"Needle","-i":true}"#,
-    )?)?;
-    assert_eq!(
-        explicit_insensitive.invocation().arguments().value()["case_sensitive"],
+        prepared.invocation().arguments().value()["replace_all"],
         false
-    );
-
-    let Err(multiline_error) = projection.prepare(request(
-        "00000000-0000-0000-0000-00000000010e",
-        "grep",
-        r#"{"pattern":"Needle","multiline":true}"#,
-    )?) else {
-        return Err("multiline must remain rejected".into());
-    };
-    assert_eq!(
-        multiline_error.kind(),
-        ToolRuntimeErrorKind::InvalidArguments
-    );
-
-    let shell_def = view
-        .definitions()
-        .iter()
-        .find(|definition| definition.exposed_name().as_str() == "run_terminal_command")
-        .ok_or("missing grok run_terminal_command definition")?;
-    let command_desc = shell_def
-        .input_schema()
-        .ok_or("run_terminal_command must have structured schema")?
-        .document()
-        .value()["properties"]["command"]["description"]
-        .as_str()
-        .ok_or("missing command description")?;
-    assert!(
-        command_desc.contains("/bin/sh"),
-        "expected /bin/sh in command description: {command_desc}"
-    );
-    assert!(
-        !command_desc.to_ascii_lowercase().contains("bash"),
-        "unexpected bash mention in command description: {command_desc}"
     );
     Ok(())
 }
@@ -1638,37 +1540,6 @@ fn grok_grep_advertised_head_limit_matches_canonical_admission()
 fn grok_list_dir_lowers_every_spelling_of_the_workspace_root()
 -> Result<(), Box<dyn std::error::Error>> {
     let projection = presentation_projection(CodingPresentation::Grok)?;
-    let view = projection.compile_request_view_v2()?;
-    let list_dir_def = view
-        .definitions()
-        .iter()
-        .find(|definition| definition.exposed_name().as_str() == "list_dir")
-        .ok_or("missing grok list_dir definition")?;
-    let list_dir_schema = list_dir_def
-        .input_schema()
-        .ok_or("grok list_dir must have structured schema")?
-        .document()
-        .value();
-    assert!(
-        list_dir_schema
-            .get("required")
-            .and_then(|value| value.as_array())
-            .is_none_or(Vec::is_empty),
-        "target_directory must be optional in list_dir schema: {list_dir_schema}"
-    );
-    let omitted = projection.prepare(request(
-        "00000000-0000-0000-0000-0000000003ff",
-        "list_dir",
-        "{}",
-    )?)?;
-    assert_eq!(
-        omitted.invocation().identity().name().as_str(),
-        "search_repository"
-    );
-    let omitted_args = omitted.invocation().arguments().value().clone();
-    assert_eq!(omitted_args["path"], json!("."));
-    assert_eq!(omitted_args["query"], json!(""));
-    assert_eq!(omitted_args["list_directory"], json!(true));
     for (index, target_directory) in [".", "", "src"].into_iter().enumerate() {
         let call = format!("00000000-0000-0000-0000-0000000003{index:02x}");
         let prepared = projection.prepare(request(

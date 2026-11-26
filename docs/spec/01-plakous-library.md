@@ -4088,7 +4088,8 @@ OpenRouter `session_id` on every wire. Chat and Responses omit
 Cached-token usage is observational and is never subtracted from admission.
 Anthropic API-key capability profiles advertise native `Caching`, so required
 caching is admitted through the production resolver and executor as well as
-emitted on the wire. This adds no beta header.
+emitted on the wire; the API-key route forwards any non-empty dialect
+`anthropic-beta` header and omits the header when none is declared.
 
 ### 6.2 Capabilities and catalogs
 
@@ -4478,10 +4479,15 @@ measurement certificates name a byte upper bound
 conservative ceiling of §6.8, never the unit compared once a provider count
 exists. Each route requires the stream's reported model to equal the admitted
 id (Messages `message_start.model`, Responses `ExactRequest`), so every
-completed round with positive input usage anchors: from then on admission and
-the compaction trigger compare `A` (the provider-reported input plus that
-round's output) plus one token per UTF-8 wire byte of items added since, plus
-16 per item, against the token window. Only the unanchored portion is bytes:
+completed round with positive input usage anchors: from then on **hard
+admission** and overflow headroom compare `A` (the provider-reported input plus
+that round's output) plus one token per UTF-8 wire byte of items added since,
+plus 16 per item, against the token window, while **scheduled compaction
+occupancy** and context gauges estimate the uncovered byte delta at
+`ceil(bytes / 4)` (`estimated_occupied_tokens`, ~4 UTF-8 bytes per token) plus
+16 per item. Using 1 byte/token for hard admission prevents over-admission,
+while using `bytes/4` for scheduled compaction prevents roughly 4x premature
+paid compaction after large tool outputs. Only the unanchored portion is bytes:
 the first request after creation, import or rebind is admitted by the
 whole-wire byte bound or, when that exceeds the window, by the non-guaranteed
 `bytes/4` estimate (§6.8); an unanchored estimate never fires the occupancy
@@ -5092,7 +5098,10 @@ exact digests. The conservative local check is
 where `margin = max(ceil(ceiling/100), min(2048, ceiling/10))`
 against the input ceiling, with a requested output reservation subtracted **only**
 on shared-window routes. Credible anchored measurement makes this local
-admission decision authoritative.
+admission decision authoritative. For scheduled compaction occupancy and context
+gauges (not hard admission or overflow headroom), the uncovered text delta is
+estimated at `ceil(new-item bytes / 4)` (`estimated_occupied_tokens`) so large
+unanchored tool outputs do not trigger paid compaction four times too early.
 
 For a `ReferenceClientEnvelope` contract, its matching, receipt-bound
 `ReferenceClientEnvelopeUpperBound` measurement is also a candidate complete-input
@@ -9501,7 +9510,11 @@ user message, `McpPromptExpansion` (text and images): the line `[prompt mcp:<ser
 its content comes from an untrusted server]`, then each message as a `user:`
 or `assistant:` label line followed by its content, rendered as tool results
 are (text, embedded text resources, resource links, at most two inline images
-carried as images of the user message, other media as placeholders). An
+carried as images of the user message, other media as placeholders). Every MCP
+inline image (in tool results and prompt expansions alike) is base64-decoded,
+bounded to `MAX_STANDARD_IMAGE_BYTES`, and checked with
+`plakous_tools::sniff_image` so the magic bytes match the declared MIME type;
+invalid or mismatched payloads are dropped rather than forwarded. An
 expansion over 256 KiB of text refuses rather than truncates. Only a user
 invokes a prompt: no tool reaches `prompts/get`, and an expansion never
 inserts an assistant turn into canonical history.
@@ -11092,7 +11105,11 @@ memory. Two things carry that:
 The successor keeps every source segment in order with the selected bodies
 replaced, and records the pass in the history's **sole** compaction segment:
 merged into the existing summary when the source has one, and otherwise
-created at position zero, where a semantic summary sits. A canonical history
+created immediately after the first rewritten segment
+(`first_replaced_in_segments + 1`, rather than at index zero) so unchanged
+segments before the first replacement keep their prompt-cache prefix and native
+reasoning intact. The same non-leading placement applies to offline
+image-residency notices. A canonical history
 admits exactly one compaction segment, and a semantic cut refuses a retained
 tail that holds one, so a second segment beside the first would make every
 later projection unplannable and the rung would work exactly once per session.
@@ -11100,11 +11117,12 @@ The model-visible placeholder line is constant: counts remain only in
 provenance, placeholder records and operator observations. Merging keeps a paid
 summary verbatim and supersedes a previous placeholder pass line
 rather than stacking, so the segment stays one line however many passes run;
-the per-pass counts live in the provenance and in the operator records. Placing
-it at position zero is also what lets the next turn fold the replaced one: the
-planner's barrier is the newest compaction before the latest intent, so a
-leading segment leaves the replaced turn selectable while a trailing one would
-fence it off forever.
+the per-pass counts live in the provenance and in the operator records. When
+that sole compaction segment is a non-leading placeholder or image-residency
+notice (not a paid semantic summary), the planner keeps its barrier at position
+zero so earlier rewritten turns remain selectable for a later semantic fold,
+while `publish_placeholders` applies the same post-compaction plan-restoration
+note seam as a paid fold.
 
 The result is a committed compaction with the same durability, provenance,
 measurements and lease-fenced CAS publication as the fold (§10.5), never a
@@ -11452,7 +11470,9 @@ otherwise. Any other served id leaves the round unanchored, so admission keeps
 the whole-wire bound. The anchor and telemetry keep the actual served id.
 `ContextRequestAnchor` carries non-Copy admission authority;
 `ContextAnchor` remains its compact chrome projection for streamed estimates.
-`ContextStatus::occupancy_tokens()` exposes the current item-delta measure when
+`ContextStatus::occupancy_tokens()` exposes the current item-delta occupancy
+estimate (`estimated_occupied_tokens`, charging `ceil(bytes / 4)` for uncovered
+text deltas while hard admission and headroom keep the 1 byte/token bound) when
 available. The whole-input bytes/4 estimate remains the common basis for
 compaction records/telemetry (`tokens_before`/`tokens_after`) and per-part chrome
 rows. Those rows are estimates, not separately reported provider counts.
@@ -13759,9 +13779,11 @@ exchange.
 
 A connection returns to the pool only when its request went out whole and its
 body ended cleanly: after a fully read body, or at
-`close_after_protocol_terminal` when the end of the body has already arrived,
-with no further data. That close never waits for the end: one still in flight
-closes the connection, so pooling adds no latency to a turn's completion. A
+`close_after_protocol_terminal` after a bounded trailing EOF drain (at most
+75 ms and 4 KiB) confirms the end of the body with no unexpected data. A peer
+that does not finish within that bound closes the connection instead, keeping
+turn-completion latency tightly bounded while allowing chunked/HTTP-2 terminal
+frames to settle for reuse. A
 fully read body waits for the connection to accept another request for at most
 one second, cut short by cancellation or the body deadline, and in practice
 only as long as the HTTP/1.1 driver takes to return to idle. A response that

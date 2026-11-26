@@ -348,11 +348,9 @@ pub(crate) fn install_identity_cache_home(home: PathBuf) {
     let _ = IDENTITY_CACHE_HOME.set(home);
 }
 
-/// Lets this process record a fresh hash in an already-existing private home's
-/// identity cache. Commands that use product state or print the binary version
-/// call it (missing or non-private homes are never created or written); purely
-/// read-only inspection commands (`help`, `session rehearse`, `status`) read a
-/// hit and never write.
+/// Lets this process record a fresh hash in the cache. Only commands that use
+/// product state call it; inspection commands (`version`, `help`, `session
+/// rehearse`, `status`) read a hit and never write.
 pub(crate) fn allow_identity_cache_writes() {
     IDENTITY_CACHE_WRITES.store(true, std::sync::atomic::Ordering::Relaxed);
 }

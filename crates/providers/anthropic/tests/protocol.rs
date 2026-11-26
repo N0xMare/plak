@@ -624,7 +624,7 @@ fn api_key_cache_write_request_is_admitted_and_emitted() -> TestResult {
     let body: serde_json::Value = serde_json::from_slice(prepared.body())?;
     assert_eq!(
         body["messages"][0]["content"][0]["cache_control"],
-        serde_json::json!({"type":"ephemeral"})
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
     );
     assert!(body.get("cache_control").is_none());
     Ok(())
@@ -1024,9 +1024,6 @@ fn claude_oauth_lowering_uses_gateway_prefix_then_projection() -> TestResult {
         InstructionSource::Profile,
         "Use Bash, Read, Edit, Write, and TaskStop.",
     )?])
-    .cache(CachePolicy::Enabled {
-        requirement: CapabilityRequirement::Required,
-    })
     .build()?;
     let plan = resolved
         .descriptor()
@@ -2088,9 +2085,6 @@ fn api_key_rolling_last_message_marks_only_the_latest_text_block() -> TestResult
         InstructionSource::Profile,
         "Stable cached instruction",
     )?])
-    .cache(CachePolicy::Enabled {
-        requirement: CapabilityRequirement::Required,
-    })
     .build()?;
     let plan = resolved
         .descriptor()
@@ -2101,7 +2095,7 @@ fn api_key_rolling_last_message_marks_only_the_latest_text_block() -> TestResult
     let system = body["system"].as_array().ok_or("system blocks")?;
     assert_eq!(
         system[0]["cache_control"],
-        serde_json::json!({"type":"ephemeral"})
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
     );
     let messages = body["messages"].as_array().ok_or("messages")?;
     assert_eq!(messages.len(), 1);
@@ -2112,13 +2106,13 @@ fn api_key_rolling_last_message_marks_only_the_latest_text_block() -> TestResult
     assert_eq!(content[1]["text"], "second");
     assert_eq!(
         content[1]["cache_control"],
-        serde_json::json!({"type":"ephemeral"})
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
     );
     Ok(())
 }
 
 #[test]
-fn api_key_last_customer_tool_defaults_to_five_minute_cache_control() -> TestResult {
+fn api_key_last_customer_tool_emits_one_hour_cache_control() -> TestResult {
     let resolved = resolved()?;
     let selected: SelectedProviderConfigurationId =
         serde_json::from_value(serde_json::to_value(Digest::sha256(
@@ -2172,9 +2166,6 @@ fn api_key_last_customer_tool_defaults_to_five_minute_cache_control() -> TestRes
         "Stable cached instruction",
     )?])
     .tools(vec![tool])
-    .cache(CachePolicy::Enabled {
-        requirement: CapabilityRequirement::Required,
-    })
     .build()?;
     let plan = resolved
         .descriptor()
@@ -2182,87 +2173,24 @@ fn api_key_last_customer_tool_defaults_to_five_minute_cache_control() -> TestRes
     let prepared =
         MessagesRequestTranslator::new(resolved).translate(&plan, ToolOwnership::default())?;
     let body: serde_json::Value = serde_json::from_slice(prepared.body())?;
-    let expected = serde_json::json!({"type":"ephemeral"});
-    assert_eq!(body["tools"][0]["cache_control"], expected);
-    assert!(body["tools"][0]["cache_control"].get("ttl").is_none());
-    assert_eq!(body["system"][0]["cache_control"], expected);
-    assert_eq!(body["messages"][0]["content"][0]["cache_control"], expected);
+    assert_eq!(
+        body["tools"][0]["cache_control"],
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
+    );
+    assert_eq!(
+        body["system"][0]["cache_control"],
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
+    );
+    assert_eq!(
+        body["messages"][0]["content"][0]["cache_control"],
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
+    );
     assert!(body.get("cache_control").is_none());
     assert_eq!(
         serde_json::to_string(&body)?
             .matches("cache_control")
             .count(),
         3
-    );
-    Ok(())
-}
-
-#[test]
-fn api_key_cache_policy_disabled_omits_cache_control_markers() -> TestResult {
-    let resolved = resolved()?;
-    let selected: SelectedProviderConfigurationId =
-        serde_json::from_value(serde_json::to_value(Digest::sha256(
-            DigestDomain::SelectedProviderConfiguration,
-            5,
-            &[b"api-key-disabled-selected"],
-        )?)?)?;
-    let effective: EffectiveProviderConfigurationId =
-        serde_json::from_value(serde_json::to_value(Digest::sha256(
-            DigestDomain::EffectiveProviderConfiguration,
-            5,
-            &[b"api-key-disabled-effective"],
-        )?)?)?;
-    let tool = ConfiguredTool::new(
-        ToolDefinition::new(
-            ToolName::new("lookup")?,
-            "1.0.0",
-            "Look up one value",
-            ToolInputContract::structured(serde_json::json!({
-                "$schema":"https://json-schema.org/draft/2020-12/schema",
-                "type":"object",
-                "properties":{"q":{"type":"string"}},
-                "required":["q"],
-                "additionalProperties":false
-            }))?,
-            ToolOutputContract::portable_model_content(),
-            ToolConcurrency::Parallel,
-            ToolEffect::ReadOnly,
-        )?,
-        ToolExecutionDisposition::Local,
-        ToolCallerDisposition::DirectOnly,
-    );
-    let request = ModelRequest::builder(
-        selected,
-        effective,
-        ConversationView::from_items(vec![ConversationItem::new(
-            EntryId::try_from(Uuid::from_u128(61))?,
-            Actor::User,
-            vec![ContentBlock::Text(TextBlock::new("do not cache", None)?)],
-            Provenance::UserInput,
-        )?])?,
-        RequestMetadata::for_turn(
-            RunId::try_from(Uuid::from_u128(62))?,
-            TurnId::try_from(Uuid::from_u128(63))?,
-            AttemptId::try_from(Uuid::from_u128(64))?,
-            Timestamp::new(2, 0)?,
-        ),
-    )
-    .instructions(vec![InstructionBlock::new(
-        InstructionSource::Profile,
-        "Uncached instruction",
-    )?])
-    .tools(vec![tool])
-    .cache(CachePolicy::Disabled)
-    .build()?;
-    let plan = resolved
-        .descriptor()
-        .validate_request(request, ValidationMode::Strict)?;
-    let prepared =
-        MessagesRequestTranslator::new(resolved).translate(&plan, ToolOwnership::default())?;
-    let raw = std::str::from_utf8(prepared.body())?;
-    assert!(
-        !raw.contains("cache_control"),
-        "CachePolicy::Disabled on Platform API must not emit cache_control: {raw}"
     );
     Ok(())
 }

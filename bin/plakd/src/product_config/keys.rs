@@ -820,7 +820,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         path: "gateway.key_file",
         field: ConfigField::GatewayKeyFile,
         kind: "string",
-        constraint: "absolute path; mode 0600; home-scoped; host restart required",
+        constraint: "absolute path; single-link regular file owned by euid, mode 0600 (no symlink/hardlink, max 16 KiB); home-scoped; host restart required",
         doc: "The caller key file for a configured gateway address. A tcp address defaults to the home secrets gateway.key; a unix address sends a key only when this is set, and a same-UID unix peer without one is the local administrator. Captured at host startup.",
         example: "\"/home/user/.plak/secrets/gateway.key\"",
         scope: ConfigScope::Immediate,

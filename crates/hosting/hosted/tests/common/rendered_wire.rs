@@ -182,11 +182,7 @@ pub(crate) mod suite {
 
     fn cache_for(spec: &prompts::RouteSpec) -> CachePolicy {
         match spec.provider {
-            prompts::ProviderKind::Claude
-            | prompts::ProviderKind::Platform(PlatformProvider::Anthropic)
-            | prompts::ProviderKind::OpenRouter {
-                wire: ProductResolvedProtocol::Messages,
-            } => CachePolicy::Enabled {
+            prompts::ProviderKind::Claude => CachePolicy::Enabled {
                 requirement: CapabilityRequirement::Required,
             },
             _ => CachePolicy::Disabled,
@@ -541,7 +537,7 @@ pub(crate) mod suite {
                     })
                     .with_prompt_cache(true)
                     .with_top_level_prompt_cache(false)
-                    .with_prompt_cache_ttl(None);
+                    .with_prompt_cache_ttl(Some("1h"));
                 let lowered =
                     plakous_messages::lower_request(&plan, &policy, ToolOwnership::default())
                         .unwrap_or_else(|error| {
@@ -558,7 +554,7 @@ pub(crate) mod suite {
                     spec.model,
                     "openrouter.messages.dynamic-custom-v1",
                     family,
-                    true,
+                    false,
                 );
                 let plan = descriptor
                     .validate_request(request, ValidationMode::Strict)
@@ -990,7 +986,7 @@ pub(crate) mod suite {
         ),
         (
             "grok.direct.root",
-            "cb5090f7d7315a53c132bac46303364423c23dc5e48e65fc6dcda32853139110",
+            "1d07a29008157a89682e13825a630d4ad5c7c57676bf8b3cad1aaba5d0472516",
         ),
         (
             "claude.direct.root",
@@ -1014,11 +1010,11 @@ pub(crate) mod suite {
         ),
         (
             "xai-api.direct.root.single-agent",
-            "d06ef3a070dfed7c7fcea2808b88bffcd48a22e4e020208eca83c5121b3ecfea",
+            "e7e0b74a91aa42a81905409e3a15cc5d4f4340ffd7bf4f5d995537b9b76de4ce",
         ),
         (
             "anthropic-api.direct.root.single-agent",
-            "b6befc33a78a723ad2ccd50867509ec93a70ae4297a2e95baa1b28ae70fd71bc",
+            "ff5d01897540ec01cbc597b142c1305bed9bdd3084b8208c928369aea83109e6",
         ),
     ];
 

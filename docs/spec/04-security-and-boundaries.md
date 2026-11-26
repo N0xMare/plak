@@ -754,8 +754,10 @@ on the exact address then connected, and again on every fresh connection, so
 DNS rebinding cannot move a vetted name onto a refused address. The public-only
 policy refuses loopback, private, shared, link-local (including the cloud
 metadata addresses `169.254.169.254` and `fd00:ec2::254`), documentation,
-benchmarking, multicast and reserved ranges, re-checks IPv4 addresses embedded
-in IPv6, and refuses `localhost`, `*.localhost` and `metadata.google.internal`
+benchmarking, multicast, SIIT (`64:ff9b::/96`, `64:ff9b:1::/48`), SRv6
+(`5f00::/16`), Teredo (`2001::/32`), 6to4 (`2002::/16`), non-global/reserved
+IPv6 ranges, re-checks IPv4 addresses embedded
+in IPv6 (IPv4-mapped, IPv4-compatible, NAT64/SIIT, 6to4, and Teredo), and refuses `localhost`, `*.localhost` and `metadata.google.internal`
 before resolution (chapter 01 §13.1 lists the table). Provider, OAuth, catalog
 and discovery clients install no policy: their origins are fixed configuration,
 not model input. MCP OAuth discovery follows URLs an operator-configured
@@ -1405,9 +1407,25 @@ holder of its own state home's store advertises exactly that socket; `gateway
 check` and `plakd doctor` apply the same check, so a host never relays through a
 gateway that holds another store. Startup tolerates a short listener bring-up
 window, but retries never accept another socket or fall back to local custody.
-The caller key file must be owner-only; a
+The gateway runs on a bounded Tokio pool (`worker_threads(4)`), caps concurrent
+connections separately per listener (256 Unix and 256 TCP, backed by a 512
+connection cap in `RelayServer`) so a TCP flood cannot starve `local-admin` on
+the Unix socket, enforces a 15 s HTTP/1.1 header read timeout and a 30 s request
+body read timeout, and reserves an in-flight admission slot (`admit_relay`)
+before consuming the 512 MiB aggregate relay buffer budget. Remote callers'
+`List` and empty-account `Status` responses are filtered to the accounts their
+caller scopes authorize; `DisableTarget::Caller` requires either the local
+administrator or a matching caller self-scope; and pending logins bind to
+`(Principal, GatewayAccount)` so another remote caller cannot view, poll, or
+complete someone else's login.
+
+The caller key file must be a single-link (`st_nlink == 1`) regular file owned
+by the effective user with mode `0600` (opened with `O_NOFOLLOW`, bounded at
+16 KiB, zeroized on drop — symlinks and hardlinks are refused); a
 unix gateway gets a key only when `gateway.key_file` names one. The service
-replaces a stale socket only when it is this user's socket. The audit log
+replaces a stale socket only when it is this user's socket. Private directories
+created or verified by `ensure_private_dir` must likewise be owned by the
+effective user as well as mode `0700`. The audit log
 records metadata only; upstream transport diagnostics are closed labels,
 counts and codes, never raw errors, header values or payloads. They confer
 no replay authority and are not sent to callers. A failed append is counted
@@ -1536,6 +1554,11 @@ relative to that descriptor without following links, open relative to the same
 descriptor with `O_NOFOLLOW`, and revalidate the opened descriptor's owner,
 mode, type, link count and device/inode identity before reading any bytes.
 This also governs default API key reads, without moving or re-encoding them.
+
+Optional diagnostics (`PLAK_LOG`) open their append target with `O_NOFOLLOW`
+and verify that it is a regular file owned by the effective user; symlinks,
+non-regular files, and foreign-owned targets are refused, degrading diagnostics
+without halting the host.
 
 The only account label an API key supplies is a fingerprint — `sha256:` plus
 eight hex characters of the digest — or the name of the environment variable
@@ -2716,14 +2739,17 @@ unless a replacement is shown):
 - `(?s)-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z]+ )?PRIVATE KEY-----`.
 - `(?s)-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*`: a key a cut or a bound left
   without its END, to the end of the text.
-- `(?im)(\b(?:Authorization|Proxy-Authorization|X-Api-Key|Cookie)[ \t]*:[ \t]*)([^\s"'\[\r\n][^\r\n"']*)` -> `${1}[redacted]`.
+- `(?im)(\b(?:Authorization|Proxy-Authorization|X-Api-Key|Plak-Gateway-Key|Cookie|Set-Cookie)[ \t]*:[ \t]*)([^\s"'\[\r\n][^\r\n"']*)` -> `${1}[redacted]`.
 - `((?i:\bBearer|\bBasic)[ \t]+)[A-Za-z0-9._~+/-]{16,}=*` -> `${1}[redacted]`.
 - `\bsk-[A-Za-z0-9_-]{20,}`.
 - `\bAKIA[0-9A-Z]{16}\b`.
 - `\b(?:gh[posur]_|github_pat_|glpat-|AIza|xox[abprs]-)[A-Za-z0-9_-]{20,}`.
+- `\bplakgw1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`.
 - `\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`.
 - `(\b[A-Za-z][A-Za-z0-9+.-]*://[^\s/:@]+:)[^\s@/\[]+(@)` -> `${1}[redacted]${2}`.
-- `(?i)([?&](?:token|key|api_key|access_token|password|secret|sig)=)[^\s&#"'\[\]]+` -> `${1}[redacted]`.
+- `(?i)([?&](?:token|key|api_key|access_token|refresh_token|client_secret|code|password|secret|sig)=)[^\s&#"'\[\]]+` -> `${1}[redacted]`.
+- `(?im)((?:^|[\s&])(?:refresh_token|client_secret)=)[^\s&#"'\[\]]+` -> `${1}[redacted]`.
+- `(?im)(^code=)[^\s&#"'\[\]]+(&)` -> `${1}[redacted]${2}`.
 - `(?i)(\b[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd|credential)\b)(["']?)(\s*[:=]\s*)(?:(\\["'])([^\s"'\[\]]{8,})(\\["'])|(["'])([^\s"'\[\]]{8,})(["'])|([^\s"'\[\]]{8,}))`
 
 The body of the match becomes `[redacted]`; the name, the separator and any
@@ -2736,7 +2762,7 @@ linear time.
 
 JSON keeps object and array layout. Every string and number leaf at any depth
 under a key matching
-`(?i)^[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd)$`
+`(?i)^[A-Za-z0-9_.-]*(?:(?:api|gateway)[_-]?key|token|secret|password|passwd)$`
 becomes `[redacted]`. Other string leaves and every object key use the text
 rules; the credential-name rule is decided on the original key. When a key
 redacts to the same text as an earlier key of the same object, the later entry

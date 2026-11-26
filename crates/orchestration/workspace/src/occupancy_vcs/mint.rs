@@ -128,6 +128,10 @@ pub(super) fn mint_git_worktree(request: &super::MintRequest<'_>) -> Result<Mint
     if super::names::copy_parts(&names.dir).is_none() {
         return Err(VcsError::mint_unavailable("invalid copy identity"));
     }
+    super::git::reject_configured_git_filters(
+        launch,
+        over.map(|candidate| candidate.commit.as_str()),
+    )?;
     let namespace_guard =
         super::reserve_copy_namespace(&super::pins::common(launch)?, request.namespace)?;
     let dest = launch.join(".plak/worktrees").join(&names.dir);

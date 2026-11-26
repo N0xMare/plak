@@ -496,11 +496,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
             "the home-local runner's product home no longer exists",
         ));
     }
-    // Record a fresh binary id in an already-existing private home when this
-    // command uses product state or reports the binary version, so repeated
-    // `plakd --version` and `plakd --help` invocations hit the cache without
-    // re-hashing the executable. Missing or non-private homes are never written.
-    if command_needs_product_state(&command) || matches!(command, Command::Version) {
+    // Only a command that uses product state records a fresh binary id in the
+    // home; inspection commands (`version`, `help`, `session rehearse`,
+    // `status`) read the identity cache and never write it.
+    if command_needs_product_state(&command) {
         build_identity::allow_identity_cache_writes();
     }
 
