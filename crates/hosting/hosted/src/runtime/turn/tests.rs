@@ -54,12 +54,7 @@ fn approval_handles_are_host_minted_and_single_use() {
 }
 
 #[test]
-fn result_first_race_drains_delivered_events_and_reconciles_once() {
-    assert!(
-        !turn_finalization_ready(true, false),
-        "events delivered before the result are applied before the drive ends"
-    );
-
+fn result_first_race_reconciles_once() {
     let mut assistant = "queued ".to_owned();
     assert_eq!(
         reconcile_authoritative_assistant(&mut assistant, "queued delta".to_owned()),
@@ -71,14 +66,10 @@ fn result_first_race_drains_delivered_events_and_reconciles_once() {
         None,
         "re-reading the authoritative result must not duplicate text"
     );
-
-    assert!(turn_finalization_ready(true, true));
 }
 
 #[test]
-fn event_first_race_waits_for_result_and_result_text_is_authoritative() {
-    assert!(!turn_finalization_ready(false, true));
-
+fn event_first_race_result_text_is_authoritative() {
     let mut assistant = "noncanonical presentation".to_owned();
     assert_eq!(
         reconcile_authoritative_assistant(&mut assistant, "canonical result".to_owned()),
@@ -86,8 +77,6 @@ fn event_first_race_waits_for_result_and_result_text_is_authoritative() {
         "a mismatch cannot be repainted as a delta without duplication"
     );
     assert_eq!(assistant, "canonical result");
-
-    assert!(turn_finalization_ready(true, true));
 }
 
 #[test]

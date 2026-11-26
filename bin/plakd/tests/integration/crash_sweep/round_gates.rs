@@ -30,6 +30,8 @@ impl<'a> RoundGates<'a> {
                 | "owner_lost_child_continue"
                 | "ledger_retirement_live_child_process"
                 | "node_fenced_turn_child"
+                | "tree_grandchild_survives_loss"
+                | "tree_child_parked_job_loss"
         ) {
             return None;
         }

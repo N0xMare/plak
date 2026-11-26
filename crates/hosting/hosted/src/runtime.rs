@@ -99,7 +99,7 @@ use turn::{
     admitted_turn_lifecycle, apply_cancel_settlement, emit_turn_lifecycle, flush_assistant_delta,
     flush_deferred_interrupted_status, observe_pending_cancel_settlement,
     operator_facing_agent_error, reconcile_authoritative_assistant, settle_late_cancel,
-    terminal_turn_outcome, turn_finalization_ready, turn_lifecycle, unresolved_turn_lifecycle,
+    terminal_turn_outcome, turn_lifecycle, unresolved_turn_lifecycle,
 };
 use usage::request_subscription_usage_service;
 

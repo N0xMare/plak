@@ -18,8 +18,8 @@ use super::{
     queue_edit_refused, queue_refusal, reconcile_authoritative_assistant,
     record_emitted_tree_revision, reject_draft, reject_stale_queue_action, remove_mutable,
     request_subscription_usage_service, resolve_approval_intent, sessions, settle_cancel,
-    settle_late_cancel, settle_live_thinking, surface, terminal_turn_outcome,
-    turn_finalization_ready, turn_lifecycle, unresolved_turn_lifecycle,
+    settle_late_cancel, settle_live_thinking, surface, terminal_turn_outcome, turn_lifecycle,
+    unresolved_turn_lifecycle,
 };
 use super::{HostBoundary, HostWorkflow, RuntimeFactory, TurnObserver, observe_boundary};
 use crate::node::wait_deadline;
@@ -138,7 +138,7 @@ struct RootTurn<'a, P: plakous_host_protocol::ProtocolExtension> {
     interrupted_status_pending: bool,
     abandoned_by_quit: bool,
     events_done: bool,
-    /// The result came and every event delivered before it was applied.
+    /// The result has arrived and every event delivered before it has been applied.
     events_drained: bool,
     turn_result: Option<Result<TurnResult, AgentError>>,
     event_failure: Option<String>,
@@ -367,10 +367,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
         // The drive polls a ready result before the urgent quit deadline.
         // Checking elapsed time here would abandon an already-published
         // terminal when this pass was descheduled past that deadline.
-        if turn_finalization_ready(
-            self.turn_result.is_some(),
-            self.events_done || self.events_drained,
-        ) {
+        if self.turn_result.is_some() && (self.events_done || self.events_drained) {
             return crate::node::Pass::Done;
         }
         crate::node::Pass::Wait
