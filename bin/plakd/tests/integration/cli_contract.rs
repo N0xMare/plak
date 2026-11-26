@@ -187,6 +187,7 @@ fn publication_read_only_commands_leave_missing_home_untouched() {
     for args in [
         vec!["config", "show"],
         vec!["session", "check-binding", "--all"],
+        vec!["session", "check-binding", "--gating"],
         vec!["wire", "schema"],
     ] {
         let root = tempfile::tempdir().unwrap();
@@ -322,6 +323,7 @@ fn publication_user_refusals_are_usage() {
         vec!["config", "set", "skills.enabled", "maybe"],
         vec!["state", "prune-legacy"],
         vec!["tree", "release", "some-tree"],
+        vec!["session", "check-binding", "--gating", "--all"],
     ] {
         let root = tempfile::tempdir().unwrap();
         let out = publication_command(root.path(), &args).output().unwrap();

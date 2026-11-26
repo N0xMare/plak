@@ -1058,7 +1058,7 @@ enum SessionAction {
         all: bool,
         #[arg(long, hide = true, conflicts_with = "all")]
         gating: bool,
-        #[arg(long, hide = true, requires = "all")]
+        #[arg(long, hide = true, requires = "all", conflicts_with = "gating")]
         summary: bool,
         #[arg(long, hide = true)]
         store_probe: Option<std::path::PathBuf>,

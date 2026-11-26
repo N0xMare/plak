@@ -156,7 +156,7 @@ mod gating {
     }
 
     fn heads(runtime: &Path) -> Vec<(String, String)> {
-        let report =
+        let (report, _) =
             inspect_with_dispositions(runtime, HashMap::new(), HashMap::new(), BindingScope::All)
                 .unwrap();
         let mut heads: Vec<_> = report
@@ -236,9 +236,10 @@ mod gating {
             )
             .unwrap();
         drop(connection);
-        let report = |scope| {
+        let decoding = |scope| {
             inspect_with_dispositions(&runtime, rows.clone(), children.clone(), scope).unwrap()
         };
+        let report = |scope| decoding(scope).0;
         let (full_source, gating_source) =
             (report(BindingScope::All), report(BindingScope::Gating));
         for (_, checkpoint) in [
@@ -252,7 +253,20 @@ mod gating {
         ] {
             corrupt(&runtime, checkpoint);
         }
-        let (full, gating) = (report(BindingScope::All), report(BindingScope::Gating));
+        let (full, decoded) = decoding(BindingScope::All);
+        assert_eq!(decoded.len(), heads.len());
+        let (gating, decoded) = decoding(BindingScope::Gating);
+        // Non-gating heads are never decoded, whichever flag excludes them.
+        assert_eq!(decoded.len(), heads.len() - 5);
+        for (key, _) in [
+            product_archived,
+            product_superseded,
+            runtime_archived,
+            closed_child,
+            archived_tree_child,
+        ] {
+            assert!(!decoded.contains(key), "{key} was decoded");
+        }
 
         assert_eq!(full.sessions.len(), heads.len());
         assert_eq!(gating.sessions.len(), heads.len() - 5);
@@ -299,5 +313,38 @@ mod gating {
         }
         assert!(finish(Some(&full_source), &full).is_err());
         assert!(finish(Some(&gating_source), &gating).is_err());
+    }
+}
+
+mod gating_fallback {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    fn output(code: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn only_an_unknown_argument_usage_refusal_falls_back_to_the_full_audit() {
+        let unknown = "plakd: unknown option or unexpected argument; use `plakd session --help`\n";
+        assert!(super::super::predates_gating(&output(2, "", unknown)));
+        // A refused inspection still prints its report and exits 1.
+        let report = r#"{"compatible":false,"sessions":[]}"#;
+        assert!(!super::super::predates_gating(&output(
+            1,
+            report,
+            "plakd: binding preflight refused; no runtime or state was changed\n"
+        )));
+        assert!(!super::super::predates_gating(&output(0, report, "")));
+        // Other usage errors and any output on stdout are not the old image.
+        assert!(!super::super::predates_gating(&output(
+            2,
+            "",
+            "plakd: run requires --account\n"
+        )));
+        assert!(!super::super::predates_gating(&output(2, report, unknown)));
     }
 }

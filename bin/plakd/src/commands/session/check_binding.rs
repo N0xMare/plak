@@ -55,7 +55,7 @@ impl Row {
 /// a runtime, a runner, credential sources or diagnostics.
 pub(crate) fn inspect(paths: &PlakPaths, scope: BindingScope) -> CliResult<Report> {
     let disposition = dispositions::inspect(paths)?;
-    inspect_runtime(&paths.runtime_database(), &disposition, scope)
+    inspect_runtime(&paths.runtime_database(), &disposition, scope, &mut |_| {})
 }
 
 /// A head's archival, succession and child state, known before decoding.
@@ -91,16 +91,22 @@ impl Status {
     }
 }
 
+/// `decoding` sees the `<session>/<branch>` key of each head selected for decoding.
 fn inspect_runtime(
     runtime: &Path,
     disposition: &dispositions::Dispositions,
     scope: BindingScope,
+    decoding: &mut dyn FnMut(String),
 ) -> CliResult<Report> {
     let selected = |status: &Status| scope == BindingScope::All || status.gates();
     let sources = plakous::sessions::rehearsal::inspect_selected_binding_presentations_sqlite(
         runtime,
         |locator, archived, line_head| {
-            selected(&Status::of(disposition, locator, archived, line_head))
+            let decode = selected(&Status::of(disposition, locator, archived, line_head));
+            if decode {
+                decoding(dispositions::key(locator));
+            }
+            decode
         },
     )
     .map_err(CliFailure::from)?;
@@ -175,19 +181,21 @@ fn inspect_runtime(
 }
 
 /// Inspects a runtime store under given product and tree dispositions, keyed
-/// `<session>/<branch>`.
+/// `<session>/<branch>`, with the keys of the heads selected for decoding.
 #[cfg(test)]
 pub(crate) fn inspect_with_dispositions(
     runtime: &Path,
     rows: std::collections::HashMap<String, (bool, bool)>,
     children_closed: std::collections::HashMap<String, bool>,
     scope: BindingScope,
-) -> CliResult<Report> {
+) -> CliResult<(Report, Vec<String>)> {
     let disposition = dispositions::Dispositions {
         rows,
         children_closed,
     };
-    inspect_runtime(runtime, &disposition, scope)
+    let mut decoded = Vec::new();
+    let report = inspect_runtime(runtime, &disposition, scope, &mut |key| decoded.push(key))?;
+    Ok((report, decoded))
 }
 
 fn qualified_change(

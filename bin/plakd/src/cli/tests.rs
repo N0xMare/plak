@@ -1748,3 +1748,42 @@ fn traces_requires_settled_json_and_parses_the_cutoff() {
         assert!(parse(args(argv)).is_err());
     }
 }
+
+#[test]
+fn check_binding_scopes_are_exclusive_and_gating_takes_a_store_probe() {
+    use crate::command::BindingScope;
+    assert!(matches!(
+        parse(args(&["session", "check-binding", "--all"])).unwrap(),
+        Command::SessionCheckBinding {
+            scope: BindingScope::All,
+            summary: false,
+            store_probe: None,
+        }
+    ));
+    assert!(matches!(
+        parse(args(&["session", "check-binding", "--gating"])).unwrap(),
+        Command::SessionCheckBinding {
+            scope: BindingScope::Gating,
+            summary: false,
+            store_probe: None,
+        }
+    ));
+    assert!(matches!(
+        parse(args(&["session", "check-binding", "--gating", "--store-probe", "/tmp/stores"])).unwrap(),
+        Command::SessionCheckBinding {
+            scope: BindingScope::Gating,
+            store_probe: Some(path),
+            ..
+        } if path.as_os_str() == "/tmp/stores"
+    ));
+    for refused in [
+        &["session", "check-binding", "--gating", "--all"][..],
+        &["session", "check-binding", "--gating", "--summary"],
+    ] {
+        assert!(parse(args(refused)).is_err(), "{refused:?}");
+    }
+    assert!(matches!(
+        parse(args(&["session", "check-binding"])).unwrap(),
+        Command::CommandHelp { .. }
+    ));
+}

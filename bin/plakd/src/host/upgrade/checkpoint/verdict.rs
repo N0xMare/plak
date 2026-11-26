@@ -267,12 +267,17 @@ mod tests {
             super::super::GatePhase::StoreHealthRuntime,
             std::time::Duration::from_millis(1234),
         );
-        let failed = Outcome::Failed(super::super::Failure::Health);
+        // The largest outcome: Ready with the longest instance and evidence
+        // names, every phase recorded at the longest elapsed value.
+        let ready = Outcome::Ready(
+            format!("{}-{:016x}", u32::MAX, u64::MAX),
+            super::super::Evidence::BaselinePredatesDrain,
+        );
         let longest = GateTiming::new(
             super::super::GatePhase::StoreHealthProduct,
             std::time::Duration::MAX,
         );
-        let bound = WriteVerdict::new(&paths, id, Some(true), failed, vec![longest; 8]).unwrap();
+        let bound = WriteVerdict::new(&paths, id, Some(true), ready, vec![longest; 8]).unwrap();
         assert!(serde_json::to_vec(&bound).unwrap().len() < usize::try_from(FRAME).unwrap());
         let failed = Outcome::Failed(super::super::Failure::Health);
         let written = serde_json::to_value(
