@@ -372,26 +372,18 @@ fn placeholder_notice_line() -> String {
 
 /// The canonical summary text after this pass, given the prior summary.
 ///
-/// A prior semantic summary is kept verbatim and the placeholder pass line is added
-/// under it. A prior placeholders line is superseded rather than stacked.
-fn merged_notice_text(previous: Option<&str>) -> String {
+/// Keeps the prior summary verbatim and appends the constant notice once.
+fn merged_notice_text(previous: Option<(&str, bool)>) -> String {
     let line = placeholder_notice_line();
-    let Some(previous) = previous else {
+    let Some((previous, standalone)) = previous else {
         return line;
     };
-    let kept = previous
-        .lines()
-        .filter(|candidate| {
-            !candidate
-                .trim_start()
-                .starts_with(PLACEHOLDER_NOTICE_PREFIX)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    if kept.trim().is_empty() {
+    if standalone {
         line
+    } else if previous.lines().next_back() == Some(line.as_str()) {
+        previous.to_owned()
     } else {
-        format!("{kept}\n{line}")
+        format!("{previous}\n{line}")
     }
 }
 
@@ -403,7 +395,7 @@ fn merged_notice_text(previous: Option<&str>) -> String {
 /// beside an existing summary: it merges into it, or creates the only one.
 pub(super) fn placeholders_notice_segment(
     workflow_id: SessionWorkflowId,
-    previous: Option<&str>,
+    previous: Option<(&str, bool)>,
     turns: Option<SummarizedTurns>,
 ) -> Result<HistorySegment, AgentError> {
     let entry_id = EntryId::try_from(compaction_uuid(workflow_id, b"placeholders-notice-entry")?)
@@ -417,7 +409,11 @@ pub(super) fn placeholders_notice_segment(
         entry_id,
         Actor::Assistant,
         vec![ContentBlock::Compaction(notice)],
-        Provenance::ModelOutput,
+        if previous.is_none_or(|(_, standalone)| standalone) {
+            Provenance::Instruction
+        } else {
+            Provenance::ModelOutput
+        },
     )
     .map_err(|_| invalid("placeholders notice item is invalid"))?;
     HistorySegment::new(HistorySegmentKind::Compaction, vec![item])
@@ -435,9 +431,9 @@ pub(super) fn placeholders_notice_segment(
 /// facet takes the facet branch before the ladder reaches this rung.
 fn existing_compaction_summary(
     history: &CanonicalHistory,
-) -> Result<Option<(usize, String)>, AgentError> {
+) -> Result<Option<(&str, bool)>, AgentError> {
     let mut found = None;
-    for (index, segment) in history.segments().iter().enumerate() {
+    for segment in history.segments() {
         if segment.kind() != HistorySegmentKind::Compaction {
             continue;
         }
@@ -446,7 +442,7 @@ fn existing_compaction_summary(
                 "tool-result placeholders found more than one compaction segment",
             ));
         }
-        let mut text = String::new();
+        let mut text = "";
         for block in segment.items().iter().flat_map(ConversationItem::blocks) {
             if let ContentBlock::Compaction(compaction) = block {
                 if compaction.native_item().is_some() {
@@ -454,10 +450,10 @@ fn existing_compaction_summary(
                         "tool-result placeholders cannot merge into a native compaction item",
                     ));
                 }
-                compaction.summary().clone_into(&mut text);
+                text = compaction.summary();
             }
         }
-        found = Some((index, text));
+        found = Some((text, plakous_model::is_placeholder_notice_segment(segment)));
     }
     Ok(found)
 }
@@ -656,7 +652,7 @@ pub(in crate::runtime) fn placeholder_successor(
     // existing summary recorded, or nothing removed when there was none.
     let notice = placeholders_notice_segment(
         workflow_id,
-        existing.as_ref().map(|(_, text)| text.as_str()),
+        existing,
         summarized_turns(history, segments.iter()),
     )?;
     if let Some(index) = existing_in_segments {

@@ -56,7 +56,7 @@ pub(in crate::runtime) fn residency_successor(
         Some(segment) if segment.items().iter().flat_map(ConversationItem::blocks).any(|block| matches!(block, ContentBlock::Compaction(compaction) if compaction.native_item().is_some())) => (*segment).clone(),
         previous => {
             let summary = previous.and_then(|segment| segment.items().iter().flat_map(ConversationItem::blocks).find_map(|block| match block {
-                ContentBlock::Compaction(compaction) => Some(compaction.summary()), _ => None,
+                ContentBlock::Compaction(compaction) => Some((compaction.summary(), plakous_model::is_placeholder_notice_segment(segment))), _ => None,
             }));
             placeholders_notice_segment(workflow, summary, summarized_turns(source, segments.iter()))?
         }

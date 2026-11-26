@@ -654,15 +654,24 @@ fn wait_bounded(
     child: &mut std::process::Child,
     timeout: std::time::Duration,
 ) -> std::io::Result<Option<std::process::ExitStatus>> {
+    wait_bounded_while(child, timeout, || true)
+}
+
+fn wait_bounded_while(
+    child: &mut std::process::Child,
+    timeout: std::time::Duration,
+    within_budget: impl Fn() -> bool,
+) -> std::io::Result<Option<std::process::ExitStatus>> {
     let group = i32::try_from(child.id())
         .ok()
         .and_then(rustix::process::Pid::from_raw);
     let started = std::time::Instant::now();
+    let mut poll = std::time::Duration::from_millis(1);
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(Some(status));
         }
-        if started.elapsed() >= timeout {
+        if started.elapsed() >= timeout || !within_budget() {
             if let Some(group) = group {
                 let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
             }
@@ -670,7 +679,8 @@ fn wait_bounded(
             let _ = child.wait();
             return Ok(None);
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(poll);
+        poll = (poll * 2).min(std::time::Duration::from_millis(10));
     }
 }
 

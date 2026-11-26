@@ -23,7 +23,7 @@ use super::holder::HolderMode;
 use super::holder::{self, HolderLock};
 use super::io_file::ensure_private_dir;
 use super::product::ProductGateway;
-use super::server_config::{self, ServerConfig};
+use super::server_config::{self, MAX_TCP_CONNECTIONS, MAX_UNIX_CONNECTIONS, ServerConfig};
 use crate::home::paths::PlakPaths;
 
 pub(crate) struct Gateway {
@@ -156,11 +156,6 @@ fn finish_accounts(
 /// spin up one thread per host CPU core.
 const GATEWAY_WORKER_THREADS: usize = 4;
 
-/// Concurrent connection caps, split between Unix and TCP so a TCP connection
-/// flood cannot lock out `local-admin` on the Unix socket.
-const MAX_UNIX_CONNECTIONS: usize = 256;
-const MAX_TCP_CONNECTIONS: usize = 256;
-
 /// How long in-flight relays, refresh claims and admin calls may take to
 /// settle once the service stops accepting.
 const DRAIN_DEADLINE: Duration = Duration::from_secs(30);
@@ -204,9 +199,13 @@ async fn run(
             listeners.push(format!("tcp:{addr}"));
         }
     }
-    let unix_connections = Arc::new(Semaphore::new(MAX_UNIX_CONNECTIONS));
-    let tcp_connections = Arc::new(Semaphore::new(MAX_TCP_CONNECTIONS));
+    let unix_connections = Arc::new(Semaphore::new(MAX_UNIX_CONNECTIONS as usize));
+    let tcp_connections = Arc::new(Semaphore::new(MAX_TCP_CONNECTIONS as usize));
     let mut connections = JoinSet::new();
+    // One bounded overload response per listener. Leave later dials queued
+    // in the listener backlog while it flushes, without blocking the other listener.
+    let mut unix_busy = JoinSet::new();
+    let mut tcp_busy = JoinSet::new();
     tokio::pin!(stop);
     loop {
         if state.draining.load(Ordering::Relaxed) {
@@ -218,10 +217,12 @@ async fn run(
                 break;
             }
             _ = connections.join_next(), if !connections.is_empty() => {}
-            accepted = unix.accept() => {
+            _ = unix_busy.join_next(), if !unix_busy.is_empty() => {}
+            _ = tcp_busy.join_next(), if !tcp_busy.is_empty() => {}
+            accepted = unix.accept(), if unix_busy.is_empty() => {
                 let Ok((stream, _)) = accepted else { continue; };
                 let Ok(permit) = Arc::clone(&unix_connections).try_acquire_owned() else {
-                    drop(stream);
+                    unix_busy.spawn(RelayServer::<ProductGateway>::serve_busy(stream));
                     continue;
                 };
                 let same_user = stream.peer_cred().map(|cred| cred.uid()).ok()
@@ -233,10 +234,10 @@ async fn run(
                     let _ = task.serve(stream, peer).await;
                 });
             }
-            accepted = accept_tcp(tcp.as_ref()), if tcp.is_some() => {
+            accepted = accept_tcp(tcp.as_ref()), if tcp.is_some() && tcp_busy.is_empty() => {
                 let Ok((stream, peer_addr)) = accepted else { continue; };
                 let Ok(permit) = Arc::clone(&tcp_connections).try_acquire_owned() else {
-                    drop(stream);
+                    tcp_busy.spawn(RelayServer::<ProductGateway>::serve_busy(stream));
                     continue;
                 };
                 let peer = Peer::Tcp(peer_addr);

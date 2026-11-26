@@ -67,6 +67,7 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
             format!("refusing to replace symlink {}", path.display()),
         ));
     }
+    plakous::auth::private_temps::sweep_hex_siblings(path);
     let tmp = random_temp_path(path)?;
     let write_result = (|| -> io::Result<()> {
         let fd = open(

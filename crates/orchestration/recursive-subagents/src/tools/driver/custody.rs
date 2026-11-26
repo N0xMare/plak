@@ -35,9 +35,9 @@ impl Drop for DriverCustody {
     /// The last clone of the driver is gone: no writer of this tree remains,
     /// so its share is released. Inside a Tokio runtime the blocking custody
     /// store release is offloaded via `spawn_blocking` so dropping a driver
-    /// never stalls an async worker thread. A release the store refuses leaves
-    /// the record naming this live process, which its next take joins and
-    /// which ends with it.
+    /// never stalls an async worker thread. If shutdown drops the queued
+    /// release, the next process must prove the old holder gone before taking
+    /// over the unreleased record.
     fn drop(&mut self) {
         let Ok(hold) = &self.hold else {
             return;

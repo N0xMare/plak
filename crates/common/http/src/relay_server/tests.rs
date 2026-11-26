@@ -1296,15 +1296,61 @@ async fn header_read_timeout_and_body_timeout_bound_stalled_callers() {
         .unwrap();
     let text = String::from_utf8_lossy(&reply[..n]);
     assert!(
-        text.contains("422") && text.contains("envelope_invalid"),
+        text.starts_with("HTTP/1.1 408") && !text.contains("plak-gateway-error"),
         "expected refusal on body timeout, got: {text}"
     );
     drop(client_io);
     let _ = task.await.unwrap();
+    assert_eq!(fixture.accepted.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        server.inner.request_budget.available_permits(),
+        super::RELAY_BUFFER_BUDGET_BYTES
+    );
 }
 
 #[tokio::test]
-async fn connection_cap_drops_excess_connections_and_recovers() {
+async fn gateway_http_timeout_proves_no_upstream_dispatch() {
+    let endpoint = GatewayEndpoint::InMemory(InMemoryGateway::new(|io| {
+        tokio::spawn(async move {
+            let service = hyper::service::service_fn(
+                |request: http::Request<hyper::body::Incoming>| async move {
+                    let reply = if request.uri().path() == "/versions" {
+                        super::bytes_reply(
+                        http::StatusCode::OK,
+                        "application/json",
+                        br#"{"versions":[1,2],"instance":"0b9e5f4c-7d3a-4e21-9f80-1a2b3c4d5e6f"}"#.to_vec(),
+                    )
+                    } else {
+                        super::body_timeout_reply()
+                    };
+                    Ok::<_, std::convert::Infallible>(reply)
+                },
+            );
+            hyper::server::conn::http1::Builder::new()
+                .header_read_timeout(None)
+                .serve_connection(hyper_util::rt::TokioIo::new(io), service)
+                .await
+                .unwrap();
+        });
+    }));
+    let failure = relayed(endpoint)
+        .execute(
+            request(
+                Origin::parse(&format!("{LOGICAL}/")).unwrap(),
+                "/v1/x",
+                placeholder(7),
+            ),
+            control(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(failure.transmission(), TransmissionFact::NotStarted);
+    assert_eq!(failure.kind(), ErrorKind::DeadlineExceeded);
+    assert_eq!(failure.phase(), Phase::Connect);
+}
+
+#[tokio::test]
+async fn connection_cap_refuses_excess_connections_and_recovers() {
     let fixture = upstream(Script::Reply(ok_reply("text/plain", b"ok"))).await;
     let server = RelayServer::new(
         Service::new(),
@@ -1326,10 +1372,14 @@ async fn connection_cap_drops_excess_connections_and_recovers() {
     let n = first_client.read(&mut buf).await.unwrap();
     assert!(String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200"));
 
-    // Second concurrent connection hits cap=1 and closes immediately with 0 bytes.
+    // The second connection gets a typed refusal without sending any body.
     let (mut second_client, second_server) = tokio::io::duplex(4096);
     let s2 = server.clone();
     let t2 = tokio::spawn(async move { s2.serve(second_server, Peer::InProcess).await });
+    second_client
+        .write_all(b"POST /v1/relay HTTP/1.1\r\nhost: g\r\ncontent-length: 10\r\n\r\n")
+        .await
+        .unwrap();
     let mut overflow = Vec::new();
     tokio::time::timeout(
         Duration::from_secs(1),
@@ -1338,7 +1388,13 @@ async fn connection_cap_drops_excess_connections_and_recovers() {
     .await
     .unwrap()
     .unwrap();
-    assert!(overflow.is_empty(), "excess connection must be closed");
+    let overflow = String::from_utf8(overflow).unwrap();
+    assert!(overflow.starts_with("HTTP/1.1 503"), "{overflow}");
+    assert!(overflow.contains("plak-gateway-error: busy"), "{overflow}");
+    assert!(
+        overflow.contains(r#""code":"busy","retry_after_ms":500"#),
+        "{overflow}"
+    );
     t2.await.unwrap().unwrap();
 
     // Closing the first connection frees the slot.

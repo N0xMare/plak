@@ -11,6 +11,10 @@ use super::address::{self, AddressError};
 use super::io_file::write_private;
 use crate::home::paths::{self, PlakPaths};
 
+// Separate caps preserve Unix local-admin capacity under TCP load.
+pub(super) const MAX_UNIX_CONNECTIONS: u32 = 256;
+pub(super) const MAX_TCP_CONNECTIONS: u32 = 256;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ServerConfig {
     pub socket: PathBuf,
@@ -107,6 +111,19 @@ impl ServerConfig {
         if max_inflight == 0 || max_inflight_per_caller == 0 {
             return Err("inflight limits must be at least 1".to_owned());
         }
+        let connection_cap = MAX_UNIX_CONNECTIONS
+            + if listen_tcp.is_some() {
+                MAX_TCP_CONNECTIONS
+            } else {
+                0
+            };
+        if max_inflight > connection_cap {
+            tracing::warn!(
+                max_inflight,
+                connection_cap,
+                "gateway max_inflight exceeds the connection cap and is capped"
+            );
+        }
         let max_request_body_bytes = file
             .max_request_body_bytes
             .unwrap_or(plakous::gateway::server::DEFAULT_MAX_REQUEST_BODY_BYTES as u64);
@@ -115,7 +132,7 @@ impl ServerConfig {
             listen_tcp,
             state_root,
             audit_retention_days,
-            max_inflight,
+            max_inflight: max_inflight.min(connection_cap),
             max_inflight_per_caller,
             max_request_body_bytes,
             allow_non_tailnet,
@@ -211,4 +228,22 @@ pub(crate) fn audit_dir(home: &PlakPaths) -> PathBuf {
 /// The running service's audit-failure count, for `plakd gateway status`.
 pub(crate) fn audit_failures_path(home: &PlakPaths) -> PathBuf {
     ServerConfig::gateway_dir(home).join("audit-failures")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_inflight_is_capped_by_enabled_listeners() -> Result<(), String> {
+        let config = "state_root = '/state'\nmax_inflight = 1000\n";
+        let load =
+            |text: &str| ServerConfig::parse_with_socket(text, PathBuf::from("/gateway.sock"));
+        assert_eq!(load(config)?.max_inflight, MAX_UNIX_CONNECTIONS);
+        assert_eq!(
+            load(&format!("{config}listen_tcp = '127.0.0.1:1'\n"))?.max_inflight,
+            MAX_UNIX_CONNECTIONS + MAX_TCP_CONNECTIONS
+        );
+        Ok(())
+    }
 }

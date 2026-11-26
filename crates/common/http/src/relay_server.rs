@@ -55,6 +55,7 @@ const MAX_RELAY_DURATION: Duration = Duration::from_secs(3600);
 const DEFAULT_HEADER_READ_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_MAX_CONNECTIONS: usize = 512;
+const BUSY_RESPONSE_TIMEOUT: Duration = Duration::from_millis(250);
 const INITIAL_READ_CAPACITY_CAP: usize = 64 * 1024;
 const EOF_DRAIN_TIMEOUT: Duration = Duration::from_millis(75);
 const EOF_DRAIN_MAX_BYTES: usize = 4096;
@@ -384,7 +385,7 @@ impl<S: GatewayService> RelayServer<S> {
     {
         let Ok(_connection_permit) = Arc::clone(&self.inner.connection_limit).try_acquire_owned()
         else {
-            return Ok(());
+            return Self::serve_busy(io).await;
         };
         let inner = Arc::clone(&self.inner);
         let service = hyper::service::service_fn(move |request| {
@@ -404,6 +405,30 @@ impl<S: GatewayService> RelayServer<S> {
                 connection.await.map_err(ServeError)
             }
             result = &mut connection => result.map_err(ServeError),
+        }
+    }
+
+    /// Sends one typed capacity refusal without authenticating, reading a
+    /// body, or dispatching. The caller bounds concurrent rejection tasks.
+    ///
+    /// # Errors
+    /// Returns the HTTP/1.1 connection failure, if any.
+    pub async fn serve_busy<IO>(io: IO) -> Result<(), ServeError>
+    where
+        IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        let service = hyper::service::service_fn(|_: http::Request<Incoming>| async {
+            Ok::<_, Infallible>(refusal_reply(&GatewayRefusal::Busy {
+                retry_after_ms: 500,
+            }))
+        });
+        let connection = hyper::server::conn::http1::Builder::new()
+            .keep_alive(false)
+            .header_read_timeout(None)
+            .serve_connection(TokioIo::new(io), service);
+        match tokio::time::timeout(BUSY_RESPONSE_TIMEOUT, connection).await {
+            Ok(result) => result.map_err(ServeError),
+            Err(_) => Ok(()),
         }
     }
 }
@@ -453,12 +478,15 @@ impl<S: GatewayService> ServerInner<S> {
         match endpoint {
             Endpoint::Relay => self.relay(request, principal, version).await,
             Endpoint::Facts | Endpoint::Refresh | Endpoint::Admin => {
-                let body = read_whole(
-                    request.into_body(),
-                    call::MAX_CALL_BYTES,
+                let Ok(body) = tokio::time::timeout(
                     self.request_body_timeout,
+                    read_whole(request.into_body(), call::MAX_CALL_BYTES),
                 )
-                .await?;
+                .await
+                else {
+                    return Ok(body_timeout_reply());
+                };
+                let body = body?;
                 let reply = self
                     .service
                     .call(&principal, version, endpoint, &body)
@@ -506,13 +534,15 @@ impl<S: GatewayService> ServerInner<S> {
                 retry_after_ms: 500,
             });
         }
-        let (whole, buffer_hold) = read_whole_budgeted(
-            request.into_body(),
-            bound,
+        let Ok(body) = tokio::time::timeout(
             self.request_body_timeout,
-            &self.request_budget,
+            read_whole_budgeted(request.into_body(), bound, &self.request_budget),
         )
-        .await?;
+        .await
+        else {
+            return Ok(body_timeout_reply());
+        };
+        let (whole, buffer_hold) = body?;
         let started = Instant::now();
         let (envelope, upstream_body) =
             envelope::decode_request(&whole).map_err(|error| match error {
@@ -979,40 +1009,27 @@ async fn send(sender: &mpsc::Sender<Bytes>, frame: &Frame) -> Result<(), ()> {
     sender.send(Bytes::from(encoded)).await.map_err(|_| ())
 }
 
-/// Reads a whole request body within `bound` and `timeout`; over `bound` is
-/// refused and a stalled body times out.
-async fn read_whole(
-    mut body: Incoming,
-    bound: usize,
-    timeout: Duration,
-) -> Result<Bytes, GatewayRefusal> {
+/// Reads a whole request body within its byte bound.
+async fn read_whole(mut body: Incoming, bound: usize) -> Result<Bytes, GatewayRefusal> {
     let capacity = body
         .size_hint()
         .exact()
         .and_then(|bytes| usize::try_from(bytes).ok())
         .map_or(0, |bytes| bytes.min(bound).min(INITIAL_READ_CAPACITY_CAP));
     let mut whole = Vec::with_capacity(capacity);
-    let read = tokio::time::timeout(timeout, async {
-        while let Some(frame) = body.frame().await {
-            let frame = frame.map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
-            if let Ok(data) = frame.into_data() {
-                let Some(new_len) = whole.len().checked_add(data.len()) else {
-                    return Err(GatewayRefusal::LimitExceeded {});
-                };
-                if new_len > bound {
-                    return Err(GatewayRefusal::LimitExceeded {});
-                }
-                whole.extend_from_slice(&data);
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
+        if let Ok(data) = frame.into_data() {
+            let Some(new_len) = whole.len().checked_add(data.len()) else {
+                return Err(GatewayRefusal::LimitExceeded {});
+            };
+            if new_len > bound {
+                return Err(GatewayRefusal::LimitExceeded {});
             }
+            whole.extend_from_slice(&data);
         }
-        Ok(())
-    })
-    .await;
-    match read {
-        Ok(Ok(())) => Ok(Bytes::from(whole)),
-        Ok(Err(refusal)) => Err(refusal),
-        Err(_) => Err(GatewayRefusal::EnvelopeInvalid {}),
     }
+    Ok(Bytes::from(whole))
 }
 
 /// Reads a whole relay request body while acquiring permits incrementally from
@@ -1021,7 +1038,6 @@ async fn read_whole(
 async fn read_whole_budgeted(
     mut body: Incoming,
     bound: usize,
-    timeout: Duration,
     budget: &Arc<Semaphore>,
 ) -> Result<(Bytes, Option<OwnedSemaphorePermit>), GatewayRefusal> {
     let capacity = body
@@ -1031,42 +1047,41 @@ async fn read_whole_budgeted(
         .map_or(0, |bytes| bytes.min(bound).min(INITIAL_READ_CAPACITY_CAP));
     let mut whole = Vec::with_capacity(capacity);
     let mut held: Option<OwnedSemaphorePermit> = None;
-    let read = tokio::time::timeout(timeout, async {
-        while let Some(frame) = body.frame().await {
-            let frame = frame.map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
-            if let Ok(data) = frame.into_data() {
-                if data.is_empty() {
-                    continue;
-                }
-                let Some(new_len) = whole.len().checked_add(data.len()) else {
-                    return Err(GatewayRefusal::LimitExceeded {});
-                };
-                if new_len > bound {
-                    return Err(GatewayRefusal::LimitExceeded {});
-                }
-                let permits =
-                    u32::try_from(data.len()).map_err(|_| GatewayRefusal::LimitExceeded {})?;
-                let chunk_hold =
-                    Arc::clone(budget)
-                        .try_acquire_many_owned(permits)
-                        .map_err(|_| GatewayRefusal::Busy {
-                            retry_after_ms: 500,
-                        })?;
-                match &mut held {
-                    Some(existing) => existing.merge(chunk_hold),
-                    None => held = Some(chunk_hold),
-                }
-                whole.extend_from_slice(&data);
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
+        if let Ok(data) = frame.into_data() {
+            if data.is_empty() {
+                continue;
             }
+            let Some(new_len) = whole.len().checked_add(data.len()) else {
+                return Err(GatewayRefusal::LimitExceeded {});
+            };
+            if new_len > bound {
+                return Err(GatewayRefusal::LimitExceeded {});
+            }
+            let permits =
+                u32::try_from(data.len()).map_err(|_| GatewayRefusal::LimitExceeded {})?;
+            let chunk_hold = Arc::clone(budget)
+                .try_acquire_many_owned(permits)
+                .map_err(|_| GatewayRefusal::Busy {
+                    retry_after_ms: 500,
+                })?;
+            match &mut held {
+                Some(existing) => existing.merge(chunk_hold),
+                None => held = Some(chunk_hold),
+            }
+            whole.extend_from_slice(&data);
         }
-        Ok(())
-    })
-    .await;
-    match read {
-        Ok(Ok(())) => Ok((Bytes::from(whole), held)),
-        Ok(Err(refusal)) => Err(refusal),
-        Err(_) => Err(GatewayRefusal::EnvelopeInvalid {}),
     }
+    Ok((Bytes::from(whole), held))
+}
+
+fn body_timeout_reply() -> Reply {
+    let mut reply = bytes_reply(StatusCode::REQUEST_TIMEOUT, "text/plain", Vec::new());
+    reply
+        .headers_mut()
+        .insert(http::header::CONNECTION, HeaderValue::from_static("close"));
+    reply
 }
 
 fn bytes_reply(status: StatusCode, content_type: &'static str, body: Vec<u8>) -> Reply {

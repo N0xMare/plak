@@ -415,10 +415,7 @@ fn write_cached_id(home: &Path, id: &str, fields: &str) {
     }
     // A uniquely named mode-0600 staged file; dropping it on failure removes
     // only this process's own file.
-    let Ok(mut staged) = tempfile::Builder::new()
-        .prefix(".binary-ids.")
-        .tempfile_in(home)
-    else {
+    let Ok(mut staged) = crate::home::private_temp::stage(home, ".binary-ids.") else {
         return;
     };
     if std::io::Write::write_all(&mut staged, contents.as_bytes()).is_ok() {

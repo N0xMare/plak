@@ -1031,7 +1031,9 @@ impl TopologyHub {
 
 /// An attach's own custody share, given back on every exit from the attach:
 /// after a failure it is the last share and releases the record, after a
-/// success the driver's share keeps the record held.
+/// success the driver's share keeps the record held. Cancellation during
+/// shutdown can lose the queued release; process exit then enables takeover
+/// of the still-held record through `HolderGone`.
 struct AttachCustody {
     store: Arc<dyn TreeStore>,
     hold: Option<crate::tree::CustodyHold>,

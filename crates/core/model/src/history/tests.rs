@@ -1329,13 +1329,26 @@ fn semantic_cut_rejects_non_native_non_intent_and_multiple_prior_compactions() {
 
 #[test]
 fn semantic_cut_folds_nonleading_placeholder_notice_across_turns_and_intra_turn() {
-    let notice = compaction_summary(
-        92,
-        &format!(
-            "{} tool result bodies were replaced.",
-            crate::PLACEHOLDER_NOTICE_PREFIX
-        ),
+    let summary = format!(
+        "{} tool result bodies were replaced.",
+        crate::PLACEHOLDER_NOTICE_PREFIX
     );
+    let paid = compaction_summary(92, &summary);
+    let notice = HistorySegment::new(
+        HistorySegmentKind::Compaction,
+        vec![
+            ConversationItem::new(
+                paid.items()[0].id(),
+                Actor::Assistant,
+                paid.items()[0].blocks().to_vec(),
+                Provenance::Instruction,
+            )
+            .expect("harness notice"),
+        ],
+    )
+    .expect("notice segment");
+    assert!(is_placeholder_notice_segment(&notice));
+    assert!(!is_placeholder_notice_segment(&paid));
     let turn1_intent = HistorySegment::new(
         HistorySegmentKind::RecentIntent,
         vec![text(1, Actor::User, "turn one")],

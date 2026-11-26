@@ -136,6 +136,17 @@ fn write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .recursive(true)
         .mode(0o700)
         .create(parent)?;
+    if let Some(base) = path.file_name().and_then(|name| name.to_str()) {
+        let prefix = format!(".{base}.");
+        plakous::auth::private_temps::sweep(parent, |name| {
+            name.strip_prefix(&prefix)
+                .and_then(|name| name.strip_suffix(".tmp"))
+                .and_then(|name| name.split_once('.'))
+                .is_some_and(|(pid, nanos)| {
+                    pid.parse::<u32>().is_ok() && nanos.parse::<u128>().is_ok()
+                })
+        });
+    }
     let staged = unique_stage(path);
     let write_staged = || -> std::io::Result<()> {
         let mut file = std::fs::OpenOptions::new()

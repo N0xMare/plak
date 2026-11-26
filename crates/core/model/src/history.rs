@@ -23,6 +23,7 @@ pub use planning::{
     ContextPlannerDispositionKind, ContextRetainedTail, ContextSelectedIntentGroup,
     ContextSelectedSegment, ContextSummaryRetainedTail, HistoryPlanningError,
     RetainedHistorySegmentIter, SemanticCompactionCut, SemanticCompactionCutError,
+    is_placeholder_notice_segment,
 };
 pub use view::{
     CanonicalItemPrefixIdentity, ConversationItemIter, ConversationItems,

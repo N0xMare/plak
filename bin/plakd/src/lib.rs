@@ -86,6 +86,7 @@ pub mod wire_transport;
 #[doc(hidden)]
 pub mod home {
     pub mod paths;
+    pub(crate) mod private_temp;
     pub mod secrets;
     pub mod state;
     pub(crate) mod state_artifacts;

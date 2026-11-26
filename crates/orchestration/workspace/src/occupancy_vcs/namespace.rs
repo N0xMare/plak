@@ -5,6 +5,8 @@ use std::io::Write as _;
 use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
 use std::path::Path;
 
+use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags};
+
 use super::VcsError;
 
 pub(super) fn lock(common: &Path) -> Result<fs::File, VcsError> {
@@ -20,15 +22,22 @@ pub(super) fn lock(common: &Path) -> Result<fs::File, VcsError> {
             }
         })
         .map_err(|error| VcsError::seal_failed(error.to_string()))?;
-    let metadata =
-        fs::symlink_metadata(&dir).map_err(|error| VcsError::seal_failed(error.to_string()))?;
+    let guard = rustix::fs::open(
+        &dir,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map(fs::File::from)
+    .map_err(|error| VcsError::seal_failed(error.to_string()))?;
+    let metadata = guard
+        .metadata()
+        .map_err(|error| VcsError::seal_failed(error.to_string()))?;
     if !metadata.is_dir()
         || metadata.uid() != rustix::process::geteuid().as_raw()
         || metadata.mode() & 0o077 != 0
     {
         return Err(VcsError::seal_failed("unsafe namespace directory"));
     }
-    let guard = fs::File::open(&dir).map_err(|error| VcsError::seal_failed(error.to_string()))?;
     rustix::fs::flock(&guard, rustix::fs::FlockOperation::LockExclusive)
         .map_err(|error| VcsError::seal_failed(error.to_string()))?;
     Ok(guard)
@@ -48,6 +57,7 @@ fn reserve_prefixes(common: &Path, digest: &str, lengths: &[usize]) -> Result<fs
         return Err(VcsError::seal_failed("invalid tree namespace digest"));
     }
     let guard = lock(common)?;
+    sweep_stages(&guard);
     let dir = common.join("plak-namespaces");
     // Check every existing claim before publishing either new claim. A
     // collision must not leave evidence asserting a different prefix owner.
@@ -68,6 +78,32 @@ fn reserve_prefixes(common: &Path, digest: &str, lengths: &[usize]) -> Result<fs
         check_owner(&owner, digest, *length)?;
     }
     Ok(guard)
+}
+
+fn sweep_stages(directory: &fs::File) {
+    // Namespace publishers all hold this directory lock; no stage can be
+    // active while it is held by the next publisher.
+    let Ok(entries) = Dir::read_from(directory) else {
+        return;
+    };
+    for entry in entries.take(1024).map_while(Result::ok) {
+        let name = entry.file_name();
+        let Some(suffix) = name.to_bytes().strip_prefix(b".tmp") else {
+            continue;
+        };
+        if suffix.len() != 6 || !suffix.iter().all(u8::is_ascii_alphanumeric) {
+            continue;
+        }
+        let Ok(stat) = rustix::fs::statat(directory, name, AtFlags::SYMLINK_NOFOLLOW) else {
+            continue;
+        };
+        if FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile
+            && stat.st_uid == rustix::process::geteuid().as_raw()
+            && !Mode::from_raw_mode(stat.st_mode).intersects(Mode::RWXG | Mode::RWXO)
+        {
+            let _ = rustix::fs::unlinkat(directory, name, AtFlags::empty());
+        }
+    }
 }
 
 fn publish(dir: &Path, digest: &str, prefix: &str) -> Result<(), VcsError> {

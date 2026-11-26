@@ -116,7 +116,8 @@ pub(super) fn publish(path: &Path, report: &impl serde::Serialize) -> CliResult<
         evidence::private(&shipping::open(path)?)?;
     }
     let parent = crate::snapshot_install::parent(path)?;
-    let mut output = tempfile::NamedTempFile::new_in(parent).map_err(io)?;
+    let mut output =
+        crate::home::private_temp::stage(parent, ".plak-receipt-stage.").map_err(io)?;
     output
         .write_all(&shipping::canonical(report)?)
         .map_err(io)?;

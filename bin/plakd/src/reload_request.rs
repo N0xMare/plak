@@ -138,6 +138,16 @@ fn owned_private(metadata: &fs::Metadata, forbidden: u32) -> bool {
 /// Writes `bytes` to `path` through a private temporary file and a rename,
 /// so a reader never sees a partial file.
 fn publish(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        plakous::auth::private_temps::sweep(parent, |name| {
+            name.rsplit_once(".tmp-").is_some_and(|(stem, suffix)| {
+                uuid::Uuid::parse_str(stem).is_ok_and(|id| id.hyphenated().to_string() == stem)
+                    && uuid::Uuid::parse_str(suffix).is_ok_and(|id| {
+                        id.get_version_num() == 4 && id.hyphenated().to_string() == suffix
+                    })
+            })
+        });
+    }
     let temporary = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);

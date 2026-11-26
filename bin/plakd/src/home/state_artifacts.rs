@@ -888,7 +888,8 @@ pub(super) fn remember_artifacts(
         artifact.unadopted.extend(previous.unadopted);
     }
     let bytes = serde_json::to_vec(&artifact).map_err(|error| error.to_string())?;
-    let mut scratch = tempfile::NamedTempFile::new_in(&dir).map_err(|error| error.to_string())?;
+    let mut scratch = super::private_temp::stage(&dir, ".plak-artifact-stage.")
+        .map_err(|error| error.to_string())?;
     scratch
         .as_file_mut()
         .write_all(&bytes)

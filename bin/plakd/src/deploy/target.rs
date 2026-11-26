@@ -644,7 +644,8 @@ impl<'a> ClientTarget<'a> {
         let parent = snapshot_install::parent(&self.blob)?;
         snapshot_install::ensure(parent)?;
         snapshot_install::require_owned(parent)?;
-        let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(io)?;
+        let mut temp =
+            crate::home::private_temp::stage(parent, ".plak-client-stage.").map_err(io)?;
         shipping::copy(&source, &mut temp, &facts)?;
         temp.as_file()
             .set_permissions(fs::Permissions::from_mode(0o500))

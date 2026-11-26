@@ -335,7 +335,7 @@ fn write_document_with_directory_sync(
     let parent = path
         .parent()
         .ok_or_else(|| format!("the output path {} names no directory", path.display()))?;
-    let mut file = tempfile::NamedTempFile::new_in(parent)
+    let mut file = crate::home::private_temp::stage(parent, ".plak-carry-stage.")
         .map_err(|error| format!("could not create output temporary file: {error}"))?;
     file.write_all(&bytes)
         .and_then(|()| file.as_file().sync_all())

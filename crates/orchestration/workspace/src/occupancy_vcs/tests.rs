@@ -1780,7 +1780,7 @@ fn a_stalled_git_is_killed_at_its_ceiling() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
         "prompt=0 askpass=[] \
-         -c core.fsmonitor=false -c core.hooksPath=/dev/null \
+         -c core.fsmonitor=false -c submodule.recurse=false -c core.hooksPath=/dev/null \
          -c protocol.ext.allow=never -c core.pager=cat -c gc.auto=0 \
          -c diff.external= -c core.sshCommand=false -c credential.helper= fast"
     );
@@ -2659,4 +2659,102 @@ fn git_command_neutralizes_external_diff_and_ext_protocol_and_refuses_filtered_r
         info_err.detail
     );
     let _ = base;
+}
+
+#[test]
+fn git_attribute_scan_covers_nested_worktree_index_head_and_candidate() {
+    let repo = git_repo();
+    let root = repo.path();
+    let relative = "nested/deep/.gitattributes";
+    let attributes = root.join(relative);
+    std::fs::create_dir_all(attributes.parent().unwrap()).unwrap();
+    let check = |candidate| git::reject_configured_git_filters(root, candidate);
+
+    std::fs::write(&attributes, b"*.txt -filter\n*.dat !filter\n").unwrap();
+    check(None).unwrap();
+
+    let macro_source = root.join(".gitattributes");
+    std::fs::write(&macro_source, b"[attr]demo filter=synthetic\n*.txt demo\n").unwrap();
+    assert!(check(None).unwrap_err().detail.contains("filter=synthetic"));
+    std::fs::remove_file(macro_source).unwrap();
+
+    std::fs::write(&attributes, b"*.txt filter=synthetic\n").unwrap();
+    assert!(check(None).unwrap_err().detail.contains("filter=synthetic"));
+    git_in(root, &["add", "--", relative]);
+    std::fs::remove_file(&attributes).unwrap();
+    assert!(check(None).unwrap_err().detail.contains("filter=synthetic"));
+
+    git_in(root, &["commit", "-m", "nested attributes"]);
+    let candidate = git_text(root, &["rev-parse", "HEAD"], "candidate").unwrap();
+    git_in(root, &["rm", "--cached", "--", relative]);
+    assert!(check(None).unwrap_err().detail.contains("filter=synthetic"));
+    git_in(root, &["reset", "--hard", "HEAD^"]);
+    check(None).unwrap();
+    assert!(
+        check(Some(&candidate))
+            .unwrap_err()
+            .detail
+            .contains("filter=synthetic")
+    );
+}
+
+#[test]
+fn git_attribute_scan_skips_ignored_directories_and_submodules() {
+    let repo = git_repo();
+    let root = repo.path();
+    std::fs::write(
+        root.join(".gitignore"),
+        "ignored/\ntracked/.gitattributes\n",
+    )
+    .unwrap();
+    std::fs::create_dir(root.join("ignored")).unwrap();
+    std::fs::write(root.join("ignored/.gitattributes"), "* filter=ignored\n").unwrap();
+    let submodule = root.join("submodule");
+    std::fs::create_dir(&submodule).unwrap();
+    git_in(&submodule, &["init"]);
+    std::fs::write(submodule.join(".gitattributes"), "* filter=submodule\n").unwrap();
+    let commit = git_text(root, &["rev-parse", "HEAD"], "gitlink").unwrap();
+    git_in(
+        root,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{commit},submodule"),
+        ],
+    );
+    git_in(root, &["commit", "-m", "gitlink"]);
+    git::reject_configured_git_filters(root, None).unwrap();
+
+    // An ignored file still applies to eligible siblings in the same directory.
+    std::fs::create_dir(root.join("tracked")).unwrap();
+    std::fs::write(root.join("tracked/file"), "data").unwrap();
+    std::fs::write(root.join("tracked/.gitattributes"), "* filter=eligible\n").unwrap();
+    assert!(
+        git::reject_configured_git_filters(root, None)
+            .unwrap_err()
+            .detail
+            .contains("filter=eligible")
+    );
+}
+
+#[test]
+fn git_attribute_scan_bounds_large_worktree_and_committed_blobs() {
+    let repo = git_repo();
+    let root = repo.path();
+    let relative = "nested/.gitattributes";
+    std::fs::create_dir(root.join("nested")).unwrap();
+    std::fs::write(root.join(relative), vec![b'\n'; 4 * 1024 * 1024 + 1]).unwrap();
+    let check = |candidate| git::reject_configured_git_filters(root, candidate);
+    assert!(check(None).unwrap_err().detail.contains("size limit"));
+    git_in(root, &["add", "--", relative]);
+    git_in(root, &["commit", "-m", "oversized attributes"]);
+    let candidate = git_text(root, &["rev-parse", "HEAD"], "candidate").unwrap();
+    git_in(root, &["reset", "--hard", "HEAD^"]);
+    assert!(
+        check(Some(&candidate))
+            .unwrap_err()
+            .detail
+            .contains("size limit")
+    );
 }

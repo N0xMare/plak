@@ -411,6 +411,10 @@ impl RelayClient {
             .map_err(RelayCallError::Transport)?;
         let status = response.status();
         let refused = refusal_code(response.headers());
+        if refused.is_none() && status == StatusCode::REQUEST_TIMEOUT {
+            let _ = response.into_body().close().await;
+            return Err(RelayCallError::Transport(request_body_timeout()));
+        }
         let body = read_all(response.into_body(), call::MAX_CALL_BYTES)
             .await
             .map_err(RelayCallError::Transport)?;
@@ -621,6 +625,10 @@ async fn answer(
             .unwrap_or_default();
         return Ok(Answer::Refused(decode_refusal(&code, &body)));
     }
+    if response.status() == StatusCode::REQUEST_TIMEOUT {
+        let _ = response.into_body().close().await;
+        return Err(request_body_timeout());
+    }
     let relayed_frames = response.status() == StatusCode::OK
         && response
             .headers()
@@ -770,6 +778,17 @@ fn deadline_unix_ms(deadline: Instant) -> Option<u64> {
 
 fn unsent(kind: ErrorKind, cause: &'static str) -> Failure {
     Failure::new(Phase::RequestWrite, TransmissionFact::NotStarted, kind).with_cause(cause)
+}
+
+fn request_body_timeout() -> Failure {
+    // Upstream connection establishment has not started. This is safe to
+    // replay even for calls that cannot retry after a possible dispatch.
+    Failure::new(
+        Phase::Connect,
+        TransmissionFact::NotStarted,
+        ErrorKind::DeadlineExceeded,
+    )
+    .with_cause("gateway_request_body_timeout")
 }
 
 fn lost(kind: ErrorKind) -> Failure {

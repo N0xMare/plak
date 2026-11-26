@@ -51,6 +51,7 @@ pub(super) fn atomic_file_at(
     let name = target
         .file_name()
         .ok_or_else(|| before("publication target has no name"))?;
+    plakous::auth::private_temps::sweep_at(directory, is_publication_temp);
     let temporary = format!(".publication.{}.tmp", uuid::Uuid::new_v4());
     let mut file = rustix::fs::openat(
         directory,
@@ -93,6 +94,15 @@ pub(super) fn atomic_file_at(
             rustix::fs::fsync(directory).map_err(|_| "could not sync publication directory".into())
         })
         .map_err(ConfigSaveError::PublishedDurabilityUncertain)
+}
+
+pub(super) fn is_publication_temp(name: &str) -> bool {
+    name.strip_prefix(".publication.")
+        .and_then(|suffix| suffix.strip_suffix(".tmp"))
+        .is_some_and(|text| {
+            uuid::Uuid::parse_str(text)
+                .is_ok_and(|id| id.get_version_num() == 4 && id.hyphenated().to_string() == text)
+        })
 }
 
 pub(super) fn sync_parent_directory(parent: &Path) -> Result<(), String> {

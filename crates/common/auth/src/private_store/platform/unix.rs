@@ -555,6 +555,17 @@ pub(super) fn write_record(
     record: &CredentialRecord,
 ) -> Result<(), PrivateStoreError> {
     let bytes = encode_record(store, record)?;
+    if let Some(record_name) = store.record_name.to_str() {
+        let prefix = format!(".{record_name}.tmp.");
+        crate::private_temps::sweep_at(store.directory.as_ref(), |name| {
+            name.strip_prefix(&prefix).is_some_and(|suffix| {
+                suffix.len() == 24
+                    && suffix
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte))
+            })
+        });
+    }
     let temporary_name = temporary_name(&store.record_name)?;
     let descriptor = rustix::fs::openat(
         store.directory.as_ref(),

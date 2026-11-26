@@ -730,6 +730,19 @@ Every such step is built by one constructor that:
 
 The adopt diff passes `--no-ext-diff --no-textconv`, so a configured external
 diff driver or textconv filter neither runs nor alters the landed bytes.
+Before a snapshot, mint or adopt can use a filter, its preflight inspects
+the common `info/attributes`, configured attribute files, the index,
+all regular `.gitattributes` blobs in both `HEAD` and any candidate tree,
+and working-tree attribute files along paths that are tracked or not
+excluded by Git. Ignored-only directory trees and submodule interiors
+are outside the superproject scan. With a system or global driver configured,
+preflight also inspects Git's system and global attribute files. Inspection
+has size, listing, blob-count and time limits; a limit or an unreadable
+required source is a refusal, never evidence that no filter applies.
+Worktree dirt and divergence reads refuse repository-configured drivers and
+use the attribute preflight when a system or global driver could be invoked.
+They do not inspect submodule worktree dirt. Superproject operations do not
+recurse into submodules.
 Tree namespace ownership markers live under the repository's
 `.git/plak-namespaces/<16-hex tree digest>` (the common Git directory for linked
 worktrees); they are reclaimed with the namespace's final recorded artifacts.
@@ -1667,6 +1680,16 @@ The store is opened with an **explicit path**. It performs no home-directory,
 environment-variable, or provider discovery of its own.
 
 ### 3.3 Refresh is claim-based and crash-safe
+
+Atomic private writers using temporary sibling names reserve those names for
+staging. A subsequent publication can sweep old stages in the same directory,
+within fixed entry and removal bounds. The sweep uses a retained directory
+descriptor, skips directories not owned by the effective user or writable
+by others, and only unlinks matching private regular files of that owner
+whose modification and status-change times have both aged past the grace
+period, unless an exclusive publication lock already excludes all writers.
+It never follows links, reads staged data or removes published names.
+A failed or incomplete sweep does not block publication.
 
 The native subscription dialects share the local custody retry, Ready-lease
 and refresh-settlement loops in `plakous-auth`. Refresh eligibility reads the

@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write as _;
+use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 
 use plakous_hosted::tool_plan::SelectedTool;
@@ -911,11 +912,13 @@ fn publish(path: &Path, text: &str) -> Result<(), String> {
     let parent = target
         .parent()
         .ok_or_else(|| format!("{} has no parent directory", target.display()))?;
+    plakous::auth::private_temps::sweep(parent, super::atomic::is_publication_temp);
     let temporary = parent.join(format!(".publication.{}.tmp", uuid::Uuid::new_v4()));
     let written = (|| {
         let mut file = OpenOptions::new()
             .create_new(true)
             .write(true)
+            .mode(0o600)
             .open(&temporary)?;
         if let Some(permissions) = permissions {
             file.set_permissions(permissions)?;

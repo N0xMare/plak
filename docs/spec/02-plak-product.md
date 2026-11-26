@@ -7125,7 +7125,7 @@ The refusal is `gateway protocol too old; upgrade the gateway`.
 | `listen_tcp` | none | One `ip:port`; refuses wildcards, and non-loopback, non-tailnet addresses unless `allow_non_tailnet` |
 | `state_root` | the host state home (§2.3) | The store to adopt; must be those exact bytes |
 | `audit_retention_days` | 30 | 1..=365 days of audit files kept |
-| `max_inflight` / `max_inflight_per_caller` | 256 / 128 | At least 1; more is refused `busy` |
+| `max_inflight` / `max_inflight_per_caller` | 256 / 128 | At least 1; more is refused `busy`. The global value cannot exceed the combined connection cap of enabled listeners (chapter 07 §3). |
 | `max_request_body_bytes` | 32000000 | Upper bound on one relayed upstream body |
 | `allow_non_tailnet` | false | Admit a `listen_tcp` outside loopback and the tailnet |
 

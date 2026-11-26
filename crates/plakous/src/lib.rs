@@ -545,6 +545,9 @@ pub mod anthropic {
 /// ```
 #[cfg(feature = "auth")]
 pub mod auth {
+    #[cfg(unix)]
+    #[doc(hidden)]
+    pub use plakous_auth::private_temps;
     pub use plakous_auth::{
         AccountBinding, AuthSingleFlight, CallbackBinding, CredentialFence, CredentialGeneration,
         CredentialRecord, CredentialSlotId, CredentialStatus, ExposeSecret,

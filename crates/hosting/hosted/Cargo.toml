@@ -19,7 +19,7 @@ class = "published-internal"
 [dependencies]
 plakous-host-protocol.workspace = true
 plakous = { workspace = true, features = [
-    "anthropic", "claude", "codex", "composition", "composition-python",
+    "anthropic", "auth", "claude", "codex", "composition", "composition-python",
     "grok", "mcp", "openai", "openrouter", "sessions-sqlite", "web-fetch", "xai",
 ] }
 plakous-recursive-subagents = { workspace = true, features = ["git-cli"] }

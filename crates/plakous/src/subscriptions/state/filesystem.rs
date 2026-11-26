@@ -449,6 +449,12 @@ pub(super) fn write_private_atomic_retained_with_hook(
             .map_err(|_| NativeSubscriptionError::UnsafeStorage)?,
     );
     validate_existing_private_file(&directory, &name)?;
+    let prefix = format!(".{}.tmp-", name.to_string_lossy());
+    plakous_auth::private_temps::sweep_at(&directory, |name| {
+        name.strip_prefix(&prefix)
+            .and_then(|suffix| suffix.split_once('-'))
+            .is_some_and(|(pid, nonce)| pid.parse::<u32>().is_ok() && nonce.parse::<u64>().is_ok())
+    });
     let temporary = OsString::from(format!(
         ".{}.tmp-{}-{}",
         name.to_string_lossy(),

@@ -399,6 +399,11 @@ directory, the same files the host reads. Its `state_root`, when set, must be
 the host state home byte for byte (chapter 02 §2.3); `plakd gateway serve`
 refuses any other path.
 
+The gateway service's `max_inflight` is capped by the combined connection cap
+of its enabled listeners. Loading a higher value warns and uses the cap.
+Each listener retains its own separate connection limit, so either listener
+can reach capacity and return `busy` before the shared limit is reached.
+
 `console.workspace_limits` advertises protocol-8 inspection bounds, independent
 of account/configuration limits: 256 KiB page/output, 16 MiB file ceiling,
 two reads/principal, 10 requests/s (burst 20), 4 MiB/s returned raw bytes

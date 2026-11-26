@@ -337,6 +337,8 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), ApiKeyWriteError>
 }
 
 fn random_staging_path(path: &Path) -> Result<PathBuf, String> {
+    #[cfg(unix)]
+    plakous::auth::private_temps::sweep_hex_siblings(path);
     let mut entropy = [0_u8; 16];
     getrandom::fill(&mut entropy).map_err(|error| error.to_string())?;
     let mut suffix = String::with_capacity(entropy.len() * 2);

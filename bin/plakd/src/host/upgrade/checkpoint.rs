@@ -477,7 +477,8 @@ fn stage(
     let parent = path
         .parent()
         .ok_or_else(|| error("missing checkpoint directory"))?;
-    let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(error)?;
+    let mut temp =
+        crate::home::private_temp::stage(parent, ".plak-checkpoint-stage.").map_err(error)?;
     {
         let mut buffered = BufWriter::new(Capped {
             file: temp.as_file_mut(),

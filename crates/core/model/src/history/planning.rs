@@ -939,11 +939,15 @@ fn is_canonical_compaction_summary(segment: &HistorySegment) -> bool {
         && matches!(segment.items()[0].blocks(), [ContentBlock::Compaction(_)])
 }
 
-fn is_placeholder_notice_segment(segment: &HistorySegment) -> bool {
+/// Whether this is a standalone offline placeholder or image-residency notice.
+/// Unlike a paid summary, the notice is authored by the harness.
+#[must_use]
+pub fn is_placeholder_notice_segment(segment: &HistorySegment) -> bool {
     is_canonical_compaction_summary(segment)
+        && segment.items()[0].provenance() == crate::Provenance::Instruction
         && matches!(
             segment.items()[0].blocks(),
-            [ContentBlock::Compaction(block)] if block.is_placeholder_notice()
+            [ContentBlock::Compaction(block)] if block.native_item().is_none()
         )
 }
 
@@ -976,7 +980,7 @@ fn prior_compaction_position(source: &ConversationView) -> Option<usize> {
     let [ContentBlock::Compaction(block)] = segment.items()[0].blocks() else {
         return None;
     };
-    if block.is_placeholder_notice() {
+    if is_placeholder_notice_segment(segment) {
         return Some(position);
     }
     (block.native_item().is_some()

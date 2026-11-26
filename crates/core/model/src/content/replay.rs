@@ -491,9 +491,7 @@ impl SummarizedTurns {
 ///
 /// Offline passes insert this notice immediately after the first rewritten
 /// segment rather than at index zero so earlier prompt prefix cache and native
-/// reasoning survive. The history planner recognizes this prefix to fold the
-/// notice cleanly into a later semantic compaction without treating it as a
-/// leading barrier.
+/// reasoning survive. This prefix is presentation only.
 pub const PLACEHOLDER_NOTICE_PREFIX: &str = "Tool result placeholders:";
 
 /// A canonical compaction marker and semantic summary.
@@ -607,11 +605,5 @@ impl CompactionBlock {
     #[must_use]
     pub fn native_item(&self) -> Option<&str> {
         self.native_item.as_deref()
-    }
-
-    /// Reports whether this marker is an offline placeholder or image-residency notice.
-    #[must_use]
-    pub fn is_placeholder_notice(&self) -> bool {
-        self.native_item.is_none() && self.summary.starts_with(PLACEHOLDER_NOTICE_PREFIX)
     }
 }

@@ -1,12 +1,15 @@
 //! Git CLI snapshots, adopts, excludes, and worktree registration.
 
 use std::io::{Read, Write};
+use std::os::unix::ffi::OsStrExt as _;
 use std::process::{Command, Output};
+
+use rustix::fs::{Mode, OFlags};
 
 use super::{
     AdoptFailure, AdoptLanding, AdoptRequest, ChangeKind, ChangedPath, ConflictPath,
     GIT_CLI_ENABLED, Path, VcsError, VcsErrorKind, VcsSnapshot, create_private, mint_error,
-    private_scratch, wait_bounded,
+    private_scratch, wait_bounded_while,
 };
 
 /// Ceiling on a `git` read: status, rev-parse, counts, name lists.
@@ -32,13 +35,35 @@ pub(super) fn output_within(
 /// are a file, not a pipe, so a child that outlives the wait cannot pin this
 /// process on an undrained stdin.
 fn output_within_reading(
+    command: Command,
+    timeout: std::time::Duration,
+    stdin_path: Option<&Path>,
+) -> std::io::Result<Output> {
+    capture_output(command, timeout, stdin_path, usize::MAX)
+}
+
+fn capture_output(
     mut command: Command,
     timeout: std::time::Duration,
     stdin_path: Option<&Path>,
+    limit: usize,
 ) -> std::io::Result<Output> {
     let scratch = private_scratch()?;
     let stdout_path = scratch.path().join("stdout");
     let stderr_path = scratch.path().join("stderr");
+    let read = |path: &Path| {
+        if limit == usize::MAX {
+            return std::fs::read(path);
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)?
+            .take((limit + 1) as u64)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > limit {
+            return Err(std::io::Error::other("git inspection output exceeds limit"));
+        }
+        Ok(bytes)
+    };
     let captured = (|| {
         let stdin = match stdin_path {
             Some(path) => std::process::Stdio::from(std::fs::File::open(path)?),
@@ -50,12 +75,21 @@ fn output_within_reading(
             .stderr(create_private(&stderr_path)?);
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
         let mut child = command.spawn()?;
-        match wait_bounded(&mut child, timeout)? {
+        let within_limit = || {
+            limit == usize::MAX
+                || [&stdout_path, &stderr_path].iter().all(|path| {
+                    std::fs::metadata(path).is_ok_and(|meta| meta.len() <= limit as u64)
+                })
+        };
+        match wait_bounded_while(&mut child, timeout, within_limit)? {
             Some(status) => Ok(Output {
                 status,
-                stdout: std::fs::read(&stdout_path)?,
-                stderr: std::fs::read(&stderr_path)?,
+                stdout: read(&stdout_path)?,
+                stderr: read(&stderr_path)?,
             }),
+            None if !within_limit() => {
+                Err(std::io::Error::other("git inspection output exceeds limit"))
+            }
             None => Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 format!("git exceeded {}s and was killed", timeout.as_secs()),
@@ -113,6 +147,8 @@ pub(super) fn git_command(cwd: &Path) -> Command {
             "-c",
             "core.fsmonitor=false",
             "-c",
+            "submodule.recurse=false",
+            "-c",
             "core.hooksPath=/dev/null",
             "-c",
             "protocol.ext.allow=never",
@@ -149,37 +185,52 @@ pub(super) fn reject_configured_git_filters(
     path: &Path,
     tree_ref: Option<&str>,
 ) -> Result<(), VcsError> {
-    reject_config_filter_drivers(path, "--local")?;
-    if worktree_config_enabled(path) {
-        reject_config_filter_drivers(path, "--worktree")?;
+    let ambient_drivers = reject_config_filter_drivers(path)?;
+    inspect_filter_attributes(path, tree_ref, ambient_drivers)
+}
+
+// Status and divergence do not publish possibly bypassed filter output. If no
+// driver is configured, reading them cannot execute a filter at all.
+fn reject_observed_git_filters(path: &Path, tree_ref: Option<&str>) -> Result<(), VcsError> {
+    if reject_config_filter_drivers(path)? {
+        inspect_filter_attributes(path, tree_ref, true)?;
     }
-    reject_attribute_filters(path, tree_ref)
+    Ok(())
 }
 
-fn worktree_config_enabled(path: &Path) -> bool {
-    git_query(
-        path,
-        &[
-            "config",
-            "--local",
-            "--includes",
-            "--bool",
-            "--get",
-            "extensions.worktreeConfig",
-        ],
-    )
-    .is_ok_and(|output| {
-        output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true"
-    })
+fn inspect_filter_attributes(
+    path: &Path,
+    tree_ref: Option<&str>,
+    ambient_drivers: bool,
+) -> Result<(), VcsError> {
+    let toplevel = git_attribute_path(path, &["rev-parse", "--show-toplevel"])?;
+    if ambient_drivers {
+        for source in ["GIT_ATTR_GLOBAL", "GIT_ATTR_SYSTEM"] {
+            let name = git_attribute_path(&toplevel, &["var", source])?;
+            scan_attributes_file(source, &toplevel.join(name), false)?;
+        }
+    }
+    reject_attribute_filters(&toplevel, tree_ref)
 }
 
-fn reject_config_filter_drivers(path: &Path, scope: &str) -> Result<(), VcsError> {
+fn git_attribute_path(path: &Path, args: &[&str]) -> Result<std::path::PathBuf, VcsError> {
+    let result = attribute_query(path, args, GIT_QUERY_TIMEOUT)?;
+    let name = result.stdout.strip_suffix(b"\n").unwrap_or(&result.stdout);
+    if name.is_empty() {
+        return Err(VcsError::mint_unavailable(
+            "could not resolve git attribute source",
+        ));
+    }
+    Ok(std::ffi::OsStr::from_bytes(name).into())
+}
+
+fn reject_config_filter_drivers(path: &Path) -> Result<bool, VcsError> {
     let output = git_query(
         path,
         &[
             "config",
-            scope,
             "--includes",
+            "--show-scope",
             "--null",
             "--get-regexp",
             r"^filter\..*\.(clean|smudge|process)$",
@@ -187,23 +238,33 @@ fn reject_config_filter_drivers(path: &Path, scope: &str) -> Result<(), VcsError
     )
     .map_err(|_| VcsError::mint_unavailable("could not inspect git filter configuration"))?;
     if output.status.code() == Some(1) {
-        return Ok(());
+        return Ok(false);
     }
     if !output.status.success() {
         return Err(VcsError::mint_unavailable(
             "could not inspect repository git filter configuration",
         ));
     }
-    for entry in output.stdout.split(|byte| *byte == 0) {
-        if entry.is_empty() {
-            continue;
-        }
+    let mut fields = output
+        .stdout
+        .strip_suffix(&[0])
+        .unwrap_or(&output.stdout)
+        .split(|byte| *byte == 0);
+    let mut ambient = false;
+    while let Some(scope) = fields.next() {
+        let entry = fields.next().ok_or_else(|| {
+            VcsError::mint_unavailable("could not parse git filter configuration")
+        })?;
         let (key_bytes, value_bytes) = match entry.iter().position(|byte| *byte == b'\n') {
             Some(pos) => (&entry[..pos], &entry[pos + 1..]),
             None => (entry, &[][..]),
         };
         let value = String::from_utf8_lossy(value_bytes);
         if value.trim().is_empty() {
+            continue;
+        }
+        if matches!(scope, b"global" | b"system") {
+            ambient = true;
             continue;
         }
         let key = String::from_utf8_lossy(key_bytes);
@@ -213,98 +274,120 @@ fn reject_config_filter_drivers(path: &Path, scope: &str) -> Result<(), VcsError
              (such as git-lfs or git-crypt) rather than executing or bypassing filters"
         )));
     }
-    Ok(())
+    Ok(ambient)
 }
 
-fn reject_attribute_filters(path: &Path, tree_ref: Option<&str>) -> Result<(), VcsError> {
-    if let Ok(common_out) = git_query(
-        path,
+fn reject_attribute_filters(toplevel: &Path, tree_ref: Option<&str>) -> Result<(), VcsError> {
+    let common = git_attribute_path(
+        toplevel,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    ) && common_out.status.success()
-    {
-        let common = String::from_utf8_lossy(&common_out.stdout)
-            .trim()
-            .to_owned();
-        if !common.is_empty() {
-            scan_attributes_file(
-                "info/attributes",
-                &Path::new(&common).join("info/attributes"),
-            )?;
-        }
-    }
-    for scope in ["--local", "--worktree"] {
-        if scope == "--worktree" && !worktree_config_enabled(path) {
-            continue;
-        }
-        if let Ok(attr_out) = git_query(
-            path,
-            &[
-                "config",
-                scope,
-                "--includes",
-                "--path",
-                "--null",
-                "--get-all",
-                "core.attributesFile",
-            ],
-        ) && attr_out.status.success()
-        {
-            for entry in attr_out.stdout.split(|byte| *byte == 0) {
-                let raw = String::from_utf8_lossy(entry).trim().to_owned();
-                if raw.is_empty() {
-                    continue;
-                }
-                let attr_path = Path::new(&raw);
-                let resolved = if attr_path.is_absolute() {
-                    attr_path.to_path_buf()
-                } else {
-                    path.join(attr_path)
-                };
-                scan_attributes_file("core.attributesFile", &resolved)?;
+    )?;
+    scan_attributes_file("info/attributes", &common.join("info/attributes"), false)?;
+    let attr = git_query(
+        toplevel,
+        &[
+            "config",
+            "--includes",
+            "--path",
+            "--null",
+            "--get",
+            "core.attributesFile",
+        ],
+    )
+    .map_err(|_| VcsError::mint_unavailable("could not inspect core.attributesFile"))?;
+    match attr.status.code() {
+        Some(0) => {
+            let name = attr.stdout.strip_suffix(&[0]).unwrap_or(&attr.stdout);
+            if !name.is_empty() {
+                scan_attributes_file(
+                    "core.attributesFile",
+                    &toplevel.join(std::ffi::OsStr::from_bytes(name)),
+                    false,
+                )?;
             }
         }
+        Some(1) => {}
+        _ => {
+            return Err(VcsError::mint_unavailable(
+                "could not inspect core.attributesFile",
+            ));
+        }
     }
-    let toplevel_out = git_query(path, &["rev-parse", "--show-toplevel"])
-        .map_err(|_| VcsError::mint_unavailable("could not resolve git repository root"))?;
-    if !toplevel_out.status.success() {
-        return Err(VcsError::mint_unavailable(
-            "could not resolve git repository root",
-        ));
-    }
-    let toplevel = std::path::PathBuf::from(
-        String::from_utf8_lossy(&toplevel_out.stdout)
-            .trim()
-            .to_owned(),
-    );
-    let listed = git_query(
-        &toplevel,
+    let listed = attribute_query(
+        toplevel,
         &[
             "ls-files",
             "--cached",
             "--others",
+            "--exclude-standard",
+            "-z",
+        ],
+        GIT_QUERY_TIMEOUT,
+    )?;
+    let mut directories = std::collections::HashSet::new();
+    let deadline = std::time::Instant::now() + GIT_QUERY_TIMEOUT;
+    // A file can be ignored itself but still govern eligible files in its
+    // directory. Consult attributes only along paths Git includes.
+    scan_attributes_file(".gitattributes", &toplevel.join(".gitattributes"), true)?;
+    for entry in listed.stdout.split(|byte| *byte == 0) {
+        let rel = Path::new(std::ffi::OsStr::from_bytes(
+            entry.strip_suffix(b"/").unwrap_or(entry),
+        ));
+        for parent in rel
+            .ancestors()
+            .skip(1)
+            .filter(|path| !path.as_os_str().is_empty())
+        {
+            if !directories.insert(parent) {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(VcsError::mint_unavailable(
+                    "working-tree attribute inspection timed out",
+                ));
+            }
+            let attributes = parent.join(".gitattributes");
+            scan_attributes_file(
+                &attributes.to_string_lossy(),
+                &toplevel.join(&attributes),
+                true,
+            )?;
+        }
+    }
+    // Git falls back to the index when an attribute file is missing on disk.
+    let indexed = attribute_query(
+        toplevel,
+        &[
+            "ls-files",
+            "--stage",
             "-z",
             "--",
-            ".gitattributes",
-            "**/.gitattributes",
+            ":(glob)**/.gitattributes",
         ],
-    )
-    .map_err(|_| VcsError::mint_unavailable("could not inspect repository .gitattributes"))?;
-    if !listed.status.success() {
-        return Err(VcsError::mint_unavailable(
-            "could not inspect repository .gitattributes",
-        ));
-    }
-    for entry in listed.stdout.split(|byte| *byte == 0) {
-        if entry.is_empty() {
-            continue;
-        }
-        let rel = String::from_utf8_lossy(entry);
-        scan_attributes_file(&rel, &toplevel.join(rel.as_ref()))?;
-    }
+        GIT_QUERY_TIMEOUT,
+    )?;
+    scan_attribute_entries(toplevel, &indexed.stdout, false)?;
     for rev in ["HEAD"].into_iter().chain(tree_ref) {
-        scan_tree_gitattributes(&toplevel, rev)?;
+        scan_tree_gitattributes(toplevel, rev)?;
     }
     Ok(())
+}
+
+const MAX_ATTRIBUTES_BYTES: usize = 4 * 1024 * 1024;
+const MAX_ATTRIBUTE_LIST_BYTES: usize = 32 * 1024 * 1024;
+const MAX_ATTRIBUTE_BLOBS: usize = 1024;
+
+fn attribute_query(
+    path: &Path,
+    args: &[&str],
+    timeout: std::time::Duration,
+) -> Result<Output, VcsError> {
+    let mut command = git_command(path);
+    command.args(args).env("GIT_NO_LAZY_FETCH", "1");
+    capture_output(command, timeout, None, MAX_ATTRIBUTE_LIST_BYTES)
+        .ok()
+        .filter(|output| output.status.success())
+        .ok_or_else(|| VcsError::mint_unavailable("could not inspect git attributes within limits"))
 }
 
 fn scan_tree_gitattributes(toplevel: &Path, rev: &str) -> Result<(), VcsError> {
@@ -316,52 +399,90 @@ fn scan_tree_gitattributes(toplevel: &Path, rev: &str) -> Result<(), VcsError> {
             "--quiet",
             &format!("{rev}^{{tree}}"),
         ],
-    );
-    let Ok(verify) = verify else {
-        return Ok(());
-    };
-    if !verify.status.success() {
+    )
+    .map_err(|_| VcsError::mint_unavailable("could not resolve git attribute tree"))?;
+    if rev == "HEAD" && verify.status.code() == Some(1) {
         return Ok(());
     }
-    let listed = git_query(
-        toplevel,
-        &[
-            "ls-tree",
-            "-r",
-            "-z",
-            "--name-only",
-            rev,
-            "--",
-            ".gitattributes",
-            "**/.gitattributes",
-        ],
-    )
-    .map_err(|_| VcsError::mint_unavailable("could not inspect committed .gitattributes"))?;
-    if !listed.status.success() {
+    if !verify.status.success() {
         return Err(VcsError::mint_unavailable(
-            "could not inspect committed .gitattributes",
+            "could not resolve git attribute tree",
         ));
     }
-    for entry in listed.stdout.split(|byte| *byte == 0) {
-        if entry.is_empty() {
-            continue;
-        }
-        let rel = String::from_utf8_lossy(entry);
-        let spec = format!("{rev}:{rel}");
-        let blob = git_query(toplevel, &["cat-file", "blob", &spec])
-            .map_err(|_| VcsError::mint_unavailable("could not read committed .gitattributes"))?;
-        if !blob.status.success() {
+    // ls-tree pathspecs are literal prefixes, not recursive globs. Match the
+    // basename on the raw NUL-delimited names instead; gitlinks are not trees.
+    let tree = String::from_utf8_lossy(&verify.stdout);
+    let listed = attribute_query(
+        toplevel,
+        &["ls-tree", "-r", "-z", tree.trim()],
+        GIT_QUERY_TIMEOUT,
+    )?;
+    scan_attribute_entries(toplevel, &listed.stdout, true)
+}
+
+fn scan_attribute_entries(root: &Path, listed: &[u8], tree: bool) -> Result<(), VcsError> {
+    let mut inspected = std::collections::HashSet::new();
+    let deadline = std::time::Instant::now() + GIT_QUERY_TIMEOUT;
+    let query = |args: &[&str]| {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
             return Err(VcsError::mint_unavailable(
-                "could not read committed .gitattributes",
+                "git attribute blob inspection timed out",
             ));
         }
-        scan_attributes_bytes(&spec, &blob.stdout)?;
+        attribute_query(root, args, remaining)
+    };
+    for entry in listed
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+    {
+        let Some(tab) = entry.iter().position(|byte| *byte == b'\t') else {
+            return Err(VcsError::mint_unavailable(
+                "could not parse git attributes listing",
+            ));
+        };
+        let (header, name) = (&entry[..tab], &entry[tab + 1..]);
+        if name.rsplit(|byte| *byte == b'/').next() != Some(b".gitattributes".as_slice()) {
+            continue;
+        }
+        let header = String::from_utf8_lossy(header);
+        let mut fields = header.split_ascii_whitespace();
+        if !matches!(fields.next(), Some("100644" | "100755")) {
+            continue;
+        }
+        if tree {
+            fields.next(); // object type
+        }
+        let id = fields
+            .next()
+            .filter(|id| id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .ok_or_else(|| VcsError::mint_unavailable("could not parse git attribute blob id"))?;
+        if !inspected.insert(id.to_owned()) {
+            continue;
+        }
+        if inspected.len() > MAX_ATTRIBUTE_BLOBS {
+            return Err(VcsError::mint_unavailable(
+                "too many git attribute blobs to inspect",
+            ));
+        }
+        let size = query(&["cat-file", "-s", id])?;
+        if !String::from_utf8_lossy(&size.stdout)
+            .trim()
+            .parse::<usize>()
+            .is_ok_and(|size| size <= MAX_ATTRIBUTES_BYTES)
+        {
+            return Err(VcsError::mint_unavailable(format!(
+                "git attributes `{}` exceed the inspection size limit",
+                String::from_utf8_lossy(name)
+            )));
+        }
+        let blob = query(&["cat-file", "blob", id])?;
+        scan_attributes_bytes(&String::from_utf8_lossy(name), &blob.stdout)?;
     }
     Ok(())
 }
 
-fn scan_attributes_file(source: &str, file_path: &Path) -> Result<(), VcsError> {
-    const MAX_ATTRIBUTES_BYTES: u64 = 4 * 1024 * 1024;
+fn scan_attributes_file(source: &str, file_path: &Path, worktree: bool) -> Result<(), VcsError> {
     let meta = match std::fs::symlink_metadata(file_path) {
         Ok(meta) => meta,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -372,20 +493,27 @@ fn scan_attributes_file(source: &str, file_path: &Path) -> Result<(), VcsError> 
         }
     };
     if !meta.file_type().is_file() {
+        if worktree && (meta.file_type().is_symlink() || meta.is_dir()) {
+            return Ok(());
+        }
         return Err(VcsError::mint_unavailable(format!(
             "git attributes `{source}` is not a regular file"
         )));
     }
-    let file = std::fs::File::open(file_path).map_err(|_| {
-        VcsError::mint_unavailable(format!("could not read git attributes `{source}`"))
-    })?;
+    let fd = rustix::fs::open(
+        file_path,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| VcsError::mint_unavailable(format!("could not read git attributes `{source}`")))?;
+    let file = std::fs::File::from(fd);
     let mut raw = Vec::new();
-    Read::take(file, MAX_ATTRIBUTES_BYTES + 1)
+    Read::take(file, (MAX_ATTRIBUTES_BYTES + 1) as u64)
         .read_to_end(&mut raw)
         .map_err(|_| {
             VcsError::mint_unavailable(format!("could not read git attributes `{source}`"))
         })?;
-    if u64::try_from(raw.len()).unwrap_or(u64::MAX) > MAX_ATTRIBUTES_BYTES {
+    if raw.len() > MAX_ATTRIBUTES_BYTES {
         return Err(VcsError::mint_unavailable(format!(
             "git attributes `{source}` exceeds the inspection size limit"
         )));
@@ -405,15 +533,33 @@ fn scan_attributes_bytes(source: &str, bytes: &[u8]) -> Result<(), VcsError> {
 }
 
 fn first_active_filter_attr(bytes: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(bytes);
+    let text = String::from_utf8_lossy(bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes));
     for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let mut tokens = trimmed.split_ascii_whitespace();
-        let _pattern = tokens.next()?;
-        for token in tokens {
+        let attrs = if let Some(quoted) = trimmed.strip_prefix('"') {
+            let mut escaped = false;
+            let Some(close) = quoted.bytes().position(|byte| {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    return true;
+                }
+                false
+            }) else {
+                continue;
+            };
+            &quoted[close + 1..]
+        } else {
+            trimmed
+                .find(char::is_whitespace)
+                .map_or("", |end| &trimmed[end..])
+        };
+        for token in attrs.split_ascii_whitespace() {
             if let Some(value) = token.strip_prefix("filter=")
                 && !value.is_empty()
             {
@@ -1154,9 +1300,20 @@ fn note_conflict_kind(
 }
 
 pub(super) fn git_worktree_dirty(path: &Path) -> bool {
-    git_query(path, &["status", "--porcelain", "-uall"])
-        .map(|output| output.status.success() && !output.stdout.is_empty())
-        .unwrap_or(false)
+    if reject_observed_git_filters(path, None).is_err() {
+        return true;
+    }
+    git_query(
+        path,
+        &[
+            "status",
+            "--porcelain",
+            "-uall",
+            "--ignore-submodules=dirty",
+        ],
+    )
+    .map(|output| output.status.success() && !output.stdout.is_empty())
+    .unwrap_or(false)
 }
 
 /// `(ahead, behind)` of `child` against `parent` since `base`.
@@ -1249,6 +1406,7 @@ fn commits_differing_from_base(root: &Path, base: &str) -> Option<u64> {
 /// does not count. Mint-time dirt that the base already carries does not.
 /// The same question is child ahead and parent behind.
 fn worktree_differs_from_base(root: &Path, base: &str) -> Option<bool> {
+    reject_observed_git_filters(root, Some(base)).ok()?;
     let changed = status_changes(&status_z(root)?)?;
     if changed.is_empty() {
         return Some(false);
@@ -1293,6 +1451,7 @@ fn tracked_worktree_differs_from_base(
             "--no-renames",
             "--no-ext-diff",
             "--no-textconv",
+            "--ignore-submodules=dirty",
             base,
             "--",
         ],
@@ -1422,7 +1581,14 @@ fn hash_one_worktree_path(root: &Path, path: &str) -> Option<String> {
 fn status_z(path: &Path) -> Option<Vec<u8>> {
     let output = git_query(
         path,
-        &["status", "--porcelain", "--no-renames", "-z", "-uall"],
+        &[
+            "status",
+            "--porcelain",
+            "--no-renames",
+            "-z",
+            "-uall",
+            "--ignore-submodules=dirty",
+        ],
     )
     .ok()?;
     output.status.success().then_some(output.stdout)

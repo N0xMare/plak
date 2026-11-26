@@ -2004,7 +2004,7 @@ exactly, rather than copied in as loose files and merged afterwards.
 
 **Every `git` is bounded, neutral, and never prompts.** Each call drops the
 inherited `GIT_*` steering variables, runs with `-c core.fsmonitor=false -c
-core.hooksPath=/dev/null -c protocol.ext.allow=never -c core.pager=cat -c
+submodule.recurse=false -c core.hooksPath=/dev/null -c protocol.ext.allow=never -c core.pager=cat -c
 gc.auto=0 -c diff.external= -c core.sshCommand=false -c credential.helper=` so
 no repository hook, fsmonitor command, external diff, `ext::` helper, ssh
 helper, or credential helper runs, and
@@ -2022,9 +2022,8 @@ hang that holds the seal or the adopt.
 **Filtered repositories are refused.** Before `snapshot`, `mint`, or `adopt`,
 Plak inspects repository-local (and worktree-local, when
 `extensions.worktreeConfig` is enabled) `filter.*.(clean|smudge|process)`
-configuration and repository attribute sources (`info/attributes`, local
-`core.attributesFile`, working-tree `.gitattributes`, and committed
-`.gitattributes` in `HEAD` and any candidate tree) without invoking any filter.
+configuration and the bounded attribute sources specified by chapter 04 §2.6
+without invoking any filter.
 If any clean, smudge, or process filter driver or active `filter=<name>`
 attribute is present (including Git LFS or `git-crypt`), the operation refuses
 with a typed `mint_unavailable` / `Unavailable` error rather than executing
@@ -3775,10 +3774,12 @@ write outside a driver (a headless flow, a bootstrap before the hub attaches,
 a session deletion) uses the process's claim when it holds one, otherwise one
 taken for the write and released after it (`TreeStore::save_in_custody`,
 `delete_in_custody`). A release the store refuses leaves the record naming
-the live process, which its next take joins. Every share ends in a release,
-or is forgotten when its record went with the tree's rows; a last share
-dropped otherwise would keep the record held until the process exits, and
-debug builds refuse it.
+the live process, which its next take joins. The attach and driver drop
+paths offload their release rather than block a runtime worker. Runtime
+shutdown can leave that queued release unrun. The record remains held while
+the process still owns its liveness lock; after process exit the successor
+must prove `HolderGone` for that exact claim before taking over at the next
+fence. A late release under the old fence cannot release the successor.
 
 **Liveness.** Custody's holder-gone proof is its own, not the runtime lease's:
 a custody holder can hold a dormant tree with no lease. Before its first take
@@ -3843,7 +3844,7 @@ and its custody goes last. At its quit the host releases the
 attachments its switches left behind, then ends every tree a hand-off left in
 custody that no root session holds again with its joined shutdown, and joins
 the dormant trees' shutdowns already under way. Either way the hub entry goes first and
-custody is released when the tree driver's last clone drops, after every
+custody release starts when the tree driver's last clone drops, after every
 writer that can still write has returned, except at a planned handoff's
 release, which gives it up explicitly at its end (above). A starting or retiring slot is work
 in flight until its owner clears it, so an owner cancelled before it clears

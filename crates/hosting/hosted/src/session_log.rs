@@ -657,6 +657,19 @@ fn write_event_count_index(
 ) -> Result<(), String> {
     let encoded = serde_json::to_vec(index).map_err(|_| "could not encode session event count")?;
     let path = event_count_index_path(home, session_id);
+    #[cfg(unix)]
+    plakous::auth::private_temps::sweep(home.sessions_dir(), |name| {
+        name.strip_prefix('.')
+            .and_then(|name| name.strip_suffix(".tmp"))
+            .and_then(|name| name.split_once(".event-count."))
+            .is_some_and(|(session, suffix)| {
+                uuid::Uuid::parse_str(session)
+                    .is_ok_and(|id| id.hyphenated().to_string() == session)
+                    && uuid::Uuid::parse_str(suffix).is_ok_and(|id| {
+                        id.get_version_num() == 4 && id.hyphenated().to_string() == suffix
+                    })
+            })
+    });
     let temp = home.sessions_dir().join(format!(
         ".{session_id}.event-count.{}.tmp",
         uuid::Uuid::new_v4()

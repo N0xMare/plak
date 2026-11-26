@@ -3,7 +3,10 @@ use std::fs::File;
 use std::path::Path;
 
 use super::{DirectoryLiveness, hold_own_lock, lock_path};
-use crate::tree::{CustodyHost, CustodyLiveness, HostInstance, MemoryTreeStore, TreeCustody as _};
+use crate::tree::{
+    CustodyError, CustodyHost, CustodyLiveness, HolderGone, HostInstance, MemoryTreeStore,
+    TreeCustody as _,
+};
 
 /// What runs between `free_lock`'s open and its lock.
 type BeforeLock = Box<dyn Fn(&Path)>;
@@ -32,6 +35,37 @@ fn host(index: u64, host_name: &str) -> CustodyHost {
 
 fn gone(directory: &Path, own: &CustodyHost, holder: &CustodyHost) -> bool {
     DirectoryLiveness { directory, own }.holder_gone(holder)
+}
+
+#[test]
+fn takeover_after_shutdown_loses_the_queued_last_share_release() {
+    let directory = tempfile::tempdir().unwrap();
+    let old = host(41, "machine");
+    let next = host(42, "machine");
+    let liveness = DirectoryLiveness {
+        directory: directory.path(),
+        own: &next,
+    };
+    let store = MemoryTreeStore::new();
+    let held = File::create(lock_path(directory.path(), old.instance)).unwrap();
+    held.lock().unwrap();
+    let claim = store.take_custody("tree", &old, None).unwrap();
+
+    // No release reached the store. A successor cannot take a live holder's
+    // place, even though the old runtime has stopped.
+    assert!(HolderGone::prove(claim.clone(), &liveness).is_none());
+    assert!(matches!(
+        store.take_custody("tree", &next, None),
+        Err(CustodyError::HostedElsewhere(_))
+    ));
+
+    drop(held); // kernel unlock at process exit
+    assert!(!store.custody("tree").unwrap().unwrap().released);
+    let proof = HolderGone::prove(claim.clone(), &liveness).unwrap();
+    let takeover = store.take_custody("tree", &next, Some(&proof)).unwrap();
+    assert_eq!(takeover.fence, claim.fence + 1);
+    assert!(store.release_custody(&claim).is_err());
+    store.prove_custody(&takeover).unwrap();
 }
 
 /// A holder whose lock is held is alive, even to another descriptor of this

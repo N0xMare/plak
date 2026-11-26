@@ -6198,6 +6198,15 @@ flag, `cancelled`, or `gateway_failed`). The decoder refuses any other order,
 a sequence or offset gap, an oversized response and bytes after `End`. There
 is no keepalive frame, so relay silence is upstream silence.
 
+Connection-cap overflow returns the typed `busy` refusal before
+authenticating or reading the request body, then closes the connection. That
+rejection has its own short deadline and does not consume relay admission
+capacity. If the gateway times out reading a request body, it closes after an
+HTTP 408 rather than classifying an incomplete read as a malformed envelope.
+The caller maps this gateway-hop response to a retryable deadline failure
+with transmission `NotStarted`; an upstream 408 remains a framed upstream
+response. A malformed body still receives the terminal typed envelope refusal.
+
 Account facts are the non-secret view of one custodied credential: status,
 generation, access expiry, login selection epoch digest, account binding and
 credential authority digests, presentation-only email and plan, profile and
@@ -11114,12 +11123,14 @@ admits exactly one compaction segment, and a semantic cut refuses a retained
 tail that holds one, so a second segment beside the first would make every
 later projection unplannable and the rung would work exactly once per session.
 The model-visible placeholder line is constant: counts remain only in
-provenance, placeholder records and operator observations. Merging keeps a paid
-summary verbatim and supersedes a previous placeholder pass line
-rather than stacking, so the segment stays one line however many passes run;
-the per-pass counts live in the provenance and in the operator records. When
-that sole compaction segment is a non-leading placeholder or image-residency
-notice (not a paid semantic summary), the planner keeps its barrier at position
+placeholder records and operator observations. A standalone placeholder or
+image-residency notice is an assistant compaction item with instruction
+provenance and no native item. A paid summary has model-output provenance even
+when a placeholder pass appends the notice line. Merging preserves the entire
+paid summary verbatim and adds the constant line at most once. Text never
+identifies a standalone notice, including in older histories without the
+instruction provenance. When the sole compaction segment is a non-leading
+standalone notice, the planner keeps its barrier at position
 zero so earlier rewritten turns remain selectable for a later semantic fold,
 while `publish_placeholders` applies the same post-compaction plan-restoration
 note seam as a paid fold.

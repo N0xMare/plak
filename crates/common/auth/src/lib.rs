@@ -28,6 +28,9 @@ mod jwt_crypto;
 #[doc(hidden)]
 pub mod native_auth;
 mod private_store;
+#[cfg(unix)]
+#[doc(hidden)]
+pub mod private_temps;
 mod secret;
 /// In-process account/profile single-flight coordination.
 ///
