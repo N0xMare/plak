@@ -266,7 +266,7 @@ pub(super) async fn park_until_wake(
                 return match start_wake_turn(driver, live, agent_id, identity).await {
                     Ok(handle) => ParkEnd::Woken(handle, arrivals),
                     Err(WakeRefusal::ParkEnded) => end_park(driver, live, agent_id, identity).await,
-                    Err(WakeRefusal::Placement | WakeRefusal::StepHeld) => continue,
+                    Err(WakeRefusal::Placement) => continue,
                     // The child stays parked: the turn waiter marks it ending
                     // while it ends the attempt (or hands it to an interrupt).
                     Err(WakeRefusal::Failed(error)) => ParkEnd::WakeFailed(error),
@@ -396,7 +396,7 @@ pub(super) fn wake_command(
 
 /// Why a wake did not start.
 enum WakeRefusal {
-    StepHeld,
+    /// The runner placement is not ready.
     Placement,
     /// The park ended before the Start (an interrupt or close won the race,
     /// or the live session went away): nothing was admitted, and any batch
@@ -419,14 +419,9 @@ async fn start_wake_turn(
 ) -> Result<TurnResultHandle, WakeRefusal> {
     if let Ok(tree_id) = driver.read(|tree| tree.tree_id.clone())
         && let Some(runtime) = crate::topology_runtime::lookup(&tree_id)
+        && runtime.is_closed()
     {
-        runtime
-            .wait_step_release(tokio::time::Instant::now() + SAFETY_TICK)
-            .await
-            .map_err(|_| WakeRefusal::StepHeld)?;
-        if runtime.is_closed() {
-            return Err(WakeRefusal::ParkEnded);
-        }
+        return Err(WakeRefusal::ParkEnded);
     }
     if !crate::agent::placement::ready(driver, agent_id) {
         return Err(WakeRefusal::Placement);

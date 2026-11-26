@@ -49,8 +49,6 @@ type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
 #[path = "multi_wire_loopback/deepseek.rs"]
 mod deepseek;
-#[path = "multi_wire_loopback/step_hold.rs"]
-mod step_hold;
 
 const PRE_DISPATCH_DEADLINE: Duration = Duration::from_millis(400);
 

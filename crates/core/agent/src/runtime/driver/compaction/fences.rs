@@ -204,7 +204,7 @@ impl Driver {
         &mut self,
         command: &PromptCommand,
     ) -> Result<TurnCompactionOutcome, AgentError> {
-        self.hold_step_boundary(command).await?;
+        self.check_dispatch_allowed(command)?;
         self.maybe_image_residency(command, false).await?;
         self.scheduled_ladder_after_tool_group(command).await
     }
@@ -357,7 +357,7 @@ impl Driver {
         &mut self,
         command: &PromptCommand,
     ) -> Result<bool, AgentError> {
-        self.hold_step_boundary(command).await?;
+        self.check_dispatch_allowed(command)?;
         if !self.config.scheduled_compaction_enabled {
             return Ok(false);
         }
@@ -372,7 +372,7 @@ impl Driver {
         &mut self,
         command: &PromptCommand,
     ) -> Result<(), AgentError> {
-        self.hold_step_boundary(command).await?;
+        self.check_dispatch_allowed(command)?;
         self.maybe_image_residency(command, true).await?;
         if !self.config.scheduled_compaction_enabled
             || self
@@ -465,7 +465,7 @@ impl Driver {
         pending_user_input: Option<UserInput>,
         measurement: Option<CompactionMeasurement>,
     ) -> Result<TurnCompactionOutcome, AgentError> {
-        self.hold_step_boundary(command).await?;
+        self.check_dispatch_allowed(command)?;
         let checkpoint = self.authority.checkpoint();
         let canonical = checkpoint.manifest().canonical();
         let source = canonical.history().identity();

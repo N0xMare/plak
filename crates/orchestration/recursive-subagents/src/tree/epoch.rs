@@ -295,24 +295,7 @@ impl ProductAgentTree {
         &mut self,
         cause: super::InterruptCause,
     ) -> Result<Vec<String>, TopologyError> {
-        self.interrupt_and_end_holds(cause, false)
-    }
-
-    /// A root's late cancel during committed upgrade release is not a Stop
-    /// of the already-handed-off child turns.
-    ///
-    /// # Errors
-    /// Refuses malformed recorded intent data.
-    pub fn cascade_preserving_handoffs(&mut self) -> Result<Vec<String>, TopologyError> {
-        self.interrupt_and_end_holds(super::InterruptCause::Cascade, true)
-    }
-
-    fn interrupt_and_end_holds(
-        &mut self,
-        cause: super::InterruptCause,
-        keep_handoffs: bool,
-    ) -> Result<Vec<String>, TopologyError> {
-        let interrupted = self.interrupt_working_children(cause, true, keep_handoffs)?;
+        let interrupted = self.interrupt_working_children(cause, true)?;
         if !interrupted.is_empty() {
             self.bump();
         }
@@ -331,8 +314,7 @@ impl ProductAgentTree {
     /// # Errors
     /// Refuses malformed recorded intent data.
     pub fn record_handoff(&mut self) -> Result<Vec<String>, TopologyError> {
-        let handed_off =
-            self.interrupt_working_children(super::InterruptCause::Handoff, false, false)?;
+        let handed_off = self.interrupt_working_children(super::InterruptCause::Handoff, false)?;
         if !handed_off.is_empty() {
             self.bump();
         }
@@ -343,15 +325,11 @@ impl ProductAgentTree {
         &mut self,
         cause: super::InterruptCause,
         end_holds: bool,
-        keep_handoffs: bool,
     ) -> Result<Vec<String>, TopologyError> {
         let root = self.root_agent_id.clone();
         let mut interrupted = Vec::new();
         let ids: Vec<String> = self.nodes.keys().cloned().collect();
         for id in ids {
-            if keep_handoffs && self.turn_handed_off(&id) {
-                continue;
-            }
             // A stop is final for the turn it interrupted. A later cascade
             // or a planned handoff skips that child only while no turn of
             // the attempt began after the stop; a resumed turn is

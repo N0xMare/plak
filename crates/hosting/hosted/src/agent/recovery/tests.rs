@@ -184,7 +184,7 @@ pub(crate) struct Fixture {
 }
 
 #[tokio::test]
-async fn tree_step_pause_closed_recovery_is_not_retryable_step_held() {
+async fn a_closed_runtime_refuses_recovery_ownership() {
     let fixture = Fixture::new("closed-recovery-not-held");
     crate::topology_runtime::force_release(&fixture.tree_id).await;
     assert!(matches!(

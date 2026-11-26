@@ -138,10 +138,6 @@ mod usage;
 /// Items in this namespace are deliberately nameable but are not part of the
 /// supported `plakous-agent` compatibility inventory.
 pub mod internal {
-    #[doc(hidden)]
-    pub use crate::control::boundary::{
-        BoundaryError, BoundaryHold, BoundaryPhase, BoundaryProgress,
-    };
     pub use crate::test_hooks::commit_classes as commit_trace;
     /// Repository lease-fault fixtures; unavailable in production builds.
     #[doc(hidden)]

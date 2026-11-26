@@ -1,6 +1,5 @@
 //! Busy-turn control intents and their acknowledgements.
 
-use super::super::turn::CancelOrigin;
 use super::HostBoundary;
 use super::{
     CancelRefusal, CancelSettlement, CancellationStatus, HOST_CANCEL_SETTLE_TIMEOUT, Instant,
@@ -27,14 +26,6 @@ const QUIT_CANCEL_GRACE: Duration = Duration::from_millis(300);
 /// turn slow to settle under load is handed off rather than abandoned.
 const HANDOFF_CANCEL_GRACE: Duration = HOST_CANCEL_SETTLE_TIMEOUT;
 const QUIT_RESULT_JOIN: Duration = Duration::from_millis(100);
-
-fn quit_cancel_origin(origin: CancelOrigin, handoff: bool, cancel_accepted: bool) -> CancelOrigin {
-    if handoff && !cancel_accepted && origin == CancelOrigin::Ordinary {
-        CancelOrigin::PlannedHandoff
-    } else {
-        origin
-    }
-}
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
     async fn request_cancel(&self) -> Result<CancellationStatus, plakous::agent::ControlError> {
@@ -359,10 +350,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     } else {
                         QUIT_CANCEL_GRACE
                     };
-                    if self.turn_result.is_none() {
-                        self.cancel_origin =
-                            quit_cancel_origin(self.cancel_origin, handoff, self.cancel_accepted);
-                    }
                     let settlement = if self.turn_result.is_some() {
                         #[cfg(test)]
                         super::quit_trace::step(&self.host.session.id, "terminal");
@@ -574,7 +561,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     });
                 }
                 Ok(UserAction::Interrupt) => {
-                    self.cancel_origin = CancelOrigin::OperatorInterrupt;
                     // The operator's stop is durable before its cancel: a
                     // host lost before the turn's terminal leaves a stop,
                     // which nothing continues (spec 03 §14.1). A refused
@@ -1044,22 +1030,5 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 ))
             }
         });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_late_terminal_keeps_the_cancel_origin_selected_at_handoff_quit() {
-        assert!(matches!(
-            quit_cancel_origin(CancelOrigin::OperatorInterrupt, true, true),
-            CancelOrigin::OperatorInterrupt
-        ));
-        assert!(matches!(
-            quit_cancel_origin(CancelOrigin::Ordinary, true, false),
-            CancelOrigin::PlannedHandoff
-        ));
     }
 }

@@ -92,7 +92,6 @@ pub(in crate::agent) async fn recover_owed_children(
             }
             Err(
                 crate::agent::recovery::ChildOwner::Recovery
-                | crate::agent::recovery::ChildOwner::StepHeld
                 | crate::agent::recovery::ChildOwner::Closed,
             ) => continue,
         };

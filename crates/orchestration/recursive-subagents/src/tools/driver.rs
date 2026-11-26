@@ -1,8 +1,6 @@
 //! The tree driver: one tree, its store and its VCS port, and the effects it settles.
 
-use super::step_activity;
 use super::*;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// One tree with its store and its VCS port: the engine every tree mutation
 /// runs on. [`Self::mutate`] queues one writer and applies; the effects the
@@ -54,7 +52,6 @@ pub struct TreeDriver {
     /// The shutdown of the host that attached this tree last.
     host_shutdown: Arc<Mutex<Option<HostShutdown>>>,
     /// Shared with waiters that can outlive the hub's tree registration.
-    step_handoff_committed: Arc<AtomicBool>,
     /// This driver's custody of the tree in its store: every save presents
     /// its claim, which the store proves in the write's own transaction. It
     /// is released when the last clone of this driver drops, so every writer
@@ -166,25 +163,12 @@ impl TreeDriver {
             storage_parking: Arc::default(),
             root_agent_id,
             host_shutdown: Arc::default(),
-            step_handoff_committed: Arc::default(),
             custody: Arc::new(custody),
             publication_owner: None,
             capacity_retry_interval: std::time::Duration::from_secs(5),
             checkout_sizes: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
             loss_noticed: Arc::default(),
         }
-    }
-
-    /// Whether the source is releasing this held tree after a committed
-    /// same-key upgrade, independently of its hub registration.
-    #[must_use]
-    pub fn step_handoff_committed(&self) -> bool {
-        self.step_handoff_committed.load(Ordering::Acquire)
-    }
-
-    pub(crate) fn set_step_handoff_committed(&self, committed: bool) {
-        self.step_handoff_committed
-            .store(committed, Ordering::Release);
     }
 
     /// Reclaims only acknowledged, settled dormant copies. Size probes run on
@@ -316,10 +300,6 @@ impl TreeDriver {
     /// The set [`Self::spawn_release_owner`] spawns on.
     pub fn release_owners(&self) -> crate::task_set::TaskSet {
         self.release_owners.clone()
-    }
-
-    pub(crate) fn step_effects_joined(&self) -> bool {
-        self.writer.effect_activity.is_idle() && self.writer.order().try_lock_owned().is_ok()
     }
 
     /// Joins tool-side receipt, job-stop and effect settlement after child release.
@@ -834,9 +814,7 @@ impl TreeDriver {
             return;
         }
         let driver = self.clone();
-        let activity = self.writer.effect_activity.enter();
         drop(self.spawn_release_owner(async move {
-            let _activity = activity;
             if let Err(error) = driver.settle_here(effects).await {
                 tracing::error!(target: "plak.topology", code = ?error.code,
                     "effects settled for a departed caller were refused");
@@ -849,7 +827,6 @@ impl TreeDriver {
     /// settled by a release owner.
     pub fn hold_effects(&self, effects: Effects) -> HeldEffects {
         HeldEffects {
-            activity: (!effects.is_empty()).then(|| self.writer.effect_activity.enter()),
             executor: tokio::runtime::Handle::try_current().ok(),
             driver: self.clone(),
             effects: Some(effects),
@@ -926,13 +903,7 @@ impl TreeDriver {
         F: Future<Output = Result<T, TopologyError>> + Send + 'static,
         T: Send + 'static,
     {
-        let activity = self.writer.effect_activity.enter();
-        self.spawn_release_owner(async move {
-            let _activity = activity;
-            work.await
-        })
-        .await
-        .map_err(|_| {
+        self.spawn_release_owner(work).await.map_err(|_| {
             TopologyError::new(
                 TopologyErrorCode::OperationRecoveryRequired,
                 "the tree's release owner failed",
@@ -1405,7 +1376,6 @@ mod test_support;
 /// [`TreeDriver::hold_effects`].
 #[must_use = "dropped unsettled, the effects go to a release owner"]
 pub struct HeldEffects {
-    activity: Option<step_activity::EffectGuard>,
     executor: Option<tokio::runtime::Handle>,
     driver: TreeDriver,
     effects: Option<Effects>,
@@ -1422,7 +1392,6 @@ impl HeldEffects {
         self.effects
             .get_or_insert_with(Effects::default)
             .absorb(other.take());
-        self.activity = self.activity.take().or_else(|| other.activity.take());
     }
 
     fn take(&mut self) -> Effects {

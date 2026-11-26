@@ -356,15 +356,6 @@ pub(super) async fn reopen_pending_decision(
     hosted: bool,
     supersede: bool,
 ) -> TestResult {
-    reopen_pending_decision_with_hold(allow, hosted, supersede, None).await
-}
-
-async fn reopen_pending_decision_with_hold(
-    allow: bool,
-    hosted: bool,
-    supersede: bool,
-    park: Option<Duration>,
-) -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let descriptor = durable_test_descriptor("test.route")?;
@@ -437,10 +428,6 @@ async fn reopen_pending_decision_with_hold(
     crate::recovery_scope::require_recoverable(&original.checkpoint())
         .map_err(|error| format!("decision checkpoint recovery scope failed: {error:?}"))?;
     store.expire_active_lease();
-    let decision_clock = Arc::new(DecisionClock {
-        begin: tokio::time::Instant::now(),
-        advances: AtomicBool::new(park.is_some()),
-    });
     let opened = sessions
         .open(
             if hosted {
@@ -451,39 +438,13 @@ async fn reopen_pending_decision_with_hold(
                 "open:restore-deny"
             },
             address,
-            durable_decision_builder(workspace, Arc::clone(&model), registry)?
-                .identity_sources(decision_clock.clone(), Arc::new(SystemIdGenerator)),
+            durable_decision_builder(workspace, Arc::clone(&model), registry)?,
         )
         .await
         .map_err(|error| format!("open failed: {}", error.message()))?;
     let DurableRuntimeOpen::RestoredWorking { agent, turn } = opened else {
         return Err("pending decision did not restore as working".into());
     };
-    if let Some(park) = park {
-        let mut observed = turn.take_turn().ok_or("restored observer")?;
-        let mut events = observed.take_events()?;
-        let mut hold = agent.session_endpoint().hold_step_boundary()?;
-        while !matches!(hold.progress()?, crate::control::boundary::BoundaryProgress::Held { turn:Some(id), .. } if id==turn_id)
-        {
-            hold.changed().await?;
-        }
-        tokio::time::advance(park).await;
-        hold.release().await?;
-        loop {
-            if let AgentEventKind::EffectDecisionRequired { expires_at, .. } =
-                events.recv().await?.kind()
-            {
-                assert!(
-                    *expires_at > plakous_model::Clock::now(decision_clock.as_ref()),
-                    "approval window spent while held"
-                );
-                break;
-            }
-        }
-        // Later generations use this fixture's original short-lived test
-        // model ticket; only the approval accounting needs the advanced clock.
-        decision_clock.advances.store(false, Ordering::Release);
-    }
     assert_eq!(turn.turn_id(), turn_id);
     assert_eq!(
         turn.pending_decision()
@@ -1122,32 +1083,4 @@ async fn expired_durable_effect_decision_returns_recovery_required_without_reope
     ));
     let _ = original.shutdown().await;
     Ok(())
-}
-
-struct DecisionClock {
-    begin: tokio::time::Instant,
-    advances: AtomicBool,
-}
-impl plakous_model::Clock for DecisionClock {
-    fn now(&self) -> Timestamp {
-        crate::runtime::config::timestamp_after(
-            Timestamp::new(10, 0).expect("valid time"),
-            if self.advances.load(Ordering::Acquire) {
-                self.begin.elapsed()
-            } else {
-                Duration::ZERO
-            },
-        )
-    }
-}
-
-#[tokio::test(start_paused = true)]
-async fn boundary_hold_restored_effect_decision_preserves_its_approval_window() -> TestResult {
-    Box::pin(reopen_pending_decision_with_hold(
-        true,
-        false,
-        false,
-        Some(Duration::from_secs(600)),
-    ))
-    .await
 }

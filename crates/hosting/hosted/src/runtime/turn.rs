@@ -482,14 +482,13 @@ pub(super) async fn settle_late_cancel<P: plakous_host_protocol::ProtocolExtensi
     session: &mut SessionRecord,
     events: &Sender<P>,
     cancel_unsettled: Option<&CancelUnsettled>,
-    origin: CancelOrigin,
 ) {
     if cancel_unsettled.is_none() {
         return;
     }
     // The turn's own terminal already swept its tool rows before this runs, so
     // nothing is left to defer behind.
-    let _ = apply_settled_cancel(rows, store, home, session, events, None, origin).await;
+    let _ = apply_settled_cancel(rows, store, home, session, events, None).await;
 }
 
 /// Projects one bounded cancel settlement.
@@ -521,16 +520,7 @@ pub(super) async fn apply_cancel_settlement<P: plakous_host_protocol::ProtocolEx
 ) -> CancelStatusPublication {
     match settlement {
         CancelSettlement::Settled => {
-            apply_settled_cancel(
-                rows,
-                store,
-                home,
-                session,
-                events,
-                projection,
-                CancelOrigin::Ordinary,
-            )
-            .await
+            apply_settled_cancel(rows, store, home, session, events, projection).await
         }
         CancelSettlement::Unsettled(detail) => {
             let _ = events.send(ContentEvent::Status {
@@ -553,15 +543,9 @@ async fn apply_settled_cancel<P: plakous_host_protocol::ProtocolExtension>(
     session: &mut SessionRecord,
     events: &Sender<P>,
     projection: Option<&mut TurnProjection<P>>,
-    origin: CancelOrigin,
 ) -> CancelStatusPublication {
     let tree_id = durable_tree_id(rows, session);
-    let cascade = if origin == CancelOrigin::PlannedHandoff {
-        topology_state::mark_root_interrupted_after_handoff_cancel(&tree_id).await
-    } else {
-        topology_state::mark_root_interrupted(&tree_id).await
-    };
-    match cascade {
+    match topology_state::mark_root_interrupted(&tree_id).await {
         Ok(0) => {}
         Ok(children) => {
             let _ = events.notice(TranscriptRow::info(
@@ -601,13 +585,6 @@ async fn apply_settled_cancel<P: plakous_host_protocol::ProtocolExtension>(
     }
     publish_interrupted_status(events, session);
     CancelStatusPublication::Published
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub(super) enum CancelOrigin {
-    Ordinary,
-    OperatorInterrupt,
-    PlannedHandoff,
 }
 
 /// Whether the settled-cancel `interrupted` status has been published yet.

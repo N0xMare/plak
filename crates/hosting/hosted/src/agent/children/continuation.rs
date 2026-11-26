@@ -327,14 +327,6 @@ pub(in crate::agent) async fn continue_after_loss(
     parent: &SpawnParent,
     runtime: &Arc<ProductTopologyRuntime>,
 ) {
-    if runtime
-        .wait_step_release(tokio::time::Instant::now() + super::SPAWN_MATERIALIZE_TIMEOUT)
-        .await
-        .is_err()
-    {
-        runtime.defer_step_recovery();
-        return;
-    }
     if runtime.is_closed() {
         return;
     }

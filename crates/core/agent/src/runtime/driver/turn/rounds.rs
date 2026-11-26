@@ -303,7 +303,6 @@ impl Driver {
             return Err(cancelled_error());
         }
         self.appended_prompt = None;
-        self.hold_step_boundary(command).await?;
         if append_user {
             self.append_turn_prompt(command).await?;
         }
@@ -320,7 +319,6 @@ impl Driver {
         let mut segment_limit_checked = append_user;
         let mut between_rounds = false;
         loop {
-            self.hold_step_boundary(command).await?;
             if command.cancellation.is_cancelled() || self.shutdown.is_cancelled() {
                 command.cancellation.cancel();
                 return Err(cancelled_error());

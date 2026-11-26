@@ -3891,6 +3891,10 @@ before an open is owed. The query adds no persisted rows, schema, or indexes.
 
 ### 14.1 Reopen
 
+Host restart uses ordinary release and recovery; it has no reversible
+step-admission pause. The legacy wire refusal `step_held` is reserved and
+is not emitted.
+
 No live placement hold survives host loss. Reopen follows the ordinary Working
 and owner-loss laws, with no paid recovery or in-place suffix replay. An
 unavailable node's recovery/open is deferred without blocking other runners;

@@ -177,6 +177,7 @@ countdown. Other phases and reasons remain decodable but are reserved and
 are not emitted, including `draining`, `restarting`, and the paired
 successor's `starting` and `running` notices.
 A bridge that cannot reach Welcome uses the typed discovery refusal.
+The topology refusal code `step_held` is reserved and no longer emitted.
 
 Codex template writes use `{"field":"service_tier","value":"fast"}` or
 `"ultrafast"`; `null` removes the named tier for Standard. Template reads,

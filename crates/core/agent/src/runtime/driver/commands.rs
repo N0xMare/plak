@@ -254,9 +254,6 @@ impl Driver {
         active: Option<&PromptCommand>,
         control: ActorControl,
     ) {
-        let Some(control) = self.refuse_held_compaction(control) else {
-            return;
-        };
         match control {
             ActorControl::Notice {
                 turn_id,

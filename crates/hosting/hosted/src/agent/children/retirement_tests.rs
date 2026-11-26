@@ -639,10 +639,7 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
         (ModelErrorKind::Policy, false),
         (ModelErrorKind::Protocol, true),
     ] {
-        for (close_first, committed_handoff) in [(false, false), (true, false), (false, true)] {
-            if committed_handoff && !publication_fails {
-                continue;
-            }
+        for close_first in [false, true] {
             let root = tempfile::tempdir().unwrap();
             let runtime = runtime(root.path());
             let evidence = root.path().join("evidence.jsonl");
@@ -865,38 +862,6 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                     .await
                     .is_ok()
             );
-            if committed_handoff {
-                let pause = runtime.pause_step_admissions().await.unwrap();
-                pause.begin_committed_handoff();
-                turn_watch(
-                    TurnWaiterRegistration::register(runtime.driver(), &child)
-                        .await
-                        .unwrap(),
-                    runtime.live.clone(),
-                    None,
-                    Some(ChildFeedSource {
-                        sessions: Arc::clone(&feed.sessions),
-                        session: feed.session,
-                    }),
-                    handle.clone(),
-                )
-                .await;
-                // An unpublished terminal during committed release belongs
-                // to the successor, even without a durable handoff row.
-                assert_eq!(service.jobs()[0].status, plakous::tools::JobStatus::Running);
-                assert!(runtime.live.lock().await.contains_key(&child));
-                runtime
-                    .read(|tree| {
-                        let attempt = tree.attempt(&child).unwrap();
-                        assert_eq!(attempt.status, AttemptStatus::Submitted);
-                        assert!(attempt.failure.is_none());
-                        assert!(tree.loss_continuation(&child).is_none());
-                    })
-                    .unwrap();
-                // Once the pause ends, the same recovery-required outcome
-                // takes the ordinary attempt-end path.
-                drop(pause);
-            }
             watcher.watch(
                 TurnWaiterRegistration::register(runtime.driver(), &child)
                     .await
@@ -1732,69 +1697,23 @@ async fn assert_reopened_result_reconciliation(corrective: bool, empty: bool) {
 }
 
 #[tokio::test]
-async fn tree_step_pause_dispatched_child_start_joins_then_rollback_has_no_retirement() {
-    Box::pin(child_start_control_fixture(
-        false,
-        false,
-        false,
-        StartPause::Held,
-    ))
-    .await;
-}
-
-#[tokio::test]
-async fn tree_step_pause_parent_and_child_held_then_rollback_resume_the_same_turns() {
-    Box::pin(child_start_control_fixture(
-        false,
-        false,
-        false,
-        StartPause::HeldDrivers,
-    ))
-    .await;
-}
-
-#[tokio::test]
 async fn fresh_child_start_retains_control_after_terminal_before_ack() {
-    Box::pin(child_start_control_fixture(
-        false,
-        true,
-        false,
-        StartPause::Open,
-    ))
-    .await;
+    Box::pin(child_start_control_fixture(false, true, false)).await;
 }
 
 #[tokio::test]
 async fn duplicate_child_start_registers_existing_live_turn_without_redispatch() {
-    Box::pin(child_start_control_fixture(
-        true,
-        false,
-        false,
-        StartPause::Open,
-    ))
-    .await;
+    Box::pin(child_start_control_fixture(true, false, false)).await;
 }
 
 #[tokio::test]
 async fn duplicate_child_start_without_live_turn_requires_reconciliation() {
-    Box::pin(child_start_control_fixture(
-        true,
-        true,
-        false,
-        StartPause::Open,
-    ))
-    .await;
+    Box::pin(child_start_control_fixture(true, true, false)).await;
 }
 
 #[tokio::test]
 async fn duplicate_child_start_below_retention_preserves_its_projected_acceptance() {
-    Box::pin(child_start_control_fixture(
-        true,
-        true,
-        true,
-        StartPause::Open,
-    ))
-    .await;
+    Box::pin(child_start_control_fixture(true, true, true)).await;
 }
 
 #[tokio::test]
@@ -1936,17 +1855,10 @@ async fn reclaimed_child_start_settles_consumed_without_binding() {
         .unwrap();
 }
 
-enum StartPause {
-    Open,
-    Held,
-    HeldDrivers,
-}
-
 async fn child_start_control_fixture(
     duplicate: bool,
     terminal_before_ack: bool,
     below_retention: bool,
-    pause_after_spawn: StartPause,
 ) {
     use crate::agent_tree_protocol::{AttemptStatus, NodeStatus, SpawnAgentRequest, Tier};
     use plakous::model::ModelErrorKind;
@@ -1995,40 +1907,6 @@ async fn child_start_control_fixture(
         panic!("created session required")
     };
     let agent = session.agent().clone();
-    let mut held_drivers = if matches!(pause_after_spawn, StartPause::HeldDrivers) {
-        let parent_controller = BoundaryController::quiet_from_evidence_path(
-            CrashBoundary::None,
-            root.path().join("parent-evidence.jsonl"),
-        )
-        .unwrap();
-        let CreateSessionOutcome::Created {
-            session: parent, ..
-        } = sessions
-            .create(CreateSessionRequest::new(
-                SessionOperationId::new("held-parent-create").unwrap(),
-                terminal_failure_runtime_binding(
-                    root.path(),
-                    parent_controller,
-                    ModelErrorKind::Protocol,
-                )
-                .unwrap(),
-            ))
-            .await
-            .unwrap()
-        else {
-            panic!("parent created")
-        };
-        let parent_hold = plakous::agent::host_control::hold_step_boundary(parent.agent()).unwrap();
-        let parent_turn = parent
-            .agent()
-            .prompt("parent waits at its next boundary")
-            .await
-            .unwrap();
-        let child_hold = plakous::agent::host_control::hold_step_boundary(&agent).unwrap();
-        Some((parent, parent_turn, parent_hold, child_hold))
-    } else {
-        None
-    };
     let command = CommandId::new("start-control-command").unwrap();
     ChildLedger::new(runtime.driver(), &id)
         .prepare(CommandIntent {
@@ -2052,11 +1930,6 @@ async fn child_start_control_fixture(
         recovered_turn: None,
         topology_owner: None,
     };
-    let mut step_pause = if matches!(pause_after_spawn, StartPause::Open) {
-        None
-    } else {
-        Some(runtime.pause_step_admissions().await.unwrap())
-    };
     let startup = runtime.reserve_startup(&id).await.unwrap();
     let started = Box::pin(start_child_turn_owned_with_ack(
         &runtime,
@@ -2068,20 +1941,6 @@ async fn child_start_control_fixture(
         true,
         StartAdmission::Ordinary,
         async {
-            if let Some((_, _, parent_hold, child_hold)) = held_drivers.as_mut() {
-                use plakous::agent::host_control::BoundaryProgress;
-                for hold in [parent_hold, child_hold] {
-                    tokio::time::timeout(Duration::from_secs(20), async {
-                        while !matches!(hold.progress().unwrap(), BoundaryProgress::Held { turn: Some(_), .. }) {
-                            hold.changed().await.unwrap();
-                        }
-                    }).await.unwrap();
-                }
-                assert!(plakous_offline_crash_harness::evidence::read_evidence(&evidence)
-                    .unwrap().iter().all(|row| row.kind != plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched),
-                    "child dispatched through its hold");
-                return;
-            }
             tokio::time::timeout(Duration::from_secs(20), async {
                 while !plakous_offline_crash_harness::evidence::read_evidence(&evidence)
                     .is_ok_and(|rows| {
@@ -2091,15 +1950,6 @@ async fn child_start_control_fixture(
                 {
                     tokio::task::yield_now().await;
                 }
-                if step_pause.is_some() {
-                    runtime.read(|tree| {
-                        let node = tree.node(&id).unwrap();
-                        assert_ne!(node.status, NodeStatus::RecoveryRequired);
-                        assert!(tree.attempt(&id).unwrap().failure.is_none());
-                    }).unwrap();
-                }
-                // Abort the coordinator after the dispatched startup really joined.
-                drop(step_pause.take());
                 if terminal_before_ack {
                     let replay = agent.start(command.clone(), "work").await.unwrap();
                     assert_eq!(
@@ -2132,28 +1982,6 @@ async fn child_start_control_fixture(
         },
     ))
     .await;
-    if let Some((parent, parent_turn, parent_hold, child_hold)) = held_drivers {
-        let paused = step_pause.take().unwrap();
-        let snapshot = paused.agents().await.unwrap();
-        assert_eq!(snapshot.agents.len(), 1);
-        assert!(!snapshot.transitioning);
-        assert!(
-            !runtime.driver().release_owners().is_empty(),
-            "the live actor remains owned"
-        );
-        assert!(
-            paused.effects_joined(),
-            "held child ownership is not an unjoined effect"
-        );
-        drop(paused);
-        parent_hold.release().await.unwrap();
-        child_hold.release().await.unwrap();
-        assert!(matches!(
-            parent_turn.result().await.unwrap().outcome(),
-            TurnResultOutcome::Failed(_)
-        ));
-        parent.release().await.unwrap();
-    }
     if below_retention {
         let Err(ChildStartFailure::Failed(message)) = started else {
             panic!("a duplicate below retention starts nothing")

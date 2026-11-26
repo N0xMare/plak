@@ -43,7 +43,6 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 mod admitted_round;
-mod boundary;
 mod cleanup;
 mod commands;
 mod compaction;
@@ -53,6 +52,7 @@ mod effects;
 #[cfg(test)]
 #[path = "exit_probe_tests.rs"]
 pub(crate) mod exit_probe;
+mod ingress;
 mod model;
 pub(super) use model::completed_history_prefix;
 mod notices;
@@ -89,7 +89,6 @@ pub use turn::OPERATION_BUDGET_WRAP_UP_NOTE;
     reason = "independent per-turn recovery and paid-fold guards must persist separately"
 )]
 struct Driver {
-    boundary: crate::control::boundary::BoundaryOwner,
     agent_id: DriverInstanceId,
     model: Arc<dyn LanguageModel>,
     provider_configuration: Arc<CompiledProviderConfiguration>,

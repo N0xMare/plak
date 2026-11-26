@@ -203,7 +203,6 @@ pub fn epoch_rebind_refusal(
 enum ChildStop {
     /// The root's Ctrl-C: cascade, and settle the release in the background.
     Cascade,
-    HandoffCancelCascade,
     /// A running turn's stop: record `stopped` and signal, without joining.
     /// The idle sweep joins.
     Signal,
@@ -219,12 +218,6 @@ enum ChildStop {
 /// background and retain their own failure evidence.
 pub(crate) async fn mark_root_interrupted(tree_id: &str) -> Result<usize, String> {
     interrupt_root(tree_id, ChildStop::Cascade).await
-}
-
-pub(crate) async fn mark_root_interrupted_after_handoff_cancel(
-    tree_id: &str,
-) -> Result<usize, String> {
-    interrupt_root(tree_id, ChildStop::HandoffCancelCascade).await
 }
 
 /// A running turn's stop: record `stopped` and signal the children, and do
@@ -249,21 +242,14 @@ async fn interrupt_root(tree_id: &str, stop: ChildStop) -> Result<usize, String>
         None
     };
     let cause = match stop {
-        ChildStop::Cascade | ChildStop::HandoffCancelCascade => {
-            crate::agent_tree::InterruptCause::Cascade
-        }
+        ChildStop::Cascade => crate::agent_tree::InterruptCause::Cascade,
         ChildStop::Signal | ChildStop::Join => crate::agent_tree::InterruptCause::Stopped,
     };
-    let preserve_handoffs = matches!(stop, ChildStop::HandoffCancelCascade)
-        && runtime.driver().step_handoff_committed();
     let mut interrupted = runtime
         .mutate_then_emit(false, move |tree| {
-            let interrupted = if preserve_handoffs {
-                tree.cascade_preserving_handoffs()
-            } else {
-                tree.interrupt_running_descendants_for(cause)
-            }
-            .map_err(|error| error.message)?;
+            let interrupted = tree
+                .interrupt_running_descendants_for(cause)
+                .map_err(|error| error.message)?;
             tree.mark_root_interrupted();
             Ok(interrupted)
         })
