@@ -178,7 +178,8 @@ complete: a connection admitted then receives `starting` with reason
 `startup`, and `running` with reason `startup` once they complete. Until
 then a root attach answers a read-only saved first page, and opens, prompts
 and new sessions are refused with placement `runner_unreachable`, phase
-`reconcile`; after `running`, send `retry_attach` for a live attachment. A
+`reconcile`. After `running` the host opens the session and sends `moved`;
+reattach to the named node for a live attachment (`retry_attach` also works). A
 connection admitted after the start completed receives no startup notice.
 Other phases and reasons remain decodable but are reserved and are not
 emitted, including `draining`, `restarting` and the paired upgrade reasons.

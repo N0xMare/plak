@@ -1922,8 +1922,11 @@ A plain attach retries the open through the existing serialized slot and
 serves saved history only if that fresh attempt fails. While the start's
 inventories are incomplete, root attach serves saved history without an open
 attempt and without marking the slot failed; its failure is the retryable
-placement refusal `runner_unreachable` with phase `reconcile`. After
-`running`, `retry_attach` or a fresh attach opens it live. While the startup scan
+placement refusal `runner_unreachable` with phase `reconcile`. When the start
+completes the host opens, off any connection, each session such a link still
+holds; the link then receives `moved` to reattach live, as a startup-scan open
+moves its links. A failed open leaves the link read-only and records the
+failure as any failed open does. While the startup scan
 still owns a failed slot's automatic retries, plain attach instead reads the
 cached failure without attempting another open. When that slot opens, existing
 read-only links receive `moved` to reattach live. A failed child-node attach
@@ -6404,8 +6407,14 @@ settles asynchronously after endpoint binding, before local admission.
   projection and a directory watch sends its first snapshot when the
   projection is published; and an auto-started host cannot idle-exit. A
   failed inventory logs `plakd host: startup failed: <why>` and stops the
-  host as a planned stop with a failed exit; a stop during the start
-  suppresses `running`. Advisory notices still never decide admission.
+  host as a planned stop with a failed exit, which a unit's
+  `Restart=on-failure` restarts. Any stop during the start, including an
+  idle retirement or a failed rebind, ends it before its next step: no
+  runner probe, home-local daemon start or continuation inventory begins,
+  `running` is not sent, and the stop waits at most 3 s for the step under
+  way. A failed first directory projection does not stop the host: directory
+  reads answer that the directory could not be read until a later
+  revalidation rebuilds it. Advisory notices still never decide admission.
 - **Start scan.** Before admitting work, the host reads which of the directory's
   sessions the last host left a continuation that runs by itself: a root
   whose latest loss is a planned handoff, a root continuation decided and

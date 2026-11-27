@@ -404,6 +404,7 @@ impl Source {
         projected: &Projected,
         notify: &watch::Sender<u64>,
     ) -> bool {
+        crate::test_hooks::host_lifecycle::directory_projection_held();
         match self.rebuild() {
             Ok(rows) => {
                 *shared.write().unwrap_or_else(PoisonError::into_inner) = rows;
@@ -949,4 +950,31 @@ fn profile(
         &profiles.catalog,
     );
     (profile.id, profile.differences)
+}
+
+#[cfg(test)]
+mod projected_tests {
+    use super::{Duration, Projected};
+
+    #[test]
+    fn a_read_before_the_first_projection_waits_then_answers_its_outcome() {
+        let projected = Projected::default();
+        assert!(!projected.done());
+        assert!(
+            projected
+                .wait(Duration::ZERO)
+                .is_err_and(|error| error.contains("still being read"))
+        );
+        projected.publish(Err("product store busy".into()));
+        assert!(
+            projected
+                .wait(Duration::from_secs(60))
+                .is_err_and(|error| error.contains("could not be read: product store busy"))
+        );
+        // A later rebuild repairs a failed first projection; success is final.
+        projected.publish(Ok(()));
+        projected.publish(Err("later".into()));
+        assert!(projected.done());
+        assert_eq!(projected.wait(Duration::ZERO), Ok(()));
+    }
 }

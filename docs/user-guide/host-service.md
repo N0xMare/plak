@@ -212,6 +212,15 @@ children whose owner was lost also continue. Promoted background jobs keep runni
 the runner daemon. A foreground command a turn was still waiting on ends with
 the stop; the continuation turn sees that it was interrupted.
 
+The host answers clients before it has finished starting: an attach then
+shows saved history read-only, and prompts wait. Once the log shows
+`plakd host: startup complete`, the host opens the sessions clients are
+viewing and their views turn live without a reattach. If a startup inventory
+fails, the log shows `plakd host: startup failed: <why>` and the host exits
+with a failure; under the unit's `Restart=on-failure` (or `KeepAlive` on
+macOS) a persistent failure restarts it in a loop, so read the log and fix
+the cause rather than waiting.
+
 If the new build fails to start, look at its log before doing anything else.
 If it never started, point the link back at the old snapshot and start the
 service. Once it may have opened the stores, repair and start it again, or

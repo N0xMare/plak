@@ -268,6 +268,9 @@ pub struct SessionHost<P: ProtocolExtension> {
     release_join: Duration,
     /// Set once the host stops: nothing opens or is created after it.
     closing: Arc<std::sync::atomic::AtomicBool>,
+    /// Sessions served read-only because their open was deferred, each with
+    /// the liveness of the link that holds it.
+    deferred: Mutex<Vec<(String, std::sync::Weak<()>)>>,
 }
 
 /// Whether this nonblocking slot view names `session`. Busy views use a
@@ -330,6 +333,7 @@ where
             release_wait: RELEASE_WAIT,
             release_join: RELEASE_JOIN,
             closing: Arc::default(),
+            deferred: Mutex::default(),
         })
     }
 
@@ -650,6 +654,8 @@ struct ReadOnlyLink<P: ProtocolExtension, W: Write> {
     refusal: RequestRefusal,
     connection: WireConnection<P, W>,
     _mailbox: plakous_host_protocol::IntentReceiver<P>,
+    /// Held while the link waits for its deferred open.
+    _deferral: Option<Arc<()>>,
 }
 
 /// A connection's host attachment: the rows it sent last.

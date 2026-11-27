@@ -299,7 +299,12 @@ impl RunningHost {
             environment,
             runtime: runtime.handle().clone(),
             scanning: Arc::clone(&scanning),
-            stopped: Arc::new(move || stop.stopped()),
+            stopped: {
+                // Any stop, not only a signal (an idle retirement or a
+                // failed rebind), ends the start before its next step.
+                let startup = Arc::clone(&startup);
+                Arc::new(move || stop.stopped() || startup.ended())
+            },
         });
         let reload_requests = runtime.spawn(requested_reload::serve(
             Arc::clone(&host),
@@ -335,7 +340,7 @@ impl RunningHost {
         hand_off(&host, stopping);
         // The start checks for a stop between its steps; none of its steps
         // may run on a runtime that has shut down.
-        let _ = completing.join();
+        join_startup(&completing);
         eprintln!(
             "plakd host: stopped in {} ms",
             stopping.elapsed().as_millis()
@@ -347,6 +352,21 @@ impl RunningHost {
             ))),
             None => Ok(ProcessOutcome::Success),
         }
+    }
+}
+
+/// How long a stop waits for an inventory step under way. Steps are store
+/// reads; this stays inside the stop margin.
+const STARTUP_JOIN: Duration = Duration::from_secs(3);
+
+fn join_startup(completing: &std::thread::JoinHandle<()>) {
+    let deadline = Instant::now() + STARTUP_JOIN;
+    while !completing.is_finished() {
+        if Instant::now() >= deadline {
+            eprintln!("plakd host: startup inventory still reading at stop; not joined");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -380,10 +400,13 @@ fn complete_startup(work: StartupWork) -> std::thread::JoinHandle<()> {
             scanning,
             stopped,
         } = work;
-        crate::test_hooks::host_lifecycle::startup_held();
+        crate::test_hooks::host_lifecycle::startup_held(&*stopped);
         let inventories = (|| -> CliResult<Option<Vec<String>>> {
             if stopped() {
                 return Ok(None);
+            }
+            if let Some(failure) = crate::test_hooks::host_lifecycle::startup_failure() {
+                return Err(CliFailure::new(failure));
             }
             let local = runner::host::inventory(&services)?;
             if stopped() {
@@ -401,6 +424,8 @@ fn complete_startup(work: StartupWork) -> std::thread::JoinHandle<()> {
                         started.elapsed().as_millis()
                     );
                     host.changed();
+                    // Links served read-only while the start ran move live.
+                    drop(host.open_deferred());
                     let stopped = Arc::clone(&stopped);
                     scan(
                         &host,
@@ -412,7 +437,7 @@ fn complete_startup(work: StartupWork) -> std::thread::JoinHandle<()> {
                     );
                 }
             }
-            Ok(None) => {}
+            Ok(None) => eprintln!("plakd host: startup ended by the stop"),
             Err(failure) => {
                 eprintln!("plakd host: startup failed: {}", failure.message());
                 startup.fail(failure.message().to_owned());

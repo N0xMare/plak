@@ -24,10 +24,20 @@ pub(crate) fn record_handoff_budget(elapsed: std::time::Duration, remaining: std
     }
 }
 
-/// Holds the start's inventories until the release file exists, after
-/// announcing the hold beside it, so a fixture can act while they wait.
-pub(crate) fn startup_held() {
-    let Some(release) = super::hook_environment("PLAK_TEST_HOST_STARTUP_HOLD") else {
+/// Holds the start's inventories until the release file exists or the host
+/// stops, after announcing the hold beside it, so a fixture can act while
+/// they wait.
+pub(crate) fn startup_held(stopped: &dyn Fn() -> bool) {
+    hold("PLAK_TEST_HOST_STARTUP_HOLD", stopped);
+}
+
+/// Holds the session directory's first projection the same way.
+pub(crate) fn directory_projection_held() {
+    hold("PLAK_TEST_DIRECTORY_PROJECTION_HOLD", &|| false);
+}
+
+fn hold(variable: &str, stopped: &dyn Fn() -> bool) {
+    let Some(release) = super::hook_environment(variable) else {
         return;
     };
     let release = std::path::PathBuf::from(release);
@@ -35,7 +45,13 @@ pub(crate) fn startup_held() {
     held.push(".held");
     let _ = std::fs::write(held, []);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    while !release.exists() && std::time::Instant::now() < deadline {
+    while !release.exists() && !stopped() && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+}
+
+/// A startup inventory failure the fixture names.
+pub(crate) fn startup_failure() -> Option<String> {
+    super::hook_environment("PLAK_TEST_HOST_STARTUP_FAILURE")
+        .map(|value| value.to_string_lossy().into_owned())
 }

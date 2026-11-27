@@ -19,6 +19,7 @@ pub(super) struct StoredAttachment<P: ProtocolExtension> {
     actions: plakous_host_protocol::IntentSender<P>,
     mailbox: plakous_host_protocol::IntentReceiver<P>,
     page: Option<Box<dyn super::PreparedViewport>>,
+    deferral: Option<Arc<()>>,
 }
 
 impl<P: ProtocolExtension> StoredAttachment<P> {
@@ -50,7 +51,14 @@ impl<P: ProtocolExtension> StoredAttachment<P> {
             actions,
             mailbox,
             page,
+            deferral: None,
         }
+    }
+
+    /// Marks a saved view served because its open was deferred.
+    pub(super) fn deferred(mut self, token: Arc<()>) -> Self {
+        self.deferral = Some(token);
+        self
     }
 }
 
@@ -110,6 +118,7 @@ where
             actions,
             mailbox,
             page,
+            deferral,
         } = stored;
         let sessions = Arc::clone(&self.host.sessions);
         let mut connection = WireConnection::on_service(
@@ -169,6 +178,7 @@ where
                 refusal,
                 connection,
                 _mailbox: mailbox,
+                _deferral: deferral,
             });
         }
         Ok(Forwarded::Reading(reading))

@@ -107,9 +107,11 @@ where
         // A start that has not finished its inventories serves saved history
         // without touching the slot, so no open failure is recorded.
         if let Some(deferred) = self.sessions.deferred_open(&id) {
-            return self
-                .stored_target(node, &id, Some(&deferred))
-                .unwrap_or_else(|| Target::Refused(self.sessions.refusal(&id, &deferred)));
+            return match self.stored_target(node, &id, Some(&deferred)) {
+                Some(Target::Stored(stored)) => Target::Stored(stored.deferred(self.defer(&id))),
+                Some(target) => target,
+                None => Target::Refused(self.sessions.refusal(&id, &deferred)),
+            };
         }
         match slot.resident_at_handoff() {
             Ok((resident, from_open)) => {
@@ -126,6 +128,47 @@ where
                 .stored_target(node, &id, Some(&failure))
                 .unwrap_or_else(|| Target::Refused(self.sessions.refusal(&id, &failure))),
         }
+    }
+
+    /// Records a read-only link whose open was deferred; the link holds
+    /// the returned token.
+    fn defer(&self, session: &str) -> Arc<()> {
+        let token = Arc::new(());
+        let mut deferred = self
+            .deferred
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        deferred.retain(|(_, link)| link.strong_count() > 0);
+        deferred.push((session.to_owned(), Arc::downgrade(&token)));
+        token
+    }
+
+    /// Opens, on a thread of its own, each session a live read-only link
+    /// holds because its open was deferred. Each open moves its links live,
+    /// as any background open does; a failed open leaves them read-only.
+    pub fn open_deferred(self: &Arc<Self>) -> std::thread::JoinHandle<()> {
+        let mut sessions = std::mem::take(
+            &mut *self
+                .deferred
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+        .into_iter()
+        .filter(|(_, link)| link.strong_count() > 0)
+        .map(|(session, _)| session)
+        .collect::<Vec<_>>();
+        sessions.sort();
+        sessions.dedup();
+        let host = Arc::clone(self);
+        std::thread::spawn(move || {
+            for session in sessions {
+                if host.closed() {
+                    return;
+                }
+                let _ = host.slot(&session).resident();
+                host.changed();
+            }
+        })
     }
 
     fn prepare_resident(

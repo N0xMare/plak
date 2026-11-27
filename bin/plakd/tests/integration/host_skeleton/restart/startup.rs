@@ -5,21 +5,28 @@
 use super::*;
 
 struct Held {
+    variable: &'static str,
     release: PathBuf,
 }
 
 impl Held {
     fn new(fixture: &Fixture) -> Self {
         Self {
+            variable: "PLAK_TEST_HOST_STARTUP_HOLD",
             release: fixture.root.join("startup-release"),
         }
     }
 
+    /// Holds only the session directory's first projection.
+    fn directory(fixture: &Fixture) -> Self {
+        Self {
+            variable: "PLAK_TEST_DIRECTORY_PROJECTION_HOLD",
+            release: fixture.root.join("directory-release"),
+        }
+    }
+
     fn env(&self) -> (&'static str, String) {
-        (
-            "PLAK_TEST_HOST_STARTUP_HOLD",
-            self.release.display().to_string(),
-        )
+        (self.variable, self.release.display().to_string())
     }
 
     /// The inventories have not begun: the hook announced its hold and
@@ -38,7 +45,13 @@ impl Held {
 /// Spawns the host and returns once its socket serves, without waiting for
 /// its start to complete.
 fn serving_before_startup(fixture: &Fixture, held: &Held) -> Host {
-    let (child, lines) = spawn_env(fixture, &[], &[held.env()]);
+    serving_held(fixture, held, &[])
+}
+
+fn serving_held(fixture: &Fixture, held: &Held, env: &[(&str, String)]) -> Host {
+    let mut env = env.to_vec();
+    env.push(held.env());
+    let (child, lines) = spawn_env(fixture, &[], &env);
     let socket = loop {
         let line = lines.recv_timeout(WAIT).expect("the held host serves");
         if let Some(rest) = line.strip_prefix("plakd host: serving on ") {
@@ -195,6 +208,15 @@ fn a_held_start_serves_welcome_and_a_saved_first_page_and_admission_waits() {
     while !lifecycle(&running, "running") {
         running = frame(&mut reader);
     }
+    // The host opens the session the link waited for and moves it live; the
+    // client sends no retry.
+    let moved = loop {
+        let next = frame(&mut reader);
+        if next["frame"] == "moved" {
+            break next;
+        }
+    };
+    assert_eq!(moved["attachment"], attachment, "{moved}");
     loop {
         let line = host.lines.recv_timeout(WAIT).unwrap();
         if line.starts_with("plakd host: startup complete") {
@@ -203,9 +225,202 @@ fn a_held_start_serves_welcome_and_a_saved_first_page_and_admission_waits() {
         assert!(!line.starts_with("plakd host: startup failed"), "{line}");
     }
 
-    // After the start the same node attaches live.
+    // After the start the same node also attaches live.
     let mut client = Client::connect(&host);
     client.attach(3, &node);
     drop(client);
+    stop(&mut host);
+}
+
+fn request(writer: &mut UnixStream, id: u64, op: Op<PlakExtension>) {
+    writer
+        .write_all(
+            encode_line(&ClientFrame::<PlakExtension>::Request { id, op })
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+}
+
+/// Nothing arrives on `reader` while `held` holds: a request it carries is
+/// still waiting.
+fn silent(reader: &mut BufReader<UnixStream>, held: &Held) {
+    reader
+        .get_ref()
+        .set_read_timeout(Some(Duration::from_millis(300)))
+        .unwrap();
+    let mut line = String::new();
+    assert!(
+        reader.read_line(&mut line).is_err(),
+        "answered while held: {line}"
+    );
+    assert!(held.holding());
+    reader.get_ref().set_read_timeout(Some(WAIT)).unwrap();
+}
+
+#[test]
+fn lifecycle_requests_wait_for_a_held_start_then_are_admitted() {
+    let Some(fixture) = fixture() else { return };
+    let _cleanup = HomeHost(fixture.home());
+    let archived = seed(&fixture, 51);
+    let deleted = seed(&fixture, 52);
+    let stopped = seed(&fixture, 53);
+    let held = Held::new(&fixture);
+    let mut host = serving_before_startup(&fixture, &held);
+    let requests = [
+        new_session(&fixture.workspace()),
+        Op::ArchiveSession {
+            session: archived,
+            archived: true,
+        },
+        Op::DeleteSession {
+            session: deleted,
+            abandon_children: false,
+            abandon_jobs: false,
+        },
+        Op::StopSession { session: stopped },
+    ];
+    let mut waiting = Vec::new();
+    for op in requests {
+        let (mut reader, mut writer) = hello(&host.socket);
+        assert!(lifecycle(&frame(&mut reader), "starting"));
+        let name = op.name();
+        request(&mut writer, 1, op);
+        waiting.push((name, reader, writer));
+    }
+    for (_, reader, _) in &mut waiting {
+        silent(reader, &held);
+    }
+    held.release();
+    for (name, reader, _) in &mut waiting {
+        let answered = until_response(reader, 1);
+        let outcome = &answered.last().unwrap()["outcome"];
+        // Admitted: answered by its own checks, not the startup refusal.
+        assert!(!reconciling(outcome), "{name} after the start: {outcome}");
+        if *name == "new_session" {
+            assert_eq!(outcome["ok"]["answer"], "created", "{outcome}");
+        }
+    }
+    stop(&mut host);
+}
+
+#[test]
+fn a_stop_during_a_held_start_sends_no_running_and_joins_the_start() {
+    let Some(fixture) = fixture() else { return };
+    let _cleanup = HomeHost(fixture.home());
+    let held = Held::new(&fixture);
+    let mut host = serving_before_startup(&fixture, &held);
+    let (mut reader, _writer) = hello(&host.socket);
+    assert!(lifecycle(&frame(&mut reader), "starting"));
+    stop(&mut host);
+    let mut phases = Vec::new();
+    let mut line = String::new();
+    while reader.read_line(&mut line).unwrap_or(0) != 0 {
+        let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
+        if frame["frame"] == "host_lifecycle" {
+            phases.push(frame["phase"].as_str().unwrap().to_owned());
+        }
+        line.clear();
+    }
+    assert_eq!(phases, ["stopping"], "a stopped start announced running");
+    assert!(!held.release.exists());
+    let lines: Vec<String> = host.lines.iter().collect();
+    let ended = lines
+        .iter()
+        .position(|line| line == "plakd host: startup ended by the stop")
+        .unwrap_or_else(|| panic!("the start was not joined: {lines:?}"));
+    let stopped = lines
+        .iter()
+        .position(|line| line.starts_with("plakd host: stopped in "))
+        .unwrap();
+    assert!(ended < stopped, "{lines:?}");
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.starts_with("plakd host: startup complete")),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn a_failed_startup_inventory_stops_the_host_with_a_failed_exit() {
+    let Some(fixture) = fixture() else { return };
+    let _cleanup = HomeHost(fixture.home());
+    let (mut child, lines) = spawn_env(
+        &fixture,
+        &[],
+        &[(
+            "PLAK_TEST_HOST_STARTUP_FAILURE",
+            "fixture inventory unreadable".to_owned(),
+        )],
+    );
+    let lines: Vec<String> = lines.iter().collect();
+    let status = child.wait().unwrap();
+    assert!(!status.success(), "{lines:?}");
+    let serving = lines
+        .iter()
+        .position(|line| line.starts_with("plakd host: serving on "))
+        .unwrap_or_else(|| panic!("{lines:?}"));
+    let failed = lines
+        .iter()
+        .position(|line| line == "plakd host: startup failed: fixture inventory unreadable")
+        .unwrap_or_else(|| panic!("{lines:?}"));
+    assert!(serving < failed, "{lines:?}");
+}
+
+#[test]
+fn directory_reads_wait_for_the_first_projection_and_watches_snapshot_it() {
+    let Some(fixture) = fixture() else { return };
+    let _cleanup = HomeHost(fixture.home());
+    let session = seed(&fixture, 61);
+    let held = Held::directory(&fixture);
+    let mut host = serving_held(&fixture, &held, &[]);
+    // The start completes without its directory; no notice interleaves.
+    await_startup(&host.lines).unwrap();
+    let (mut lister, mut list_writer) = hello(&host.socket);
+    request(
+        &mut list_writer,
+        1,
+        Op::ListSessions {
+            workspace: None,
+            runner: None,
+            include_archived: false,
+        },
+    );
+    let (mut watcher, mut watch_writer) = hello(&host.socket);
+    request(
+        &mut watch_writer,
+        1,
+        Op::WatchSessions {
+            include_archived: false,
+        },
+    );
+    let watching = until_response(&mut watcher, 1);
+    assert_eq!(
+        watching.last().unwrap()["outcome"]["ok"]["answer"],
+        "watching",
+        "{watching:?}"
+    );
+    assert!(
+        !watching.iter().any(|frame| frame["frame"] == "directory"),
+        "{watching:?}"
+    );
+    silent(&mut lister, &held);
+    silent(&mut watcher, &held);
+    held.release();
+    let listed = until_response(&mut lister, 1);
+    let rows = listed.last().unwrap()["outcome"]["ok"]["rows"].clone();
+    assert!(rows.to_string().contains(&session), "{listed:?}");
+    let snapshot = loop {
+        let next = frame(&mut watcher);
+        if next["frame"] == "directory" {
+            break next;
+        }
+    };
+    assert_eq!(snapshot["snapshot"], true, "{snapshot}");
+    assert!(
+        snapshot["rows"].to_string().contains(&session),
+        "{snapshot}"
+    );
     stop(&mut host);
 }

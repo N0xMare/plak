@@ -16,4 +16,10 @@ pub(crate) fn record_handoff_budget(
 ) {
 }
 
-pub(crate) const fn startup_held() {}
+pub(crate) fn startup_held(_stopped: &dyn Fn() -> bool) {}
+
+pub(crate) const fn directory_projection_held() {}
+
+pub(crate) const fn startup_failure() -> Option<String> {
+    None
+}

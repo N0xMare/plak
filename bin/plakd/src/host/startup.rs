@@ -4,6 +4,7 @@
 //! Until they do, every open, creation and runner-dependent lifecycle change
 //! waits here, and an attach is served from saved history.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -26,6 +27,8 @@ enum Phase {
 pub(crate) struct Startup {
     phase: Mutex<Phase>,
     settled: Condvar,
+    /// Set by any stop of the host, also after a completed start.
+    stopping: AtomicBool,
 }
 
 impl Startup {
@@ -33,6 +36,7 @@ impl Startup {
         Self {
             phase: Mutex::new(Phase::Starting),
             settled: Condvar::new(),
+            stopping: AtomicBool::new(false),
         }
     }
 
@@ -42,6 +46,7 @@ impl Startup {
         Self {
             phase: Mutex::new(Phase::Ready),
             settled: Condvar::new(),
+            stopping: AtomicBool::new(false),
         }
     }
 
@@ -124,7 +129,14 @@ impl Startup {
     /// completion that has not been announced yet is not announced at all.
     /// A completed start is left to the host's own stop.
     pub(super) fn stop(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
         self.settle(Phase::Stopped);
+    }
+
+    /// Whether the host is stopping, however the stop began, or the start
+    /// failed: no further startup step may run.
+    pub(super) fn ended(&self) -> bool {
+        self.stopping.load(Ordering::SeqCst) || self.failure().is_some()
     }
 
     fn settle(&self, next: Phase) {
@@ -180,6 +192,10 @@ mod tests {
         assert!(waiter.join().unwrap().is_ok());
         assert!(startup.deferred(&local()).is_none());
         assert!(!startup.complete(|| unreachable!("completion is announced once")));
+        assert!(!startup.ended());
+        // A stop after the start keeps work admitted but ends startup steps.
+        startup.stop();
+        assert!(startup.ended() && startup.is_ready());
     }
 
     #[test]
@@ -204,6 +220,7 @@ mod tests {
             } else {
                 startup.stop();
             }
+            assert!(startup.ended());
             assert!(waiter.join().unwrap().is_err_and(|f| reconciling(&f)));
             assert!(!startup.complete(|| panic!("a stopped start announces nothing")));
         }
