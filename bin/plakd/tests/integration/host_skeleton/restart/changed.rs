@@ -157,7 +157,15 @@ fn paired_check_reopen_reaches_a_prestarted_candidate_daemon_by_explicit_command
             .stdout(Stdio::null())
             .status()
             .unwrap();
-        assert!(started.success());
+        let logs: Vec<_> = std::fs::read_dir(home.join("runner/builds"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| {
+                std::fs::read_to_string(entry.path().join("serve.log")).unwrap_or_default()
+            })
+            .collect();
+        assert!(started.success(), "{}: {logs:?}", home.display());
     };
     prestart(&paired.runner.home);
     assert_eq!(inventory(), 2);
@@ -172,8 +180,9 @@ fn paired_check_reopen_reaches_a_prestarted_candidate_daemon_by_explicit_command
 
     // An explicit command reaching another runner's candidate daemon is
     // refused by the pinned identity, not trusted for being named.
+    // One byte longer than the paired home: socket paths are near their limit.
     let other = paired.runner.home.with_file_name(format!(
-        "{}-other",
+        "{}o",
         paired.runner.home.file_name().unwrap().to_str().unwrap()
     ));
     std::fs::create_dir_all(other.join("runner")).unwrap();
