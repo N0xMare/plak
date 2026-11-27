@@ -327,10 +327,12 @@ async fn sigkill_additive_admission_revision_preserves_the_current_store() -> Te
         let codec_backup = path.with_extension("pre-codec-bootstrap.sqlite3");
         let codec_bytes = fs::read(&codec_backup)?;
         let store = SqliteSessionStore::open(&path)?;
-        let lease = lease(&store).await?;
+        let initial_lease = lease(&store).await?;
         let prior = store.load_branch(selector()?, "reopen").await?;
-        let committed = store.commit(commit_request(&prior, lease.clone())?).await?;
-        store.release(lease).await?;
+        let committed = store
+            .commit(commit_request(&prior, initial_lease.clone())?)
+            .await?;
+        store.release(initial_lease).await?;
         store.shutdown().await?;
         drop(store);
         super::remove_admission_revision(&Connection::open(&path)?)?;
