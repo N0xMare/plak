@@ -467,13 +467,15 @@ fn crash_seed(base: u128) -> TestResult<CrashSeed> {
 }
 
 #[tokio::test]
-async fn cold_start_query_count_is_constant_for_large_authoritative_history() -> TestResult {
+async fn full_audit_query_count_is_constant_for_large_authoritative_history() -> TestResult {
     const COMMITS: u64 = 128;
     // rusqlite validates each of the five shape PRAGMAs through pragma_list,
     // adding two traced statements per PRAGMA, independent of history size.
     const PRAGMA_VALIDATION_QUERIES: u64 = 2 * 5;
-    // One marker probe and one retained-window probe per payload codec.
-    const CODEC_ADMISSION_QUERIES: u64 = 6;
+    // Both indexed and raw readability checks use a marker, object and feed query.
+    const READABILITY_QUERIES: u64 = 2 * 3;
+    // Read the writer's counts and compare them with the admission inventory.
+    const INVENTORY_QUERIES: u64 = 2;
     let database = CrashDatabase::new()?;
     let seed = crash_seed(81_000)?;
     let store = SqliteSessionStore::open(&database.path)?;
@@ -528,8 +530,8 @@ async fn cold_start_query_count_is_constant_for_large_authoritative_history() ->
     connection.trace_v2(TraceEventCodes::empty(), None::<fn(TraceEvent<'_>)>)?;
     let query_count = STARTUP_QUERY_COUNT.load(Ordering::Relaxed);
     assert!(
-        query_count <= 32 + PRAGMA_VALIDATION_QUERIES + CODEC_ADMISSION_QUERIES,
-        "cold-start authority validation executed {query_count} statements for {COMMITS} commits"
+        query_count <= 32 + PRAGMA_VALIDATION_QUERIES + READABILITY_QUERIES + INVENTORY_QUERIES,
+        "full audit executed {query_count} statements for {COMMITS} commits"
     );
     assert_eq!(head.revision().get(), COMMITS);
     Ok(())

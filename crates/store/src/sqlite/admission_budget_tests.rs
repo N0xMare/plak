@@ -151,7 +151,7 @@ fn populate(b: &mut Backend) -> TestResult {
     Ok(())
 }
 
-fn measure(large: bool) -> TestResult<Metrics> {
+fn measure(large: bool) -> TestResult<(Metrics, Metrics)> {
     let dir = tempfile::tempdir()?;
     let mut b = gc_tests::backend(&dir.path().join("runtime.sqlite3"))?;
     if large {
@@ -176,6 +176,8 @@ fn measure(large: bool) -> TestResult<Metrics> {
     b.connection
         .trace_v2(TraceEventCodes::SQLITE_TRACE_PROFILE, Some(profile))?;
     METRICS.with(|metrics| *metrics.borrow_mut() = Metrics::default());
+    admit_open(&b.connection)?;
+    let startup = METRICS.with(|metrics| std::mem::take(&mut *metrics.borrow_mut()));
     assert!(
         usage(&b.connection, b.limits)?
             .ordinary_exhausted()
@@ -188,13 +190,20 @@ fn measure(large: bool) -> TestResult<Metrics> {
     )?;
     b.connection
         .trace_v2(TraceEventCodes::empty(), None::<fn(TraceEvent<'_>)>)?;
-    Ok(METRICS.with(|metrics| metrics.borrow().clone()))
+    Ok((startup, METRICS.with(|metrics| metrics.borrow().clone())))
 }
 
 #[test]
 fn large_store_admission_has_equal_statement_and_vm_budgets() -> TestResult {
-    let small = measure(false)?;
-    let large = measure(true)?;
+    let (small_open, small) = measure(false)?;
+    let (large_open, large) = measure(true)?;
+    assert_eq!(
+        small_open, large_open,
+        "startup SQL work grew with retained history or GC backlog"
+    );
+    assert!(large_open.statements > 0);
+    assert_eq!(large_open.payload_reads, 0);
+    assert_eq!(large_open.recursive_or_sum, 0);
     assert_eq!(
         small, large,
         "critical-lane SQL work grew with retained history or GC backlog"
