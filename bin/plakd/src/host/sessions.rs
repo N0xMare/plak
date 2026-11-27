@@ -328,18 +328,19 @@ impl ProductSessions {
                 .resume_after_loss
                 != Some(crate::product_config::ResumeAfterLoss::Hold);
         let store = self.services.session_records()?;
+        let mut entries = self
+            .with_product(|product| product.continuation_candidates())
+            .map_err(CliFailure::new)?;
         let paths = self.services.paths()?;
-        // Its own store: the inventory runs beside attaches, which resolve
-        // their nodes through the shared metadata handle.
-        let mut product =
-            ProductStore::open(paths).map_err(|error| CliFailure::new(error.to_string()))?;
-        let mut entries = product.continuation_candidates().map_err(CliFailure::new)?;
         for tree_id in self
             .tree
             .handoff_candidate_tree_ids()
             .map_err(|error| CliFailure::new(error.detail))?
         {
-            if let Some(session) = product.head_of_tree(&tree_id).map_err(CliFailure::new)? {
+            if let Some(session) = self
+                .with_product(|product| product.head_of_tree(&tree_id))
+                .map_err(CliFailure::new)?
+            {
                 entries.push(session);
             }
         }
@@ -353,8 +354,8 @@ impl ProductSessions {
             if !record.archived
                 && (plakous_hosted::runtime::root_standing(store.as_ref(), &id)
                     .is_ok_and(|standing| owes_open(standing, continue_losses))
-                    || (product
-                        .head_of_tree(&record.node.tree_id)
+                    || (self
+                        .with_product(|product| product.head_of_tree(&record.node.tree_id))
                         .map_err(CliFailure::new)?
                         .as_deref()
                         == Some(id.as_str())

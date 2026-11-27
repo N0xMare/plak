@@ -53,7 +53,14 @@ fn production_predecessor_restart_upgrade_preserves_live_work() {
     let (old_facts, new_facts) = probe_pair(&fixture, &old, &candidate);
     let new_id = binary_id(&fixture, &candidate);
     if old_facts["state_key"] != new_facts["state_key"] {
-        let mut source = start_host(&fixture, &old, &paired, &socket, &workspace);
+        let mut source = start_host(
+            &fixture,
+            &old,
+            Startup::Predecessor,
+            &paired,
+            &socket,
+            &workspace,
+        );
         let refusal = fixture
             .base_command_from(&candidate)
             .arg("host")
@@ -84,7 +91,14 @@ fn production_predecessor_restart_upgrade_preserves_live_work() {
     assert_eq!(gateway_check(&fixture, &candidate), old_service);
     let mut local = start_local_runner(&fixture, &old);
     let runner_pids = (local.id(), paired.daemon.id());
-    let mut host = start_host(&fixture, &old, &paired, &socket, &workspace);
+    let mut host = start_host(
+        &fixture,
+        &old,
+        Startup::Predecessor,
+        &paired,
+        &socket,
+        &workspace,
+    );
     let pid = host.child.as_ref().unwrap().id();
     let old_wire = source_wire_version(&fixture, &old);
     let mut client = Client::connect_at_version(&host.socket, old_wire);
@@ -123,7 +137,14 @@ fn production_predecessor_restart_upgrade_preserves_live_work() {
         .args(["store", "backup", "--stopped"])
         .arg(&backup));
     assert_private_backup(&backup);
-    let mut host = start_host(&fixture, &candidate, &paired, &socket, &workspace);
+    let mut host = start_host(
+        &fixture,
+        &candidate,
+        Startup::Reported,
+        &paired,
+        &socket,
+        &workspace,
+    );
     let successor_pid = host.child.as_ref().unwrap().id();
     assert_ne!(successor_pid, pid);
     assert_eq!(gateway_check(&fixture, &candidate), old_service);
@@ -511,9 +532,18 @@ fn start_local_runner(fixture: &Fixture, image: &Path) -> Child {
     runner
 }
 
+/// Whether the image reports its startup inventories; the pinned
+/// predecessor reads them before it serves and logs no completion.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Startup {
+    Predecessor,
+    Reported,
+}
+
 fn start_host(
     fixture: &Fixture,
     image: &Path,
+    startup: Startup,
     paired: &Paired,
     socket: &Path,
     workspace: &Path,
@@ -527,7 +557,7 @@ fn start_host(
     )
     .unwrap();
     std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
-    await_serving_host(spawn_host(
+    let process = spawn_host(
         fixture
             .base_command_from(image)
             .current_dir(workspace)
@@ -540,7 +570,11 @@ fn start_host(
                 "--ui",
             ])
             .arg(fixture.root.join("ui")),
-    ))
+    );
+    match startup {
+        Startup::Reported => await_serving_host(process),
+        Startup::Predecessor => await_serving_predecessor(process),
+    }
     .unwrap()
 }
 

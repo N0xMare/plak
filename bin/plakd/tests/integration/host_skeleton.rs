@@ -199,7 +199,19 @@ fn serving_host(process: (Child, mpsc::Receiver<String>)) -> Option<Host> {
     await_serving_host(process).ok()
 }
 
-fn await_serving_host((child, lines): (Child, mpsc::Receiver<String>)) -> Result<Host, String> {
+fn await_serving_host(process: (Child, mpsc::Receiver<String>)) -> Result<Host, String> {
+    let host = await_serving_predecessor(process)?;
+    // The socket serves before the start's inventories; fixtures act on a
+    // host that has finished starting unless they hold the start themselves.
+    await_startup(&host.lines)?;
+    Ok(host)
+}
+
+/// [`await_serving_host`] for an image that reads its startup inventories
+/// before it serves and reports no completion.
+fn await_serving_predecessor(
+    (child, lines): (Child, mpsc::Receiver<String>),
+) -> Result<Host, String> {
     let mut last = String::new();
     let line = loop {
         let line = lines
@@ -217,9 +229,6 @@ fn await_serving_host((child, lines): (Child, mpsc::Receiver<String>)) -> Result
         .and_then(|rest| rest.split(" (host ").next())
         .unwrap_or_else(|| panic!("start line: {line}"));
     assert!(line.contains(", instance "), "{line}");
-    // The socket serves before the start's inventories; fixtures act on a
-    // host that has finished starting unless they hold the start themselves.
-    await_startup(&lines)?;
     Ok(Host {
         child: Some(child),
         socket: PathBuf::from(socket),
