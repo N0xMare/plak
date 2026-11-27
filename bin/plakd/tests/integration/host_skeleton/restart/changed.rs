@@ -245,6 +245,26 @@ fn local_and_paired_background_jobs_survive_a_changed_triple_restart() {
     assert_eq!(Some(remote.foreground.1), paired.runner.pid());
     assert_ne!(local.foreground.1, remote.foreground.1);
 
+    // The candidate's daemon starts beside the incumbent's while the source
+    // serves and its promoted job runs; the incumbent keeps the job.
+    let started = image_command(&fixture, &image)
+        .envs(candidate_environment(&image))
+        .env("PLAK_HOME", &paired.runner.home)
+        .args(["runner", "connect", "--stdio"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .status()
+        .unwrap();
+    assert!(started.success());
+    assert_eq!(
+        std::fs::read_dir(paired.runner.home.join("runner/builds"))
+            .unwrap()
+            .count(),
+        2
+    );
+    assert_eq!(Some(remote.foreground.1), paired.runner.pid());
+    assert!(runner::alive(remote.background.0) && runner::alive(remote.foreground.0));
+
     paired.advance(&image);
     destination_script(&fixture);
     drop(client);
