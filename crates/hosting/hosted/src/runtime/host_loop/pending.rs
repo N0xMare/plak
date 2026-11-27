@@ -12,7 +12,7 @@
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::PendingContinuation;
 
-use super::{Instant, RootActor, TREE_OBSERVE_INTERVAL, commit_session_update};
+use super::{Instant, RootActor, TREE_OBSERVE_INTERVAL};
 use crate::runtime::operator_attention::{
     AttentionReason, PendingTreeWork, SessionAttention, prepared_wake_count,
 };
@@ -371,17 +371,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         {
             return;
         }
-        let stored = row.clone();
-        let _ = commit_session_update(
+        let _ = self.role.events.notice(row);
+        let _ = crate::runtime::events::commit_notice_intents(
+            &self.role.events,
             &*self.role.config.store,
             &self.role.config.home,
+            self.role.log.as_ref(),
             &mut self.role.config.session,
-            |session| {
-                session.record_notice(stored);
-                true
-            },
+            false,
         );
-        let _ = self.role.events.send(ContentEvent::Row(row));
     }
 }
 

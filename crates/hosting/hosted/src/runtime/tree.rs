@@ -696,7 +696,7 @@ pub(super) fn publish_notice_once<P: plakous_host_protocol::ProtocolExtension>(
     })?;
     if committed {
         notice_ids.insert(id.into());
-        let _ = events.send(ContentEvent::Row(row));
+        let _ = events.send_committed_notice(id, row);
     }
     Ok(committed)
 }

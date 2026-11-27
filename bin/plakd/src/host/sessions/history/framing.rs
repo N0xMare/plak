@@ -29,6 +29,7 @@ pub(crate) struct LiveTail {
     pub(crate) applied: Option<FeedSeq>,
     pub(crate) upserts: Vec<TranscriptItem>,
     pub(crate) lengths: BTreeMap<RowKey, u64>,
+    pub(super) notice_ids: Vec<String>,
 }
 
 impl LiveTail {
@@ -42,6 +43,7 @@ impl LiveTail {
             applied: Some(capture.applied),
             upserts: capture.items,
             lengths,
+            notice_ids: capture.notice_ids,
         }
     }
 }

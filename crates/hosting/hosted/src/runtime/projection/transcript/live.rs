@@ -65,6 +65,18 @@ impl LiveRows {
         key
     }
 
+    pub(super) fn notice(&mut self, key: RowKey, row: &TranscriptRow) -> LiveChange {
+        self.last_issued = self.last_issued.max(Some(key));
+        self.assistant = None;
+        LiveChange {
+            upserts: vec![TranscriptItem {
+                key,
+                row: crate::sessions::bound_row(row.clone()),
+            }],
+            deletes: Vec::new(),
+        }
+    }
+
     pub(super) fn retain(&mut self, rows: &BTreeMap<RowKey, TranscriptRow>) {
         self.calls.retain(|_, key| rows.contains_key(key));
         self.settled.retain(|_, keys| {

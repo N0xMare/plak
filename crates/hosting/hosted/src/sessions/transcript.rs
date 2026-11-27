@@ -312,6 +312,10 @@ impl ProductTranscript {
             .map(|(key, row)| (self.notice_ids.get(key).map(String::as_str), row))
     }
 
+    pub(crate) fn pending_notice_keys(&self) -> impl Iterator<Item = (RowKey, &str)> {
+        self.notice_ids.iter().map(|(&key, id)| (key, id.as_str()))
+    }
+
     pub(crate) fn pending_notice_items(&self) -> Vec<(TranscriptItem, Option<String>)> {
         self.notice_keys
             .iter()

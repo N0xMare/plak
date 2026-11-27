@@ -40,6 +40,52 @@ fn target() -> BaselineTarget {
     }
 }
 
+#[test]
+fn a_baseline_captured_before_notice_settlement_keeps_its_provisional_key_only() {
+    let fixture = Fixture::new();
+    let mut store = ProductStore::open(&fixture.paths).unwrap();
+    let mut record = store.load(&fixture.id).unwrap();
+    let row = TranscriptRow::info(
+        plakous_host_protocol::views::transcript::NoticeScope::Session,
+        "same wording",
+    );
+    record.record_notice(row.clone());
+    record.record_notice(row.clone());
+    store.commit(&mut record).unwrap();
+    let intents = store.load_intents(&fixture.id).unwrap();
+    let [committing, earlier] = intents.notices.as_slice() else {
+        panic!("two durable notices");
+    };
+    let preview = RowKey::new(1 << 63, Lane::Product, 0);
+    let live = LiveTail {
+        upserts: vec![TranscriptItem { key: preview, row }],
+        notice_ids: vec![committing.notice_id.clone()],
+        ..LiveTail::default()
+    };
+    transcript_history::read(&fixture.paths, &fixture.id, |history| {
+        let turns = Turns {
+            starts: vec![],
+            retained_from: 0,
+            older_from: None,
+        };
+        let page = first_with_live(&history, &turns, &live)?;
+        let frames = framing::baseline(page, target(), live)?;
+        let [HostFrameV13::Snapshot(baseline)] = frames.as_slice() else {
+            panic!("one baseline page");
+        };
+        assert_eq!(
+            baseline
+                .items
+                .iter()
+                .map(|item| item.key)
+                .collect::<Vec<_>>(),
+            [earlier.key(), preview]
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
 fn cursor_of(frames: &[HostFrameV13]) -> HistoryCursor {
     let HostFrameV13::Snapshot(baseline) = &frames[1] else {
         panic!("no baseline")
@@ -286,6 +332,7 @@ fn baseline_parts_keep_one_turn_order_and_merge_live_rows_by_key() {
                 row: TranscriptRow::assistant(&appended),
             }],
             lengths: [(live_key, appended.len() as u64)].into(),
+            ..LiveTail::default()
         };
         let parts = framing::baseline(page, target(), live)?;
         assert_eq!(parts.len(), 2);

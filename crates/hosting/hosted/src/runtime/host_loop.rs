@@ -456,6 +456,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             &self.role.config.session.id,
             views.cursor,
             snapshot,
+            Some(&self.role.config.session.transcript),
         );
     }
 

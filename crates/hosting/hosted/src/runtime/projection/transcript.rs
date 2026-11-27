@@ -62,6 +62,7 @@ pub(in crate::runtime) struct Presentations {
     keyed_root: bool,
     root_applied: Option<(String, FeedSeq)>,
     root_overrides: BTreeSet<RowKey>,
+    root_notices: BTreeMap<String, RowKey>,
     // One root and at most the one agent this face serves. Revisions remain
     // monotonic across replacements, so a retired serve cannot share a baseline.
     states: BTreeMap<TranscriptScope, TranscriptState>,
@@ -121,6 +122,7 @@ impl Presentations {
         Some(super::super::RootHistoryCapture {
             applied: *applied,
             revision: state.revision(),
+            notice_ids: self.root_notice_ids(),
             items: items
                 .into_iter()
                 .map(|(&key, row)| TranscriptItem {
@@ -273,6 +275,10 @@ impl Presentations {
             .entry(scope.clone())
             .or_default()
             .reset(state.items());
+        if scope == TranscriptScope::Root {
+            self.root_notices
+                .retain(|_, key| state.items().contains_key(key));
+        }
         self.states.insert(scope, state);
         sink.send(HostEvent::PresentationSnapshot(snapshot)).is_ok()
     }
@@ -321,9 +327,13 @@ impl Presentations {
             return false;
         }
         self.live
-            .entry(snapshot.scope)
+            .entry(snapshot.scope.clone())
             .or_default()
             .reset(state.items());
+        if snapshot.scope == TranscriptScope::Root {
+            self.root_notices
+                .retain(|_, key| state.items().contains_key(key));
+        }
         // A refusal is remembered by the mailbox. Keep the current source
         // baseline, so overflow or a consumer's resync gets the complete view.
         let scope = patch.scope.clone();
@@ -375,6 +385,7 @@ impl Presentations {
 
     pub(in crate::runtime) fn clear(&mut self) {
         self.mark_root_publication("", None);
+        self.root_notices.clear();
         self.states.clear();
         self.live.clear();
         self.repairs.clear();
@@ -452,6 +463,83 @@ impl Presentations {
             {
                 snapshot.items.insert(at, notice.clone());
             }
+        }
+    }
+
+    pub(in crate::runtime) fn observe_notice<P: ProtocolExtension>(
+        &mut self,
+        id: &str,
+        key: RowKey,
+        row: &TranscriptRow,
+        sink: &HostEventSender<P>,
+    ) -> bool {
+        let scope = TranscriptScope::Root;
+        self.states.entry(scope.clone()).or_default();
+        let change = self.live.entry(scope.clone()).or_default().notice(key, row);
+        if self.keyed_root {
+            self.root_notices.insert(id.to_owned(), key);
+        }
+        self.apply_live_change(scope, change, sink)
+    }
+
+    pub(in crate::runtime) fn root_notice_ids(&self) -> Vec<String> {
+        self.root_notices.keys().cloned().collect()
+    }
+
+    pub(in crate::runtime) fn forget_root_notice(&mut self, id: &str) {
+        self.root_notices.remove(id);
+    }
+
+    pub(in crate::runtime) fn align_root_notices<'a>(
+        &self,
+        snapshot: &mut PresentationSnapshot,
+        pending: impl Iterator<Item = (RowKey, &'a str)>,
+    ) {
+        if self.root_notices.is_empty() {
+            return;
+        }
+        let mut changed = false;
+        for (internal, id) in pending {
+            if let Some(&live) = self.root_notices.get(id)
+                && internal != live
+                && let Some(item) = snapshot.items.iter_mut().find(|item| item.key == internal)
+            {
+                item.key = live;
+                changed = true;
+            }
+        }
+        if changed {
+            snapshot.items.sort_by_key(|item| item.key);
+        }
+    }
+
+    pub(in crate::runtime) fn settle_root_notices<P: ProtocolExtension>(
+        &mut self,
+        notices: Vec<(String, RowKey)>,
+        sink: &HostEventSender<P>,
+    ) {
+        let mut change = live::LiveChange {
+            upserts: Vec::new(),
+            deletes: Vec::new(),
+        };
+        let Some(state) = self.states.get(&TranscriptScope::Root) else {
+            return;
+        };
+        for (notice_id, canonical) in notices {
+            if let Some(&key) = self.root_notices.get(&notice_id)
+                && let Some(row) = state.items().get(&key)
+            {
+                change.deletes.push(key);
+                change.upserts.push(TranscriptItem {
+                    key: canonical,
+                    row: row.clone(),
+                });
+            }
+        }
+        if !change.deletes.is_empty() {
+            change.deletes.sort_unstable();
+            change.upserts.sort_by_key(|item| item.key);
+            let _ = self.apply_live_change(TranscriptScope::Root, change, sink);
         }
     }
 
@@ -587,6 +675,8 @@ impl Presentations {
             return false;
         }
         if self.keyed_root && scope == TranscriptScope::Root {
+            self.root_notices
+                .retain(|_, key| state.items().contains_key(key));
             self.root_overrides.extend(
                 patch
                     .upserts

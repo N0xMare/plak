@@ -43,7 +43,7 @@ pub fn publish_root_projection<P: plakous_host_protocol::ProtocolExtension>(
     applied: plakous::sessions::feed::FeedSeq,
     snapshot: plakous_host_protocol::views::PresentationSnapshot,
 ) -> bool {
-    sender.publish_root_projection(session, applied, snapshot)
+    sender.publish_root_projection(session, applied, snapshot, None)
 }
 
 /// Republish the real reducer's current canonical and live presentation.

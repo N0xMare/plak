@@ -51,6 +51,54 @@ fn opening(events: &ObservationReceiver, previous: Option<(RowKey, u64)>) -> Row
 }
 
 #[test]
+fn settling_an_operator_notice_replaces_only_its_provisional_identity() {
+    let (sink, events) = observation_channel::<Core>();
+    let mut publisher = Presentations::keyed_root();
+    assert!(publisher.snapshot(snapshot(TranscriptScope::Root, &[]), &sink));
+    let HostEvent::PresentationSnapshot(initial) = events.try_recv().unwrap() else {
+        panic!("initial baseline");
+    };
+    let mut folded = TranscriptState::default();
+    folded.replace(initial).unwrap();
+    let row = TranscriptRow::info(NoticeScope::Session, "same wording");
+    let pending = crate::sessions::provisional_key();
+    let other = crate::sessions::provisional_key();
+    assert!(publisher.observe_notice("committing", pending, &row, &sink));
+    assert!(publisher.observe_notice("unsaved", other, &row, &sink));
+    folded.apply(patch(events.try_recv().unwrap())).unwrap();
+    let key = RowKey::new(9, Lane::Product, 0);
+    publisher.settle_root_notices(vec![("committing".into(), key)], &sink);
+    let replacement = patch(events.try_recv().unwrap());
+    assert_eq!(replacement.deletes, [pending]);
+    assert_eq!(
+        replacement.upserts,
+        [TranscriptItem {
+            key,
+            row: row.clone()
+        }]
+    );
+    folded.apply(replacement).unwrap();
+    assert!(publisher.resync(&TranscriptScope::Root, &sink));
+    let HostEvent::PresentationSnapshot(repaired) = events.try_recv().unwrap() else {
+        panic!("resync baseline");
+    };
+    assert_eq!(
+        repaired.items,
+        [
+            TranscriptItem {
+                key,
+                row: row.clone()
+            },
+            TranscriptItem { key: other, row }
+        ]
+    );
+    assert_eq!(
+        folded.items().keys().copied().collect::<Vec<_>>(),
+        [key, other]
+    );
+}
+
+#[test]
 fn keyed_runs_open_before_streaming_and_reconcile_at_interleaving() {
     let (channel, events) = observation_channel();
     let (sender, root) = Sender::over_keyed_root(channel);

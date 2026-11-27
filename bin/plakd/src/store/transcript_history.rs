@@ -301,6 +301,15 @@ impl<'a> History<'a> {
         Ok(items)
     }
 
+    pub(crate) fn notice_keys(
+        &self,
+        ids: &[String],
+    ) -> Result<impl Iterator<Item = RowKey>, HistoryError> {
+        super::views::intents::operator_notice_keys(self.connection, &self.line.session, ids)
+            .map(|keys| keys.into_iter().map(|(_, key)| key))
+            .map_err(unavailable)
+    }
+
     pub(crate) fn row(&self, key: RowKey) -> Result<TranscriptRow, HistoryError> {
         if key == MARKER && self.prune.truncated {
             return Ok(TranscriptRow::Truncated);

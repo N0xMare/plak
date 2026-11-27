@@ -26,6 +26,8 @@ pub struct RootHistoryCapture {
     pub revision: u64,
     /// Provisional rows and live overrides of durable rows.
     pub items: Vec<TranscriptItem>,
+    /// Durable intent identities of any provisional operator notices still shown.
+    pub notice_ids: Vec<String>,
 }
 
 /// The requested slice of one provisional row's rendered text.
@@ -107,8 +109,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         session: &str,
         applied: FeedSeq,
         snapshot: PresentationSnapshot,
+        transcript: Option<&crate::sessions::ProductTranscript>,
     ) -> bool {
-        self.root_projection(session, Some(applied), snapshot, false)
+        self.root_projection(session, Some(applied), snapshot, transcript, false)
     }
 
     pub(crate) fn replace_root_session(&self, session: &crate::sessions::SessionRecord) -> bool {
@@ -116,6 +119,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             &session.id,
             session.transcript.applied(),
             super::logging::project_session_snapshot(session),
+            Some(&session.transcript),
             true,
         )
     }
@@ -124,7 +128,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         &self,
         session: &str,
         applied: Option<FeedSeq>,
-        snapshot: PresentationSnapshot,
+        mut snapshot: PresentationSnapshot,
+        transcript: Option<&crate::sessions::ProductTranscript>,
         replace: bool,
     ) -> bool {
         if snapshot.scope != TranscriptScope::Root {
@@ -134,6 +139,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             .presentations
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        if let Some(transcript) = transcript {
+            presentations.align_root_notices(&mut snapshot, transcript.pending_notice_keys());
+        }
         let published = if replace {
             presentations.snapshot(snapshot, &self.inner)
         } else {

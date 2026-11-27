@@ -13,7 +13,7 @@ use std::path::Path;
 
 use crate::sessions::SessionRecord;
 use crate::sessions::projector::{
-    ProductIntents, ProjectionCommit, SessionViews, Submission, ViewWrites,
+    ProductIntents, ProjectionCommit, RowKey, SessionViews, Submission, ViewWrites,
 };
 
 mod refusal;
@@ -260,6 +260,27 @@ pub trait SessionRecordStore: Send + Sync {
     /// # Errors
     /// Unreadable store or notice identity.
     fn load_notice_ids(&self, id: &str) -> Result<HashSet<String>, String>;
+
+    /// Canonical keys of the requested operator notices that have committed.
+    ///
+    /// # Errors
+    /// Unreadable store or invalid key.
+    fn load_notice_keys(
+        &self,
+        id: &str,
+        notice_ids: &[String],
+    ) -> Result<Vec<(String, RowKey)>, String> {
+        Ok(self
+            .load_intents(id)?
+            .notices
+            .into_iter()
+            .filter(|notice| notice_ids.contains(&notice.notice_id))
+            .map(|notice| {
+                let key = notice.key();
+                (notice.notice_id, key)
+            })
+            .collect())
+    }
 
     /// The joined wake suppression and pause, without transcript or notice bodies.
     ///

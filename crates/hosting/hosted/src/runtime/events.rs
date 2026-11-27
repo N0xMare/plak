@@ -75,22 +75,42 @@ pub(super) fn commit_notice_intents<P: plakous_host_protocol::ProtocolExtension>
     let mut rows = Vec::new();
     for kept in events.take_notice_intents() {
         match kept.session_id {
-            Some(published_for) if *published_for != *session.id => log_event(
-                log,
-                &session.id,
-                SessionEvent::new("transcript.notice_dropped")
-                    .str("published_for", published_for.to_string()),
-            ),
-            _ => rows.push(kept.row),
+            Some(published_for) if *published_for != *session.id => {
+                events.forget_notice(&kept.id);
+                log_event(
+                    log,
+                    &session.id,
+                    SessionEvent::new("transcript.notice_dropped")
+                        .str("published_for", published_for.to_string()),
+                );
+            }
+            _ => rows.push((kept.id, kept.row)),
         }
     }
-    if rows.is_empty() && (!retry_pending || session.transcript.pending_notices().is_empty()) {
-        return true;
+    let save =
+        !rows.is_empty() || (retry_pending && !session.transcript.pending_notices().is_empty());
+    for (id, row) in rows {
+        session.transcript.record_named_notice(id, row);
     }
-    for row in rows {
-        session.record_notice(row);
+    if save && commit_session_update(store, home, session, |_| true).is_err() {
+        return false;
     }
-    commit_session_update(store, home, session, |_| true).is_ok()
+    let notice_ids = events
+        .presentations
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .root_notice_ids();
+    if !notice_ids.is_empty() && session.store_revision != 0 {
+        let Ok(keys) = store.load_notice_keys(&session.id, &notice_ids) else {
+            return false;
+        };
+        events
+            .presentations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .settle_root_notices(keys, &events.inner);
+    }
+    true
 }
 
 pub(super) fn apply_event<P: plakous_host_protocol::ProtocolExtension>(

@@ -52,6 +52,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
             &self.host.session.id,
             views.cursor,
             super::super::logging::project_keyed_snapshot(items),
+            Some(&transcript),
         ) {
             self.steering_projection_due = false;
         }

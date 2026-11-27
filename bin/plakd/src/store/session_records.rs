@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use plakous_hosted::sessions::projector::{
-    ProductIntents, ProjectionCommit, SessionViews, ViewWrites,
+    ProductIntents, ProjectionCommit, RowKey, SessionViews, ViewWrites,
 };
 
 #[cfg(any(test, feature = "test-support"))]
@@ -311,6 +311,14 @@ impl SessionRecordStore for SqliteSessionStore {
 
     fn load_notice_ids(&self, id: &str) -> Result<std::collections::HashSet<String>, String> {
         self.with_store(|store| store.load_notice_ids(id))
+    }
+
+    fn load_notice_keys(
+        &self,
+        id: &str,
+        notice_ids: &[String],
+    ) -> Result<Vec<(String, RowKey)>, String> {
+        self.with_store(|store| store.load_notice_keys(id, notice_ids))
     }
 
     fn load_wake_controls(

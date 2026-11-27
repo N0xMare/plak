@@ -571,6 +571,135 @@ fn the_stdio_bridge_relays_the_client_handshake_and_leaves_a_busy_root_running_o
 }
 
 #[test]
+fn a_stopped_session_has_one_canonical_notice_in_the_fresh_wire_baseline() {
+    use plakous_host_protocol::SessionObservation;
+    use plakous_host_protocol::views::transcript::{Lane, TranscriptRow, TranscriptScope};
+    use plakous_hosted::runtime::RootTranscript;
+
+    let stopped = |row: &TranscriptRow| matches!(row, TranscriptRow::Notice(notice) if notice.text.starts_with("stopped:"));
+    let Some(fixture) = fixture() else { return };
+    fixture.write_script(&json!({"version": 1, "steps": [{"output": {"text": ANSWER}}]}));
+    let mut host = start(&fixture);
+    let mut bridge = Bridge::start(&fixture);
+    bridge.hello(WIRE_VERSION);
+    assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        bridge.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("no created session");
+    };
+    let Outcome::Ok(Answer::Attached { attachment }) = bridge.request(2, Op::Attach { node })
+    else {
+        panic!("not attached");
+    };
+    assert_eq!(
+        bridge.request(
+            3,
+            Op::Intent {
+                attachment,
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
+                intent: SessionIntent::Prompt(Draft::from("one bridged turn")),
+                blobs: Vec::new(),
+            }
+        ),
+        Outcome::Ok(Answer::Accepted { duplicate: false })
+    );
+    let mut saw_answer = false;
+    loop {
+        if let HostFrame::Event { observation, .. } = bridge.next() {
+            match observation {
+                SessionObservation::TranscriptPatch(patch) => {
+                    saw_answer |= patch
+                        .upserts
+                        .iter()
+                        .any(|item| item.row.text() == Some(ANSWER));
+                }
+                SessionObservation::SetBusy(false) if saw_answer => break,
+                _ => {}
+            }
+        }
+    }
+
+    bridge.send(&ClientFrame::Request {
+        id: 4,
+        op: Op::StopSession { session },
+    });
+    let (mut answered, mut settled) = (false, false);
+    let mut live = std::collections::BTreeSet::new();
+    let mut apply_stop_patch =
+        |patch: plakous_host_protocol::views::transcript::TranscriptPatch| {
+            for key in patch.deletes {
+                live.remove(&key);
+            }
+            let mut canonical = false;
+            for item in patch.upserts.into_iter().filter(|item| stopped(&item.row)) {
+                canonical |= !RootTranscript::is_provisional(item.key);
+                live.insert(item.key);
+            }
+            canonical
+        };
+    // A resync may supersede a queued patch. See the live settlement first,
+    // then verify the independently rebuilt baseline.
+    while !answered || !settled {
+        match bridge.next() {
+            HostFrame::Response { id: 4, outcome } => {
+                assert_eq!(
+                    outcome,
+                    Outcome::Ok(Answer::Stopped {
+                        runner_pending: false
+                    })
+                );
+                answered = true;
+            }
+            HostFrame::Event {
+                observation: SessionObservation::TranscriptPatch(patch),
+                ..
+            } => {
+                settled |= apply_stop_patch(patch);
+            }
+            _ => {}
+        }
+    }
+    bridge.send(&ClientFrame::Request {
+        id: 5,
+        op: Op::Intent {
+            attachment,
+            client_id: None,
+            intent: SessionIntent::ResyncTranscript {
+                scope: TranscriptScope::Root,
+            },
+            blobs: Vec::new(),
+        },
+    });
+    let mut keys = Vec::new();
+    loop {
+        if let HostFrame::Snapshot(page) = bridge.next()
+            && page.scope == TranscriptScope::Root
+        {
+            keys.extend(
+                page.items
+                    .into_iter()
+                    .filter(|item| stopped(&item.row))
+                    .map(|item| item.key),
+            );
+            if page.last {
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        keys.len(),
+        1,
+        "stop notice keys in the fresh baseline: {keys:?}"
+    );
+    assert_eq!(keys[0].lane, Lane::Product);
+    assert!(!RootTranscript::is_provisional(keys[0]));
+    assert_eq!(live.into_iter().collect::<Vec<_>>(), keys);
+    bridge.finish();
+    stop(&mut host);
+}
+
+#[test]
 fn the_stdio_bridge_does_not_consume_a_separate_handshake_or_mask_a_version_refusal() {
     const OLDER: u32 = WIRE_VERSION - 1;
     let Some(fixture) = fixture() else { return };

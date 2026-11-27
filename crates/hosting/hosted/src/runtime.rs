@@ -349,6 +349,7 @@ struct Started(Option<String>);
 /// session it owns at that moment.
 pub(crate) struct PendingNoticeIntent {
     pub(crate) session_id: Option<Arc<str>>,
+    pub(crate) id: String,
     pub(crate) row: TranscriptRow,
 }
 
@@ -396,6 +397,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         )
     )]
     pub fn send(&self, value: ContentEvent<P>) -> bool {
+        self.send_observation(value, None)
+    }
+
+    fn send_observation(
+        &self,
+        value: ContentEvent<P>,
+        notice: Option<(&str, plakous_host_protocol::views::transcript::RowKey)>,
+    ) -> bool {
         #[cfg(test)]
         if let Some(recorded) = &self.recorded {
             recorded.lock().unwrap().push(value.clone());
@@ -408,12 +417,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         match &value {
             HostEvent::IntentStarted(started) => {
                 *window = Some(Started(started.clone()));
-                return self.publish(value);
+                return self.publish(value, notice);
             }
             // A reset closes the window: what follows answers no intent.
             HostEvent::PromptCorrelationReset => {
                 *window = None;
-                return self.publish(value);
+                return self.publish(value, notice);
             }
             _ => {}
         }
@@ -430,7 +439,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(view.clone());
         }
         let Some(answers) = self.answers.as_ref() else {
-            return self.publish(value);
+            return self.publish(value, notice);
         };
         // An answer to a named intent goes out marked as that intent's
         // answer, in a window of its own, so it reaches its requester and
@@ -440,12 +449,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         let reopen = match &answers.0 {
             Some(correlation) => Some(format!("{}{correlation}", crate::host_service::ANSWER)),
             None if window.as_ref() != Some(answers) => None,
-            None => return self.publish(value),
+            None => return self.publish(value, notice),
         };
-        let _ = self.publish(HostEvent::IntentStarted(reopen));
-        let sent = self.publish(value);
+        let _ = self.publish(HostEvent::IntentStarted(reopen), None);
+        let sent = self.publish(value, notice);
         let open = window.as_ref().and_then(|open| open.0.clone());
-        let _ = self.publish(HostEvent::IntentStarted(open));
+        let _ = self.publish(HostEvent::IntentStarted(open), None);
         sent
     }
 
@@ -495,7 +504,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             .clone()
     }
 
-    fn publish(&self, value: HostEvent<P>) -> bool {
+    fn publish(
+        &self,
+        value: HostEvent<P>,
+        notice: Option<(&str, plakous_host_protocol::views::transcript::RowKey)>,
+    ) -> bool {
         let mut cleared_processes = false;
         if matches!(value, HostEvent::ClearView | HostEvent::SessionOpening) {
             self.presentations
@@ -563,11 +576,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
                 running: 0,
             });
         }
-        let _ = presentations.observe(
-            plakous_host_protocol::views::transcript::TranscriptScope::Root,
-            &value,
-            &self.inner,
-        );
+        if let (Some((id, key)), HostEvent::Row(row)) = (notice, &value) {
+            let _ = presentations.observe_notice(id, key, row, &self.inner);
+        } else {
+            let _ = presentations.observe(
+                plakous_host_protocol::views::transcript::TranscriptScope::Root,
+                &value,
+                &self.inner,
+            );
+        }
         if boundary {
             presentations.resync_gaps(&self.inner);
         }
@@ -682,16 +699,39 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             && notice.scope.persisted()
             && let Ok(mut notices) = self.notices.lock()
         {
-            if notices.len() >= MAX_PENDING_NOTICE_INTENTS {
-                notices.pop_front();
+            if notices.len() >= MAX_PENDING_NOTICE_INTENTS
+                && let Some(dropped) = notices.pop_front()
+            {
+                self.forget_notice(&dropped.id);
             }
+            let id = uuid::Uuid::new_v4().to_string();
+            let key = sessions::provisional_key();
+            let sent = self.send_observation(ContentEvent::Row(row.clone()), Some((&id, key)));
             notices.push_back(PendingNoticeIntent {
                 session_id: self.session_id.clone(),
-                row: row.clone(),
+                id,
+                row,
             });
             self.notice_ready.notify_one();
+            return sent;
         }
         self.send(ContentEvent::Row(row))
+    }
+
+    fn forget_notice(&self, id: &str) {
+        self.presentations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .forget_root_notice(id);
+    }
+
+    fn send_committed_notice(&self, id: &str, row: TranscriptRow) -> bool {
+        let sent = self.send_observation(
+            ContentEvent::Row(row),
+            Some((id, sessions::provisional_key())),
+        );
+        self.notice_ready.notify_one();
+        sent
     }
     /// Notice intents authored since the last call, oldest
     /// first.

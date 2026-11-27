@@ -5,10 +5,10 @@ use plakous_hosted::runtime::ResumeAfterLoss;
 use plakous_hosted::runtime::operator_attention::{AttentionReason, root_reason};
 use plakous_hosted::session_store::WakeControls;
 use plakous_hosted::sessions::projector::{
-    AnchoredIntent, OperatorNotice, ProductIntents, RootContinuation, RootInterrupt, SessionViews,
-    WorkflowRequest,
+    AnchoredIntent, Lane, OperatorNotice, ProductIntents, RootContinuation, RootInterrupt, RowKey,
+    SessionViews, WorkflowRequest,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension as _};
 
 use super::super::decode_workflow_kind;
 use super::{
@@ -43,6 +43,14 @@ impl ProductStore {
             .map_err(unavailable)?
             .collect::<Result<_, _>>()
             .map_err(invalid)
+    }
+
+    pub(crate) fn load_notice_keys(
+        &self,
+        session_id: &str,
+        notice_ids: &[String],
+    ) -> Result<Vec<(String, RowKey)>, String> {
+        operator_notice_keys(&self.connection, session_id, notice_ids).map_err(unavailable)
     }
 
     pub(crate) fn load_wake_controls(&self, session_id: &str) -> Result<WakeControls, String> {
@@ -99,6 +107,35 @@ impl ProductStore {
         )
         .map(|(reason, _)| reason)
     }
+}
+
+pub(in crate::store) fn operator_notice_keys(
+    connection: &Connection,
+    session_id: &str,
+    notice_ids: &[String],
+) -> rusqlite::Result<Vec<(String, RowKey)>> {
+    if notice_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut query = connection.prepare(
+        "SELECT anchor,ordinal FROM operator_notices WHERE session_id=?1 AND notice_id=?2",
+    )?;
+    let mut keys = Vec::new();
+    for id in notice_ids {
+        let key = query
+            .query_row((session_id, id), |row| {
+                Ok(RowKey::new(
+                    from_i64(row.get(0)?)?,
+                    Lane::Product,
+                    row.get(1)?,
+                ))
+            })
+            .optional()?;
+        if let Some(key) = key {
+            keys.push((id.clone(), key));
+        }
+    }
+    Ok(keys)
 }
 
 pub(in crate::store) fn attention_facts_on(

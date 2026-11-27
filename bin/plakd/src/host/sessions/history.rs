@@ -111,7 +111,7 @@ pub(crate) fn attach(
                 return Err(HistoryError::StaleCapture);
             }
             let turns = turns_at(&paths.runtime_database(), &history, None)?;
-            let page = first(&history, &turns)?;
+            let page = first_with_live(&history, &turns, &live)?;
             let fence = fence(&history.line, &history.prune)?;
             Ok((history.line, fence, page))
         })
@@ -182,19 +182,20 @@ pub(crate) fn repair(
     if capture.revision != target.revision.revision {
         return None;
     }
+    let live = LiveTail::captured(capture);
     let page = binding
         .reader
         .read(paths, |history| {
-            if capture.applied != history.applied
+            if live.applied != Some(history.applied)
                 || fence(&history.line, &history.prune)? != binding.fence
             {
                 return Err(HistoryError::StaleCapture);
             }
             let turns = turns_at(&paths.runtime_database(), &history, None)?;
-            first(&history, &turns)
+            first_with_live(&history, &turns, &live)
         })
         .ok()?;
-    framing::baseline(page, target, LiveTail::captured(capture)).ok()
+    framing::baseline(page, target, live).ok()
 }
 
 pub(crate) fn read_row(
@@ -265,6 +266,19 @@ fn first(history: &History<'_>, turns: &Turns) -> Result<Page, HistoryError> {
         turns.starts.last().copied().unwrap_or(0),
         None,
     )
+}
+
+fn first_with_live(
+    history: &History<'_>,
+    turns: &Turns,
+    live: &LiveTail,
+) -> Result<Page, HistoryError> {
+    let mut page = first(history, turns)?;
+    // A store commit can land before the captured revision's replacement
+    // patch. Keep the provisional identity at this revision, not both keys.
+    let settled: std::collections::BTreeSet<_> = history.notice_keys(&live.notice_ids)?.collect();
+    page.items.retain(|item| !settled.contains(&item.key));
+    Ok(page)
 }
 
 fn older_page(
