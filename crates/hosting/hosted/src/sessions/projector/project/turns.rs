@@ -190,8 +190,8 @@ impl Applier<'_> {
     /// fact of its own. Its note on the turn's history, in a record with no
     /// `TurnTerminal`, after the turn's own terminal took it off the open
     /// turns, marks the record; the notice is derived from the abandonment
-    /// the turn's `RecoveryRequired` terminal record now carries. The runtime
-    /// appends that note once per turn, so the notice is derived once.
+    /// the turn's `RecoveryRequired` terminal record now carries, unless the
+    /// terminal already published it.
     pub(super) fn fenced_abandonment(&mut self) -> Result<(), ProjectError> {
         let facts = self.record.facts();
         if facts
@@ -218,6 +218,9 @@ impl Applier<'_> {
         &mut self,
         turn_id: plakous::model::TurnId,
     ) -> Result<bool, ProjectError> {
+        if self.views.state.last_projected_abandonment == Some(turn_id) {
+            return Ok(true);
+        }
         let Some(checkpoint) = record_checkpoint(self.record) else {
             return Ok(false);
         };
@@ -231,6 +234,7 @@ impl Applier<'_> {
             return Ok(false);
         };
         let report = report.clone();
+        self.views.state.last_projected_abandonment = Some(turn_id);
         self.push(TranscriptRow::warning(
             NoticeScope::Recovery,
             abandoned_turn_operator_line(&report),

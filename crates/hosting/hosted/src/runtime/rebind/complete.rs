@@ -302,11 +302,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         &mut self,
         target_locator: plakous::sessions::SessionLocator,
     ) -> CliResult<SessionRecord> {
-        let mut target_record_result = self.project_successor(target_locator).await;
+        let mut target_record_result = Box::pin(self.project_successor(target_locator)).await;
         // A switch cannot restore its source after the publication, so a
         // failed projection is tried once more in process (D-S8).
         if target_record_result.is_err() && self.succession.is_some() && !self.watch.interrupted() {
-            target_record_result = self.project_successor(target_locator).await;
+            target_record_result = Box::pin(self.project_successor(target_locator)).await;
         }
         let watch = self.watch;
         let operation = self.operation;

@@ -253,6 +253,9 @@ pub struct SessionViewState {
     /// The newest root turn on the followed lineage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_root_turn: Option<LastRootTurn>,
+    /// The latest root abandonment already derived, even if its row was trimmed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_projected_abandonment: Option<plakous::model::TurnId>,
     /// Admitted root turns without a terminal.
     #[serde(skip)]
     pub open_turns: BTreeMap<String, OpenTurn>,

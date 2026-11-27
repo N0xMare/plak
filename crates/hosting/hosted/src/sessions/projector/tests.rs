@@ -1740,9 +1740,26 @@ fn recovery_required_can_announce_the_abandonment_at_its_terminal_key() {
         [ProjectedAbandonment {
             session_id: feed.session,
             turn_id,
-            report,
+            report: report.clone(),
         }]
     );
+    let closure = append_fenced_closure(&mut feed, turn_id);
+    feed.reads
+        .insert(closure, ReadValue::Abandoned(Some(report)));
+    let mut resumed = recovered.views.clone();
+    resumed.state = serde_json::from_value(serde_json::to_value(&resumed.state).unwrap()).unwrap();
+    let tail = project(
+        resumed,
+        &feed.intents,
+        &feed.records[feed.records.len() - 1..],
+        &feed.reads,
+    )
+    .unwrap();
+    assert_eq!(tail.views.rows, recovered.views.rows);
+    assert_eq!(tail.abandonments, []);
+    let rebuilt = project_all(&feed);
+    assert_eq!(rebuilt.views.rows, recovered.views.rows);
+    assert_eq!(rebuilt.abandonments, recovered.abandonments);
 }
 
 fn running_tool_abandonment() -> plakous::agent::AbandonedTurnReport {
@@ -1776,27 +1793,8 @@ fn fenced_closure_derives_its_line_once(refused_between: bool) {
         fenced
     };
     let report = running_tool_abandonment();
-    let mut note = text_item(ReadActor::User, "the closure's note");
-    note.harness_authored = true;
-    let (fact, items) = feed.history(
-        Some(turn_id),
-        HistorySegmentKind::Conversation,
-        vec![note],
-        Vec::new(),
-    );
-    feed.advance(
-        vec![fact],
-        Reads {
-            items: vec![(0, items)],
-            ..Reads::default()
-        },
-    );
+    let request = append_fenced_closure(&mut feed, turn_id);
     let closure = std::slice::from_ref(feed.records.last().unwrap());
-    let request = ReadRequest::Abandoned {
-        branch: feed.branch,
-        checkpoint: record_checkpoint(&closure[0]).unwrap(),
-        turn_id,
-    };
     let mut unasked = feed.reads.clone();
     unasked.remove(&request);
     assert_eq!(
@@ -1831,6 +1829,29 @@ fn fenced_closure_derives_its_line_once(refused_between: bool) {
     assert_eq!(lines(&replay.views), 1);
     assert_eq!(replay.abandonments, []);
     assert_eq!(lines(&project_all(&feed).views), 1);
+}
+
+fn append_fenced_closure(feed: &mut Feed, turn_id: TurnId) -> ReadRequest {
+    let mut note = text_item(ReadActor::User, "the closure's note");
+    note.harness_authored = true;
+    let (fact, items) = feed.history(
+        Some(turn_id),
+        HistorySegmentKind::Conversation,
+        vec![note],
+        Vec::new(),
+    );
+    feed.advance(
+        vec![fact],
+        Reads {
+            items: vec![(0, items)],
+            ..Reads::default()
+        },
+    );
+    ReadRequest::Abandoned {
+        branch: feed.branch,
+        checkpoint: record_checkpoint(feed.records.last().unwrap()).unwrap(),
+        turn_id,
+    }
 }
 
 #[test]
