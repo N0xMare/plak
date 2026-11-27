@@ -211,21 +211,29 @@ fn codec_error(error: FeedCodecError) -> SessionStoreError {
 
 /// Both readable checkpoint epochs use the same in-band feed version.
 /// Ordinary admission checks framing only; reads authenticate the whole row.
-pub(super) fn require_readable_versions(c: &Connection) -> Result<(), SessionStoreError> {
-    const V1_HEADER: &[u8] = b"{\"version\":1,";
-    c.query_row(
-        "SELECT record FROM session_feed WHERE substr(record,1,length(?1))<>?1 LIMIT 1",
-        [V1_HEADER],
-        |row| {
-            let rusqlite::types::ValueRef::Blob(bytes) = row.get_ref(0)? else {
-                return Ok(Err(SessionStoreError::corrupt()));
-            };
-            Ok(match FeedRecord::encoding_version(bytes) {
-                Ok(1) | Err(_) => Err(SessionStoreError::corrupt()),
-                Ok(version) => Err(SessionStoreError::UnsupportedFeedVersion(version)),
-            })
-        },
-    )
+pub(super) fn require_readable_versions(
+    c: &Connection,
+    indexed: bool,
+) -> Result<(), SessionStoreError> {
+    let access = if indexed {
+        "INDEXED BY admission_feed_version"
+    } else {
+        "NOT INDEXED"
+    };
+    // Match the partial index predicate exactly. The binary literal is the
+    // canonical b"{\"version\":1," prefix, not a JSON parse of the payload.
+    let sql = format!(
+        "SELECT record FROM session_feed {access} WHERE substr(record,1,13)<>x'7b2276657273696f6e223a312c' LIMIT 1"
+    );
+    c.query_row(&sql, [], |row| {
+        let rusqlite::types::ValueRef::Blob(bytes) = row.get_ref(0)? else {
+            return Ok(Err(SessionStoreError::corrupt()));
+        };
+        Ok(match FeedRecord::encoding_version(bytes) {
+            Ok(1) | Err(_) => Err(SessionStoreError::corrupt()),
+            Ok(version) => Err(SessionStoreError::UnsupportedFeedVersion(version)),
+        })
+    })
     .optional()
     .map_err(map_sqlite)?
     .unwrap_or(Ok(()))

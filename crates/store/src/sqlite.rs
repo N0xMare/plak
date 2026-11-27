@@ -593,6 +593,20 @@ impl SqliteSessionStore {
         }
     }
 
+    /// Audits all retained runtime data in one read-only snapshot.
+    ///
+    /// # Errors
+    /// Refuses missing stores, pending revisions, and integrity or storage failures.
+    pub fn audit(path: impl AsRef<Path>) -> Result<(), SessionStoreError> {
+        let connection =
+            Self::open_inspection(path.as_ref())?.ok_or(SessionStoreError::NotFound)?;
+        let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
+        if classify_connection(&snapshot)? != SqlitePersistenceShape::Current {
+            return Err(SessionStoreError::NotFound);
+        }
+        verify_database(&snapshot)
+    }
+
     /// Opens or creates a private fresh-schema database.
     ///
     /// This admits bounded shape, exact schema, and counters. It does not

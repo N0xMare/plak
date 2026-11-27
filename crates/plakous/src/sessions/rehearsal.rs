@@ -59,6 +59,14 @@ pub fn runtime_bootstrap_pending(database: &Path) -> Result<bool, AgentSessionsE
     SqliteSessionStore::bootstrap_pending(database).map_err(store_error)
 }
 
+/// Audit the retained runtime without opening an actor or taking writer authority.
+///
+/// # Errors
+/// Returns typed shape, integrity and storage refusals.
+pub fn audit_runtime_sqlite(database: &Path) -> Result<(), AgentSessionsError> {
+    SqliteSessionStore::audit(database).map_err(store_error)
+}
+
 /// Exercise the actual runtime bootstrap on a detached copy.
 ///
 /// # Errors

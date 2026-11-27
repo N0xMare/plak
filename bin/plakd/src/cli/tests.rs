@@ -22,7 +22,10 @@ fn restart_upgrade_verbs_parse_and_the_handoff_verbs_are_gone() {
     ));
     assert!(matches!(
         parse(args(&["doctor", "--json"])).unwrap(),
-        Command::Doctor { json: true }
+        Command::Doctor {
+            json: true,
+            audit_runtime: false
+        }
     ));
     assert!(matches!(
         parse(args(&["gateway", "check", "--json"])).unwrap(),
@@ -843,7 +846,13 @@ fn product_command_argv_matrix() {
         (&["--version"], |c| matches!(c, Command::Version)),
         (&["-h"], |c| matches!(c, Command::Help)),
         (&["doctor"], |c| {
-            matches!(c, Command::Doctor { json: false })
+            matches!(
+                c,
+                Command::Doctor {
+                    json: false,
+                    audit_runtime: false
+                }
+            )
         }),
         (&["status", "--json"], |c| matches!(c, Command::StatusJson)),
         (&["store", "backup", "./backup"], |c| {

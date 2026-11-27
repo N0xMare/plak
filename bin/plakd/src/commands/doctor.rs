@@ -17,9 +17,14 @@ use crate::{
 pub(crate) fn run_doctor(
     services: &Services,
     json: bool,
+    audit_runtime: bool,
     stdout: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
     let paths = services.paths()?;
+    if audit_runtime {
+        plakous::sessions::rehearsal::audit_runtime_sqlite(&paths.runtime_database())
+            .map_err(|error| CliFailure::new(format!("runtime store audit: {error}")))?;
+    }
     let doctor_paths = product_doctor::DoctorPaths::under(paths.home().to_path_buf());
     let loaded = product_config::ProductConfig::load(paths);
     let config = product_doctor::inspect_config(&paths.config_file(), |_| {

@@ -693,7 +693,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             },
             &mut stdout,
         ),
-        Command::Doctor { json } => run_doctor(&services, json, &mut stdout),
+        Command::Doctor {
+            json,
+            audit_runtime,
+        } => run_doctor(&services, json, audit_runtime, &mut stdout),
         Command::StatusJson => runtime_headroom::write_status(services.paths()?, &mut stdout, true),
         Command::StoreBackup {
             directory,

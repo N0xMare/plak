@@ -6,6 +6,23 @@ use std::fs;
 #[cfg(unix)]
 use std::num::NonZeroU64;
 
+fn remove_admission_revision(connection: &Connection) -> TestResult {
+    let mut statement = connection.prepare(
+        "SELECT type,name FROM sqlite_schema WHERE name GLOB 'admission_*'
+         ORDER BY CASE type WHEN 'table' THEN 1 ELSE 0 END",
+    )?;
+    let objects = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
+    for (kind, name) in objects {
+        connection.execute_batch(&format!("DROP {kind} {name};"))?;
+    }
+    Ok(())
+}
+
 #[test]
 fn removed_branch_transition_tags_are_unsupported() {
     for tag in [3, 4] {
@@ -92,6 +109,7 @@ fn legacy_bootstrap_refuses_an_idle_writer_then_rebuilds_after_it_closes() -> Te
     let path = dir.path().join("runtime.sqlite3");
     drop(SqliteSessionStore::open(&path)?);
     let incumbent = Connection::open(&path)?;
+    remove_admission_revision(&incumbent)?;
     incumbent.execute_batch(
         "PRAGMA foreign_keys=OFF;
          DROP TABLE runtime_writer;
@@ -455,7 +473,7 @@ async fn cold_start_query_count_is_constant_for_large_authoritative_history() ->
     // adding two traced statements per PRAGMA, independent of history size.
     const PRAGMA_VALIDATION_QUERIES: u64 = 2 * 5;
     // One marker probe and one retained-window probe per payload codec.
-    const CODEC_ADMISSION_QUERIES: u64 = 3;
+    const CODEC_ADMISSION_QUERIES: u64 = 6;
     let database = CrashDatabase::new()?;
     let seed = crash_seed(81_000)?;
     let store = SqliteSessionStore::open(&database.path)?;

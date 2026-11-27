@@ -1,4 +1,4 @@
-//! One-time, stopped-store transition to the encoding-neutral schema.
+//! One-time, stopped-store revisions.
 
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
@@ -10,9 +10,10 @@ use rusqlite::backup::{Backup, StepResult};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 
 use super::{
-    SCHEMA, SessionStoreError, SqlitePersistenceShape, SqliteSessionStore, admit_readable_records,
-    classify_bootstrap_connection, initialize_writer_epoch, map_io, map_sqlite, validate_counts,
-    verify_contents, verify_exact_schema, verify_foreign_keys, verify_sqlite_runtime,
+    ADMISSION_REVISION, AdmissionRevision, SCHEMA, SessionStoreError, SqlitePersistenceShape,
+    SqliteSessionStore, admit_readable_records, classify_bootstrap_connection,
+    initialize_writer_epoch, map_io, map_sqlite, validate_admission_counts, verify_contents,
+    verify_exact_schema, verify_foreign_keys, verify_sqlite_runtime,
 };
 
 const LOCK_WAIT: Duration = Duration::from_secs(1);
@@ -33,11 +34,11 @@ impl SqliteSessionStore {
             return Ok(false);
         };
         let snapshot = reader.unchecked_transaction().map_err(map_sqlite)?;
-        let (shape, pending) = classify_bootstrap_connection(&snapshot)?;
+        let (shape, revision) = classify_bootstrap_connection(&snapshot)?;
         if shape == SqlitePersistenceShape::Current {
-            admit_readable_records(&snapshot, pending)?;
+            admit_readable_records(&snapshot, revision)?;
         }
-        Ok(pending)
+        Ok(revision != AdmissionRevision::Indexed)
     }
 
     /// Apply bootstrap to a private copy, bounded by the supplied deadline.
@@ -83,7 +84,7 @@ fn run_with_deadline(
             Err(SessionStoreError::BootstrapBusy) if Instant::now() < deadline => {
                 std::thread::sleep(LOCK_RETRY);
             }
-            Ok(Some(mut writer)) => {
+            Ok(Some((mut writer, revision))) => {
                 if live {
                     backup(&writer, path)?;
                 } else if let Some(deadline) = work_deadline {
@@ -91,7 +92,7 @@ fn run_with_deadline(
                         .progress_handler(4096, Some(move || Instant::now() >= deadline))
                         .map_err(map_sqlite)?;
                 }
-                return rebuild(&mut writer, !live, cut);
+                return migrate(&mut writer, revision, !live, cut);
             }
             Ok(None) => return Ok(()),
             Err(error) => return Err(error),
@@ -99,7 +100,10 @@ fn run_with_deadline(
     }
 }
 
-fn retain_exclusive(path: &Path, live: bool) -> Result<Option<Connection>, SessionStoreError> {
+fn retain_exclusive(
+    path: &Path,
+    live: bool,
+) -> Result<Option<(Connection, AdmissionRevision)>, SessionStoreError> {
     let mut writer = open_writer(path)?;
     if !live {
         // A detached SQLite backup may not inherit the source's journal mode.
@@ -119,18 +123,20 @@ fn retain_exclusive(path: &Path, live: bool) -> Result<Option<Connection>, Sessi
     let lock = writer
         .transaction_with_behavior(TransactionBehavior::Exclusive)
         .map_err(bootstrap_lock_error)?;
-    let (_, pending) = classify_bootstrap_connection(&lock)?;
-    if pending {
-        admit_readable_records(&lock, true)?;
+    let (_, revision) = classify_bootstrap_connection(&lock)?;
+    if revision != AdmissionRevision::Indexed {
+        admit_readable_records(&lock, revision)?;
     }
     lock.commit().map_err(bootstrap_lock_error)?;
-    if !pending {
+    if revision == AdmissionRevision::Indexed {
         return Ok(None);
     }
-    writer
-        .execute_batch("PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=ON;")
-        .map_err(map_sqlite)?;
-    Ok(Some(writer))
+    if revision == AdmissionRevision::Legacy {
+        writer
+            .execute_batch("PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=ON;")
+            .map_err(map_sqlite)?;
+    }
+    Ok(Some((writer, revision)))
 }
 
 fn open_writer(path: &Path) -> Result<Connection, SessionStoreError> {
@@ -151,14 +157,34 @@ fn bootstrap_lock_error(error: rusqlite::Error) -> SessionStoreError {
     }
 }
 
-fn rebuild(
+fn migrate(
     writer: &mut Connection,
+    revision: AdmissionRevision,
     full_verification: bool,
     cut: impl Fn(&str),
 ) -> Result<(), SessionStoreError> {
     let tx = writer
         .transaction_with_behavior(TransactionBehavior::Exclusive)
         .map_err(bootstrap_lock_error)?;
+    if revision == AdmissionRevision::Legacy {
+        rebuild_objects(&tx)?;
+    }
+    tx.execute_batch(ADMISSION_REVISION).map_err(map_sqlite)?;
+    verify_exact_schema(&tx)?;
+    admit_readable_records(&tx, AdmissionRevision::Indexed)?;
+    validate_admission_counts(&tx)?;
+    if full_verification {
+        verify_contents(&tx)?;
+    } else {
+        verify_foreign_keys(&tx)?;
+    }
+    cut("before-commit");
+    tx.commit().map_err(map_sqlite)?;
+    cut("after-commit");
+    Ok(())
+}
+
+fn rebuild_objects(tx: &rusqlite::Transaction<'_>) -> Result<(), SessionStoreError> {
     tx.execute_batch("ALTER TABLE runtime_objects RENAME TO runtime_objects_legacy;")
         .map_err(map_sqlite)?;
     tx.execute_batch(table_ddl("runtime_objects")?)
@@ -187,18 +213,7 @@ fn rebuild(
         .map_err(map_sqlite)?;
     tx.execute_batch(table_ddl("runtime_writer")?)
         .map_err(map_sqlite)?;
-    initialize_writer_epoch(&tx)?;
-    verify_exact_schema(&tx)?;
-    validate_counts(&tx)?;
-    if full_verification {
-        verify_contents(&tx)?;
-    } else {
-        verify_foreign_keys(&tx)?;
-    }
-    cut("before-commit");
-    tx.commit().map_err(map_sqlite)?;
-    cut("after-commit");
-    Ok(())
+    initialize_writer_epoch(tx)
 }
 
 fn table_ddl(name: &str) -> Result<&'static str, SessionStoreError> {

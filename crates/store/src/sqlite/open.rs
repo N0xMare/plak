@@ -103,7 +103,7 @@ pub(super) fn classify_connection(
 
 pub(super) fn classify_bootstrap_connection(
     c: &Connection,
-) -> Result<(SqlitePersistenceShape, bool), SessionStoreError> {
+) -> Result<(SqlitePersistenceShape, AdmissionRevision), SessionStoreError> {
     let app: i64 = c
         .pragma_query_value(None, "application_id", |row| row.get(0))
         .map_err(map_sqlite)?;
@@ -118,7 +118,10 @@ pub(super) fn classify_bootstrap_connection(
         )
         .map_err(map_sqlite)?;
     if app == 0 && version == 0 && objects == 0 {
-        return Ok((SqlitePersistenceShape::MissingOrFresh, false));
+        return Ok((
+            SqlitePersistenceShape::MissingOrFresh,
+            AdmissionRevision::Indexed,
+        ));
     }
     if app != APPLICATION_ID {
         return Err(SessionStoreError::corrupt());
@@ -127,10 +130,7 @@ pub(super) fn classify_bootstrap_connection(
         return Err(SessionStoreError::UnsupportedSchema);
     }
     verify_shape_pragmas(c)?;
-    Ok((
-        SqlitePersistenceShape::Current,
-        bootstrap_epoch(c)?.is_some(),
-    ))
+    Ok((SqlitePersistenceShape::Current, admission_revision(c)?))
 }
 
 /// Admits one inspection snapshot: a current shape and a bound clock domain.
@@ -225,15 +225,15 @@ pub(super) fn admit_existing_header(
         .execute_batch("PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;")
         .map_err(map_sqlite)?;
     let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
-    let (shape, legacy) = classify_bootstrap_connection(&snapshot)?;
+    let (shape, revision) = classify_bootstrap_connection(&snapshot)?;
     if shape == SqlitePersistenceShape::Current {
-        admit_readable_records(&snapshot, legacy)?;
+        admit_readable_records(&snapshot, revision)?;
         let bound = bound_domain(&snapshot)?;
         if bound.epoch() == domain.epoch() && bound != domain {
             return Err(SessionStoreError::LeaseDomainMismatch);
         }
     }
-    Ok(legacy)
+    Ok(revision != AdmissionRevision::Indexed)
 }
 
 pub(super) fn wait_for_actor(

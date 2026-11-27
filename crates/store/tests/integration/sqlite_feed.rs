@@ -338,6 +338,19 @@ async fn sqlite_feed_rows_are_deleted_with_their_session() -> TestResult {
 /// wrote it: the object table's codec CHECK and every object address.
 fn rewrite_as_build(db: &Database, version: i64, epoch: u32) -> TestResult {
     let connection = Connection::open(&db.path)?;
+    let mut additions = connection.prepare(
+        "SELECT type,name FROM sqlite_schema WHERE name GLOB 'admission_*'
+         ORDER BY CASE type WHEN 'table' THEN 1 ELSE 0 END",
+    )?;
+    let objects = additions
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(additions);
+    for (kind, name) in objects {
+        connection.execute_batch(&format!("DROP {kind} {name};"))?;
+    }
     connection.execute_batch(&format!(
         "DROP TABLE runtime_writer;
          PRAGMA writable_schema=ON;

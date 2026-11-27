@@ -14,6 +14,8 @@ const INCREMENTAL_AUTO_VACUUM: i64 = 2;
 
 pub(super) const SCHEMA_VERSION: i64 = SQLITE_SCHEMA_VERSION;
 
+pub(super) const ADMISSION_REVISION: &str = include_str!("admission.sql");
+
 pub(super) fn bound_domain(c: &Connection) -> Result<LeaseDomain, SessionStoreError> {
     let bytes = c
         .query_row(
@@ -94,6 +96,7 @@ pub(super) fn initialize_schema(
         .map_err(map_sqlite)?;
     if app == 0 && version == 0 && tables == 0 {
         c.execute_batch(SCHEMA).map_err(map_sqlite)?;
+        c.execute_batch(ADMISSION_REVISION).map_err(map_sqlite)?;
         initialize_writer_epoch(c)?;
         c.execute(
             "UPDATE store_meta SET lease_domain=?1 WHERE id=1",
@@ -350,19 +353,26 @@ pub(super) fn require_writer_epoch(c: &Connection) -> Result<(), SessionStoreErr
 
 pub(super) fn admit_readable_records(
     c: &Connection,
-    legacy: bool,
+    revision: AdmissionRevision,
 ) -> Result<(), SessionStoreError> {
-    if !legacy {
+    if revision != AdmissionRevision::Legacy {
         let epoch = writer_epoch(c)?;
         if !reads_checkpoint_epoch(epoch) {
             return Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch));
         }
     }
-    // Check actual present objects, not address-only references in sealed receipts.
+    // Seek the three disjoint ranges outside the two readable epochs. NOT IN
+    // cannot skip the supported entries in an ordinary covering index.
+    let object_query = match revision {
+        AdmissionRevision::Indexed => "SELECT codec FROM runtime_objects INDEXED BY admission_object_codec WHERE codec < ?1
+            UNION ALL SELECT codec FROM runtime_objects INDEXED BY admission_object_codec WHERE codec > ?1 AND codec < ?2
+            UNION ALL SELECT codec FROM runtime_objects INDEXED BY admission_object_codec WHERE codec > ?2 LIMIT 1",
+        _ => "SELECT codec FROM runtime_objects NOT INDEXED WHERE codec NOT IN (?1,?2) LIMIT 1",
+    };
     let unsupported = c
         .query_row(
-            "SELECT codec FROM runtime_objects WHERE codec NOT IN (?1,?2) LIMIT 1",
-            params![WRITER_EPOCH, PREVIOUS_RUNTIME_FORMAT_EPOCH],
+            object_query,
+            params![PREVIOUS_RUNTIME_FORMAT_EPOCH, WRITER_EPOCH],
             |row| row.get(0),
         )
         .optional()
@@ -370,7 +380,7 @@ pub(super) fn admit_readable_records(
     if let Some(epoch) = unsupported {
         return Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch));
     }
-    feed::require_readable_versions(c)
+    feed::require_readable_versions(c, revision == AdmissionRevision::Indexed)
 }
 
 /// Admits shape, schema, domain and counter integrity. Retained state over
@@ -380,13 +390,15 @@ pub(super) fn admit_readable_records(
 pub(super) fn admit_open(c: &Connection) -> Result<(), SessionStoreError> {
     verify_shape_pragmas(c)?;
     verify_exact_schema(c)?;
-    admit_readable_records(c, false)?;
+    admit_readable_records(c, AdmissionRevision::Indexed)?;
     bound_domain(c)?;
-    validate_counts(c)
+    validate_admission_counts(c)
 }
 
 pub(super) fn verify_database(c: &Connection) -> Result<(), SessionStoreError> {
     admit_open(c)?;
+    admit_readable_records(c, AdmissionRevision::Neutral)?;
+    validate_counts(c)?;
     verify_contents(c)
 }
 
@@ -483,7 +495,7 @@ pub(super) fn verify_shape_pragmas(c: &Connection) -> Result<(), SessionStoreErr
 }
 
 pub(super) fn verify_exact_schema(c: &Connection) -> Result<(), SessionStoreError> {
-    if bootstrap_epoch(c)?.is_some() {
+    if admission_revision(c)? != AdmissionRevision::Indexed {
         Err(SessionStoreError::UnsupportedSchema)
     } else {
         Ok(())
@@ -492,15 +504,27 @@ pub(super) fn verify_exact_schema(c: &Connection) -> Result<(), SessionStoreErro
 
 const OBJECT_CODEC_DDL: &str = "codec INTEGER NOT NULL, digest";
 
-/// Legacy admission differs by exactly two objects: the writer marker is
-/// absent and the object table constrains its codec column to one epoch.
-pub(super) fn bootstrap_epoch(c: &Connection) -> Result<Option<u32>, SessionStoreError> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum AdmissionRevision {
+    Legacy,
+    Neutral,
+    Indexed,
+}
+
+/// Legacy lacks the writer marker and constrains the object codec in DDL.
+pub(super) fn admission_revision(c: &Connection) -> Result<AdmissionRevision, SessionStoreError> {
     let reference = Connection::open_in_memory().map_err(map_sqlite)?;
     reference.execute_batch(SCHEMA).map_err(map_sqlite)?;
     let mut expected = schema_objects(&reference)?;
     let actual = schema_objects(c)?;
     if actual == expected {
-        return Ok(None);
+        return Ok(AdmissionRevision::Neutral);
+    }
+    reference
+        .execute_batch(ADMISSION_REVISION)
+        .map_err(map_sqlite)?;
+    if actual == schema_objects(&reference)? {
+        return Ok(AdmissionRevision::Indexed);
     }
     expected.retain(|(_, name, _, _)| name != "runtime_writer");
     let object_sql = &mut expected
@@ -525,7 +549,7 @@ pub(super) fn bootstrap_epoch(c: &Connection) -> Result<Option<u32>, SessionStor
     if !matches!(epoch, 38 | 39) || !reads_checkpoint_epoch(epoch) {
         return Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch));
     }
-    Ok(Some(epoch))
+    Ok(AdmissionRevision::Legacy)
 }
 
 fn schema_objects(
@@ -696,6 +720,29 @@ pub(super) fn validate_counts(c: &Connection) -> Result<(), SessionStoreError> {
         bytes,
         count("delete_tombstones")?,
     ) {
+        return Err(SessionStoreError::corrupt());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_admission_counts(c: &Connection) -> Result<(), SessionStoreError> {
+    let s = read_stats(c)?;
+    let matches: bool = c
+        .query_row(
+            "SELECT sessions=?1 AND branches=?2 AND checkpoints=?3 AND objects=?4
+                 AND object_bytes=?5 AND tombstones=?6 FROM admission_counts WHERE id=1",
+            params![
+                i64n(s.sessions)?,
+                i64n(s.branches)?,
+                i64n(s.checkpoints)?,
+                i64n(s.objects)?,
+                i64n(s.object_bytes)?,
+                i64n(s.tombstones)?,
+            ],
+            |row| row.get(0),
+        )
+        .map_err(map_sqlite)?;
+    if !matches {
         return Err(SessionStoreError::corrupt());
     }
     Ok(())

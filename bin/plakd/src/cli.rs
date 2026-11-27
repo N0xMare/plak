@@ -451,6 +451,9 @@ enum TopCommand {
         /// Print the report as one JSON object.
         #[arg(long)]
         json: bool,
+        /// Also scan and verify every retained runtime record.
+        #[arg(long)]
+        audit_runtime: bool,
     },
     /// Back up the current runtime, product and agent-tree stores.
     Store {

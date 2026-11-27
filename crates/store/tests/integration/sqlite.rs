@@ -1597,6 +1597,7 @@ async fn injected_delete_cut_rolls_back_all_authority_and_exact_retry_recovers()
     let reopened = SqliteSessionStore::open(&db.path)?;
     let receipt = reopened.delete(request).await?;
     assert_eq!(reopened.recover_delete(request).await?, receipt);
+    SqliteSessionStore::audit(&db.path)?;
     Ok(())
 }
 

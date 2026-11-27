@@ -332,7 +332,13 @@ impl TopCommand {
             Self::Gateway {
                 action: Some(action),
             } => Ok(action.into_command()),
-            Self::Doctor { json } => Ok(Command::Doctor { json }),
+            Self::Doctor {
+                json,
+                audit_runtime,
+            } => Ok(Command::Doctor {
+                json,
+                audit_runtime,
+            }),
             Self::Store { action: None } => Ok(Command::CommandHelp {
                 command: "store".to_owned(),
             }),

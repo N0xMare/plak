@@ -310,6 +310,84 @@ async fn sigkill_bootstrap_and_first_epoch_publication_keep_exact_authority() ->
     Ok(())
 }
 
+#[tokio::test]
+async fn sigkill_additive_admission_revision_preserves_the_current_store() -> TestResult {
+    for cut in ["before-commit", "after-commit"] {
+        let directory = tempfile::tempdir()?;
+        let path = legacy(directory.path())?;
+        SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
+        let store = SqliteSessionStore::open(&path)?;
+        let lease = lease(&store).await?;
+        let prior = store.load_branch(selector()?, "reopen").await?;
+        let committed = store.commit(commit_request(&prior, lease)?).await?;
+        store.shutdown().await?;
+        drop(store);
+        super::remove_admission_revision(&Connection::open(&path)?)?;
+        let before = feed(&path)?;
+        assert_eq!(
+            SqliteSessionStore::open(&path).err(),
+            Some(SessionStoreError::BootstrapRequired)
+        );
+        kill_at(&path, "bootstrap", cut)?;
+        assert_eq!(
+            SqliteSessionStore::bootstrap_pending(&path)?,
+            cut == "before-commit"
+        );
+        let backup = path.with_extension("pre-codec-bootstrap.sqlite3");
+        assert!(SqliteSessionStore::bootstrap_pending(&backup)?);
+        assert_eq!(feed(&backup)?, before);
+        SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
+        SqliteSessionStore::audit(&path)?;
+        let store = SqliteSessionStore::open(&path)?;
+        assert_eq!(
+            store
+                .recover_commit(advancing_checkpoint_id()?)
+                .await?
+                .receipt(),
+            &committed
+        );
+        assert_eq!(feed(&path)?, before);
+    }
+    Ok(())
+}
+
+#[test]
+fn bounded_admission_refuses_feed_framing_and_count_drift() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let path = legacy(directory.path())?;
+    SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
+    let connection = Connection::open(&path)?;
+    let original: Vec<u8> =
+        connection.query_row("SELECT record FROM session_feed LIMIT 1", [], |row| {
+            row.get(0)
+        })?;
+    for (bytes, refusal) in [
+        (
+            b"{\"version\":2,\"record\":null}".as_slice(),
+            SessionStoreError::UnsupportedFeedVersion(2),
+        ),
+        (b"not an envelope".as_slice(), SessionStoreError::corrupt()),
+    ] {
+        connection.execute("UPDATE session_feed SET record=?1", [bytes])?;
+        assert_eq!(SqliteSessionStore::open(&path).err(), Some(refusal));
+    }
+    connection.execute("UPDATE session_feed SET record=?1", [original])?;
+    connection.execute("UPDATE store_meta SET object_bytes=object_bytes+1", [])?;
+    assert_eq!(
+        SqliteSessionStore::open(&path).err(),
+        Some(SessionStoreError::corrupt())
+    );
+    connection.execute(
+        "UPDATE admission_counts SET object_bytes=object_bytes+1",
+        [],
+    )?;
+    assert_eq!(
+        SqliteSessionStore::audit(&path),
+        Err(SessionStoreError::corrupt())
+    );
+    Ok(())
+}
+
 #[test]
 fn unsupported_retained_payload_refuses_from_a_read_only_wal_snapshot() -> TestResult {
     let directory = tempfile::tempdir()?;

@@ -203,6 +203,7 @@ pub(crate) enum Command {
     },
     Doctor {
         json: bool,
+        audit_runtime: bool,
     },
     StoreBackup {
         directory: PathBuf,
