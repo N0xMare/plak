@@ -74,6 +74,7 @@ fn oracle(
     drained: bool,
 ) -> TestResult {
     validate_counts(&b.connection)?;
+    validate_admission_counts(&b.connection)?;
     let live = closure(
         addresses(
             &b.connection,
@@ -117,11 +118,13 @@ fn deletion_defers_objects_and_gc_steps_keep_exact_counters() -> TestResult {
         .map(|o| (o.address(), o.clone()))
         .collect();
     let created = create(&mut b, &request)?;
+    oracle(&b, &graph, true)?;
     release(&mut b, created.lease())?;
     let archived = archive(
         &mut b,
         ArchiveSession::new(created.session().session_id(), created.session().revision()),
     )?;
+    oracle(&b, &graph, true)?;
     let before = read_stats(&b.connection)?;
     let request = DeleteSession::new(
         archived.session().session_id(),

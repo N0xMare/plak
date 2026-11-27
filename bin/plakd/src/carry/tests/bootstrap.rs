@@ -103,5 +103,6 @@ async fn bootstrap_frozen_r27_presentations_import_through_v13_into_fresh_r28_he
             "bootstrap dispatched a model or tool"
         );
     }
+    plakous::sessions::rehearsal::audit_runtime_sqlite(&root.path().join("runtime.sqlite3"))?;
     Ok(())
 }
