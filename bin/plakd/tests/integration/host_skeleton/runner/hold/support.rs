@@ -73,13 +73,26 @@ impl Remote {
             };
         }
         // The host's startup reconciliation of the paired runner is a bounded,
-        // documented not-ready window; only that refusal is retried.
+        // documented not-ready window; only that refusal is retried. While it
+        // runs an operation, the refusal names that operation exactly as a
+        // failure there would; only a failure logs its cause first.
+        let log = fixture.home().join("logs/plak.log");
+        let failures = || {
+            std::fs::read_to_string(&log)
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| line.contains("runner_recovery_failed"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         let mut id = 1;
         let created = loop {
             let created = client.request(id, request.clone());
-            let reconciling = format!("{created:?}")
-                .contains("RunnerUnreachable { phase: Reconcile, timed_out: false }");
+            let refusal = format!("{created:?}");
+            let reconciling = refusal
+                .contains("RunnerUnreachable { phase: Reconcile, timed_out: false }")
+                || (refusal.contains(": reconciliation failed at ") && failures().is_empty());
             if !reconciling || std::time::Instant::now() >= deadline {
                 break created;
             }
@@ -87,7 +100,10 @@ impl Remote {
             std::thread::sleep(std::time::Duration::from_millis(100));
         };
         let Outcome::Ok(Answer::Created { session, node, .. }) = created else {
-            panic!("remote creation refused: {created:?}")
+            panic!(
+                "remote creation refused: {created:?}\nrecovery failures:\n{}",
+                failures()
+            )
         };
         let attachment = client.attach(2, &node);
         assert!(matches!(

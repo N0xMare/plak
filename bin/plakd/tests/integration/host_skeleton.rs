@@ -1342,7 +1342,9 @@ fn host_lifecycle(fixture: &Fixture, host: &Host, trace: &std::path::Path) -> Op
 /// request answers one session (never two), the crashed host reads gone,
 /// an attach opens the session; no cut leaves a
 /// handoff, a cut after the turn ended leaves no loss, and a cut before or
-/// after the turn answers the next one.
+/// after the turn answers the next one. Losses are held explicitly: under
+/// the host default a cut inside the turn continues once by itself, after
+/// the attach answers.
 #[test]
 fn host_crash_cuts_of_create_materialize_and_release_recover() {
     let Some(probe) = fixture() else { return };
@@ -1353,6 +1355,7 @@ fn host_crash_cuts_of_create_materialize_and_release_recover() {
         "steps": [{"output": {"text": ANSWER}}]
     });
     let baseline = fixture().unwrap();
+    hold_losses(&baseline);
     baseline.write_script(&script);
     let trace = baseline.root.join("baseline-trace.jsonl");
     let mut host = start_env(
@@ -1370,6 +1373,7 @@ fn host_crash_cuts_of_create_materialize_and_release_recover() {
     let mut outcomes = std::collections::BTreeMap::<&str, usize>::new();
     for (ordinal, store, store_ordinal) in &commits {
         let fixture = fixture().unwrap();
+        hold_losses(&fixture);
         fixture.write_script(&script);
         let cut_trace = fixture.root.join("cut-trace.jsonl");
         let env = [
@@ -1500,6 +1504,18 @@ fn a_host_created_session_nothing_opened_opens_in_an_embedded_face() {
 
 const PREFIX: &str = "the handed-off prefix";
 const CONTINUED: &str = "the continued answer";
+
+/// Holds every owner loss for the operator's Resume: the explicit policy a
+/// test needs to prove that nothing continues by itself, since an unset
+/// policy continues under `plakd host`.
+fn hold_losses(fixture: &Fixture) {
+    let config = fixture.home().join("config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    write_private(
+        &config,
+        &format!("{text}\n[host]\nresume_after_loss = \"hold\"\n"),
+    );
+}
 
 /// The root interrupts and continuation decisions the session's product
 /// record holds.

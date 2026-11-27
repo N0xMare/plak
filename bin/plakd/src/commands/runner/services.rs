@@ -592,7 +592,7 @@ async fn reconcile_remote(
     client: &RunnerClient,
 ) -> Result<Vec<LineId>, plakous::runner::PlacementFailure> {
     use plakous::runner::ProbePhase;
-    let unavailable = |phase| reconcile_unavailable(id, phase);
+    let unavailable = |phase, cause: &dyn std::fmt::Debug| reconcile_unavailable(id, phase, cause);
     let registry = services.runners();
     registry.begin_reconcile(id, services.now_unix_seconds());
     if let Some(terminals) = services.terminal_registry() {
@@ -600,46 +600,49 @@ async fn reconcile_remote(
         terminals
             .reconcile(id, client)
             .await
-            .map_err(|_| unavailable(ProbePhase::ReconcileTerminals))?;
+            .map_err(|error| unavailable(ProbePhase::ReconcileTerminals, &error))?;
     }
     registry.progress(id, ProbePhase::ReconcileStore);
     let roots = services
         .state_roots()
-        .map_err(|_| unavailable(ProbePhase::ReconcileStore))?
+        .map_err(|error| unavailable(ProbePhase::ReconcileStore, &error))?
         .with_runner_readiness(registry.clone(), id);
     let sessions = roots
         .runtime_sessions()
-        .map_err(|_| unavailable(ProbePhase::ReconcileStore))?;
+        .map_err(|error| unavailable(ProbePhase::ReconcileStore, &error))?;
     registry.progress(id, ProbePhase::ReconcileJobs);
     let (readopted, failures) =
         plakous_hosted::runner_adoption::readopt_lines(client, &roots, "plak:host:readopt")
             .await
-            .map_err(|_| unavailable(ProbePhase::ReconcileJobs))?;
+            .map_err(|error| unavailable(ProbePhase::ReconcileJobs, &error))?;
     if let Some(failure) = failures.iter().find(|failure| !failure.held_elsewhere) {
         tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
-        return Err(unavailable(ProbePhase::ReconcileJobs));
+        return Err(unavailable(ProbePhase::ReconcileJobs, &failure.reason));
     }
     let _ = client.recover().await;
     registry.progress(id, ProbePhase::ReconcileStops);
     let pending = finish_stops(services, client, &sessions, &readopted)
         .await
-        .map_err(|_| unavailable(ProbePhase::ReconcileStops))?;
+        .map_err(|error| unavailable(ProbePhase::ReconcileStops, &error))?;
     registry.progress(id, ProbePhase::ReconcileForeground);
     client
         .reconcile_settled_foreground()
         .await
-        .map_err(|_| unavailable(ProbePhase::ReconcileForeground))?;
+        .map_err(|error| unavailable(ProbePhase::ReconcileForeground, &error))?;
     #[cfg(test)]
     tests::production_fence::after_cleanup(client).await;
     Ok(pending)
 }
 
+/// The placement failure of a failed reconciliation operation. The typed
+/// failure carries only the operation, so the host log keeps its cause.
 fn reconcile_unavailable(
     id: &str,
     phase: plakous::runner::ProbePhase,
+    cause: &dyn std::fmt::Debug,
 ) -> plakous::runner::PlacementFailure {
     if let Some(operation) = phase.reconcile_operation() {
-        tracing::warn!(target: "plak.runner", runner_id = id, phase = "reconcile", operation, "runner_recovery_failed");
+        tracing::warn!(target: "plak.runner", runner_id = id, phase = "reconcile", operation, error = ?cause, "runner_recovery_failed");
     }
     plakous::runner::PlacementFailure::RunnerUnreachable {
         phase,

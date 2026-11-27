@@ -290,6 +290,9 @@ fn runner_hold_host_loss() {
     let fixture = strict_fixture();
     let fixture = fixture.with_session_lease_seconds(2);
     let remote = Remote::new(&fixture);
+    // Under the host default the open itself continues the loss, recording
+    // consent after the attach answers; holding isolates what Ready grants.
+    hold_losses(&fixture);
     remote.arm("before-poll");
     fixture.write_script(&remote.script(&fixture));
     let (mut host, attached, session, node) = remote.start(&fixture);
