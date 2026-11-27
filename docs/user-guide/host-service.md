@@ -180,8 +180,10 @@ stable link and start the service. The backup is needed when
 `store rehearse` reports a pending revision or runtime bootstrap. Without
 either, the new build leaves the stores at the old build's revisions, so you
 may skip it: going back means pointing the link at the old snapshot and
-starting the service again. Still check that nothing writes the stores
-before the start.
+starting the service again. Your scheduled store backup is then the only
+copy that protects against damage the new build might do to the data
+itself, so make sure it is recent. Still check that nothing writes the
+stores before the start.
 
 ```sh
 systemctl --user stop plakd-host.service
@@ -214,7 +216,23 @@ If the new build fails to start, look at its log before doing anything else.
 If it never started, point the link back at the old snapshot and start the
 service. Once it may have opened the stores, repair and start it again, or
 start another build that supports the same store revisions. When the
-upgrade applied no revision, the old build is such a build. The backup is for
+upgrade applied no revision, the old build is such a build, under these
+conditions:
+
+- Check again before going back. Each store's `PRAGMA user_version` must
+  still be what it was before the stop, and no new `*.pre-revision-*`,
+  `runtime.pre-codec-bootstrap*` or pre-admission revision copy may sit
+  beside the databases.
+- The clients must still speak the old build's wire, or be moved back too.
+- Move every paired runner's link back to its old snapshot as well. A runner
+  daemon only talks to a host of its exact build, so an old host with runner
+  links on the new build reaches no paired runner.
+- A session whose runner jobs the new build already took over cannot reopen
+  on the old build. Leave it for the new build and never clear runner
+  stores to get it back. If the new build took over live background jobs,
+  repair and keep the new build instead.
+
+The backup is for
 disaster recovery only: stop everything using the home, restore all three
 database files from one backup, and start the old build. Writes after the
 backup are lost.

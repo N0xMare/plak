@@ -146,6 +146,7 @@ pub(crate) fn check_reopen(
 ) -> CheckReopenReport {
     let probe = || -> Result<CheckReopenReport, String> {
         let (paths, record) = probe_session(services, id)?;
+        commands.refuse_unconfigured(paths)?;
         crate::test_hooks::gate_upgrade_reopen(&record.id)?;
         let children = inspect_children(paths, &record)?;
         let mut qualification = children.qualify();

@@ -42,6 +42,28 @@ impl RunnerCommands {
         Ok(Self(commands))
     }
 
+    /// Refuses a name no `[runners.<name>]` configures, so a misspelt
+    /// runner cannot silently leave its roots on the configured command.
+    pub(crate) fn refuse_unconfigured(
+        &self,
+        paths: &crate::home::paths::PlakPaths,
+    ) -> Result<(), String> {
+        if self.0.is_empty() {
+            return Ok(());
+        }
+        let configured = crate::product_config::ProductConfig::load(paths)?.runners;
+        match self
+            .0
+            .iter()
+            .find(|(name, _)| !configured.contains_key(name))
+        {
+            Some((name, _)) => Err(format!(
+                "check_reopen_runner_command: --runner-command names {name}, which no [runners.{name}] configures"
+            )),
+            None => Ok(()),
+        }
+    }
+
     fn get(&self, name: &str) -> Option<&str> {
         self.0
             .iter()

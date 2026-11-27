@@ -6028,8 +6028,9 @@ A non-migrating restart (the same state key, no pending revision and no
 pending bootstrap, as the candidate's `store rehearse` reports) may omit it:
 its candidate leaves the store revisions as the source wrote them, so the
 recovery is to relink and restart the source on the unchanged stores, under
-the reverse-restart limits below. Writer vacancy is still proved before the
-start. Then the stable host link moves to the candidate and the unit starts.
+the rule below. Writer vacancy is still proved before the start. Omitting the
+stopped backup leaves protection against logical damage within the same
+schema to the home's scheduled store backup. Then the stable host link moves to the candidate and the unit starts.
 
 The candidate starts as any host does: stopped-store revisions under the
 writer lock with their synced pre-revision copies (§2.5), the runtime
@@ -6039,9 +6040,25 @@ Before the candidate process has been started, a failure restores the
 source links and starts the source build. Once the candidate may have
 opened the stores, including a start that failed or never answered Welcome,
 recovery is fix-forward: repair the cause and start the candidate or another
-build that supports the committed revisions. After a non-migrating restart
-the source still supports them, so relinking and restarting the source is
-also a recovery. Restoring the stopped backup is
+build that supports the committed revisions. After a non-migrating restart,
+relinking and restarting the source is also a recovery, but only when all of
+these hold, each checked at recovery time:
+
+- The state key is the same and no revision or bootstrap was applied: each
+  store's `user_version` equals its pre-stop value, and no new
+  `*.pre-revision-*`, `runtime.pre-codec-bootstrap*` or pre-admission
+  revision copy has appeared in the state directory.
+- The client wire is unchanged, or its clients have been moved back.
+- Every paired runner's dedicated link is moved back to its source snapshot.
+  A paired daemon binds only its exact version, so a source left with runner
+  links on the candidate reaches no paired runner.
+- Roots whose runner line the candidate has already taken over are left to
+  the candidate, under the reverse-restart limits below; never clear a fence
+  or a runner store to cure one. When the candidate swept lines with live
+  promoted jobs, prefer fix-forward. Operator tooling records each paired
+  runner's job inventory when it requests the stop so this can be judged.
+
+Restoring the stopped backup is
 manual disaster recovery: stop every user of the home, restore all three
 stores from one backup set, then start the source build. Writes after the
 backup are lost and restoring one store alone does not roll back the
@@ -6096,10 +6113,11 @@ candidate is qualified, and the runner's dedicated link advances to the
 candidate's snapshot immediately before the host stop: from then on the source
 opens no new connection to that runner. The source's existing connection
 keeps talking to the incumbent daemon, which keeps its jobs; the candidate's
-start dials the advanced link and finds its daemon already running. Operator tooling checks that the incumbent host can still
-list the runner through the advanced link and that the candidate qualifies
-it with its installed command, exact revision, flavor, protocol and pinned
-identity and roots. An unreachable enrolled runner without a durable
+start dials the advanced link and finds its daemon already running. Operator
+tooling checks each advanced link with the candidate's `plakd runner ps
+<name>`, since the incumbent can no longer bind it, and that the candidate
+qualifies the runner with its installed command, exact revision, flavor,
+protocol and pinned identity and roots. An unreachable enrolled runner without a durable
 placement reference may be skipped with a warning; repair its link before
 using that placement.
 

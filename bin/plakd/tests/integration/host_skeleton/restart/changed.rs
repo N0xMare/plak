@@ -109,14 +109,12 @@ fn paired_check_reopen_reaches_a_prestarted_candidate_daemon_by_explicit_command
     let attachment = client.attach(2, &node);
     client.prompt(3, attachment, "save a paired session", ANSWER);
     profiles::wait_idle(&mut client, &session);
-    drop(client);
-    stop(&mut host);
 
+    // Every probe below runs while the source host still serves the session.
     let builds = paired.runner.home.join("runner/builds");
     let inventory = || std::fs::read_dir(&builds).unwrap().count();
     let incumbent = std::fs::read_link(&paired.link).unwrap();
-    let explicit = format!("remote={}", image.display());
-    let probe = || {
+    let probe = |explicit: &str| {
         let output = image_command(&fixture, &image)
             .envs(environment.clone())
             .args([
@@ -124,38 +122,46 @@ fn paired_check_reopen_reaches_a_prestarted_candidate_daemon_by_explicit_command
                 "check-reopen",
                 &session,
                 "--runner-command",
-                &explicit,
+                explicit,
             ])
             .output()
             .unwrap();
         serde_json::from_slice::<serde_json::Value>(&output.stdout)
             .unwrap_or_else(|error| panic!("check-reopen: {error}: {output:?}"))
     };
+    let refused = |report: serde_json::Value, code: &str| {
+        assert_eq!(report["verdict"], "refused", "{report}");
+        assert!(
+            report["reason"].as_str().unwrap().contains(code),
+            "{report}"
+        );
+    };
+    let explicit = format!("remote={}", image.display());
     // Without a running candidate daemon the explicit command still starts nothing.
-    let report = probe();
-    assert_eq!(report["verdict"], "refused", "{report}");
-    assert!(
-        report["reason"]
-            .as_str()
-            .unwrap()
-            .contains("check_reopen_runner_qualification"),
-        "{report}"
-    );
+    refused(probe(&explicit), "check_reopen_runner_qualification");
     assert_eq!(inventory(), 1, "the probe started a runner daemon");
+    // A name no [runners] entry configures is refused before any dial.
+    refused(
+        probe(&format!("elsewhere={}", image.display())),
+        "check_reopen_runner_command",
+    );
 
     // The operator starts the candidate's exact-triple daemon beside the
     // incumbent's; the command link stays on the incumbent.
-    let started = image_command(&fixture, &image)
-        .envs(candidate_environment(&image))
-        .env("PLAK_HOME", &paired.runner.home)
-        .args(["runner", "connect", "--stdio"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .status()
-        .unwrap();
-    assert!(started.success());
+    let prestart = |home: &Path| {
+        let started = image_command(&fixture, &image)
+            .envs(candidate_environment(&image))
+            .env("PLAK_HOME", home)
+            .args(["runner", "connect", "--stdio"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(started.success());
+    };
+    prestart(&paired.runner.home);
     assert_eq!(inventory(), 2);
-    let report = probe();
+    let report = probe(&explicit);
     assert_eq!(report["verdict"], "opens", "{report}");
     assert_eq!(inventory(), 2);
     assert_eq!(std::fs::read_link(&paired.link).unwrap(), incumbent);
@@ -163,6 +169,48 @@ fn paired_check_reopen_reaches_a_prestarted_candidate_daemon_by_explicit_command
         paired.runner.pid().is_some(),
         "the incumbent daemon stopped"
     );
+
+    // An explicit command reaching another runner's candidate daemon is
+    // refused by the pinned identity, not trusted for being named.
+    let other = paired.runner.home.with_file_name(format!(
+        "{}-other",
+        paired.runner.home.file_name().unwrap().to_str().unwrap()
+    ));
+    std::fs::create_dir_all(other.join("runner")).unwrap();
+    std::fs::set_permissions(&other, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+    std::fs::set_permissions(
+        other.join("runner"),
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    std::fs::copy(
+        paired.runner.home.join("runner/runner.toml"),
+        other.join("runner/runner.toml"),
+    )
+    .unwrap();
+    prestart(&other);
+    let wrapper = fixture.root.join("other-runner");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nPLAK_HOME={} exec {} \"$@\"\n",
+            shell_words::quote(other.to_str().unwrap()),
+            shell_words::quote(image.to_str().unwrap())
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        &wrapper,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    refused(
+        probe(&format!("remote={}", wrapper.display())),
+        "check_reopen_runner_identity",
+    );
+    drop(client);
+    stop(&mut host);
+    let _ = std::fs::remove_dir_all(&other);
 }
 
 #[test]
