@@ -259,10 +259,12 @@ fn next_until<T>(
     mut check: impl FnMut(),
     decode: impl Fn(&str) -> Option<T>,
 ) -> Option<T> {
-    socket
-        .get_mut()
-        .set_read_timeout(Some(Duration::from_millis(250)))
-        .unwrap();
+    crate::socket_timeout::allow_closed_peer(
+        socket
+            .get_ref()
+            .set_read_timeout(Some(Duration::from_millis(250))),
+    )
+    .unwrap();
     loop {
         check();
         assert!(

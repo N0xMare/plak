@@ -171,7 +171,8 @@ fn host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch() {
                 id: 5,
                 op: change(attachment, rebind),
             });
-            client.stream.set_read_timeout(Some(WAIT)).unwrap();
+            crate::socket_timeout::allow_closed_peer(client.stream.set_read_timeout(Some(WAIT)))
+                .unwrap();
             loop {
                 let mut line = String::new();
                 if client.reader.read_line(&mut line).unwrap() == 0 {

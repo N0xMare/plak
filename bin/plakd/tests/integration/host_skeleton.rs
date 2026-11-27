@@ -398,7 +398,8 @@ impl Client {
                 .filter(|remaining| !remaining.is_zero())
                 .expect("host observation deadline expired")
         });
-        self.stream.set_read_timeout(Some(timeout)).unwrap();
+        crate::socket_timeout::allow_closed_peer(self.stream.set_read_timeout(Some(timeout)))
+            .unwrap();
         let read = self.reader.read_line(&mut line).unwrap_or_else(|error| {
             panic!(
                 "host client read failed: {error}; buffered bytes={}; reader {}; writer {}",

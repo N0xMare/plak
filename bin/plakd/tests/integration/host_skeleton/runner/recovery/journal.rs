@@ -21,7 +21,7 @@ fn received(stream: &mut UnixStream) -> RunnerFrame {
 fn bind(fixture: &Fixture) -> (UnixStream, String) {
     let mut stream =
         UnixStream::connect(local_runner_root(&fixture.home()).join("run/r.sock")).unwrap();
-    stream.set_read_timeout(Some(WAIT)).unwrap();
+    crate::socket_timeout::allow_closed_peer(stream.set_read_timeout(Some(WAIT))).unwrap();
     let RunnerFrame::Hello(hello) = received(&mut stream) else {
         panic!("no hello")
     };

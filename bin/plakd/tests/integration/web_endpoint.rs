@@ -198,9 +198,10 @@ fn connect(web: &Web) -> UnixStream {
 fn connect_at(path: &std::path::Path) -> UnixStream {
     let stream = UnixStream::connect(path).unwrap();
     // A read the endpoint never answers fails the test rather than hang it.
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
-        .unwrap();
+    crate::socket_timeout::allow_closed_peer(
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(20))),
+    )
+    .unwrap();
     stream
 }
 

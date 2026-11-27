@@ -39,7 +39,7 @@ fn a_host_refuses_requested_reload_without_any_client_or_redispatch() {
         fixture.write_script(&json!({"version":1,"steps":[step]}));
         let mut host = start(&fixture);
         let mut probe = UnixStream::connect(&host.socket).unwrap();
-        probe.set_read_timeout(Some(WAIT)).unwrap();
+        crate::socket_timeout::allow_closed_peer(probe.set_read_timeout(Some(WAIT))).unwrap();
         probe
             .write_all(
                 encode_line(&ClientFrame::<PlakExtension>::Hello(Hello {

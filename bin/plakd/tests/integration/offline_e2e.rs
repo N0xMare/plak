@@ -3367,9 +3367,10 @@ fn service_answers_while_writer_lives(endpoint: SocketAddr, pid: u32) {
         );
         std::thread::sleep(Duration::from_millis(20));
     };
-    stream
-        .set_read_timeout(Some(Duration::from_secs(15)))
-        .expect("read timeout");
+    crate::socket_timeout::allow_closed_peer(
+        stream.set_read_timeout(Some(Duration::from_secs(15))),
+    )
+    .expect("read timeout");
     let wrote = stream
         .write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
         .is_ok();

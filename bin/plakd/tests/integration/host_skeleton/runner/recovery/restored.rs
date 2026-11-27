@@ -3,10 +3,12 @@
 use super::*;
 
 fn wait_for_approval(client: &mut Client, require_restored: bool) {
-    client
-        .stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-        .unwrap();
+    crate::socket_timeout::allow_closed_peer(
+        client
+            .stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5))),
+    )
+    .unwrap();
     let mut restored = !require_restored;
     let mut approval = false;
     loop {

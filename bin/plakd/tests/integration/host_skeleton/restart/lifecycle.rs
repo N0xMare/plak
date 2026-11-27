@@ -11,7 +11,7 @@ fn observe(host: &Host) -> (BufReader<UnixStream>, u64) {
 
 fn observe_binary(host: &Host) -> (BufReader<UnixStream>, u64, String) {
     let mut stream = UnixStream::connect(&host.socket).unwrap();
-    stream.set_read_timeout(Some(WAIT)).unwrap();
+    crate::socket_timeout::allow_closed_peer(stream.set_read_timeout(Some(WAIT))).unwrap();
     stream
         .write_all(
             encode_line(&ClientFrame::<PlakExtension>::Hello(Hello {
@@ -77,7 +77,7 @@ fn host_lifecycle_protocol_twelve_gets_only_version_mismatch_even_at_planned_sto
     let Some(fixture) = fixture() else { return };
     let mut host = start(&fixture);
     let mut stream = UnixStream::connect(&host.socket).unwrap();
-    stream.set_read_timeout(Some(WAIT)).unwrap();
+    crate::socket_timeout::allow_closed_peer(stream.set_read_timeout(Some(WAIT))).unwrap();
     stream
         .write_all(
             encode_line(&ClientFrame::<PlakExtension>::Hello(Hello {

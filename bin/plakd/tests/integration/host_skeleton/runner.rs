@@ -118,7 +118,7 @@ fn a_reload_signal_during_runner_startup_is_retained() {
             Err(error) => panic!("inspection: {error}"),
         }
     };
-    stream.set_read_timeout(Some(WAIT)).unwrap();
+    crate::socket_timeout::allow_closed_peer(stream.set_read_timeout(Some(WAIT))).unwrap();
     // macOS hands accepted sockets the listener's O_NONBLOCK; Linux does not.
     stream.set_nonblocking(false).unwrap();
     stream
@@ -228,7 +228,7 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
                 Err(error) => panic!("old socket: {error}"),
             }
         };
-        stream.set_read_timeout(Some(WAIT)).unwrap();
+        crate::socket_timeout::allow_closed_peer(stream.set_read_timeout(Some(WAIT))).unwrap();
         stream.set_nonblocking(false).unwrap();
         stream
             .write_all(&frame::encode(&RunnerFrame::Hello(hello)).unwrap())

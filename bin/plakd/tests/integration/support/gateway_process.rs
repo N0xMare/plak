@@ -83,9 +83,10 @@ impl GatewayProcess {
         loop {
             if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket) {
                 use std::io::{Read as _, Write as _};
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(1)))
-                    .unwrap();
+                crate::socket_timeout::allow_closed_peer(
+                    stream.set_read_timeout(Some(Duration::from_secs(1))),
+                )
+                .unwrap();
                 if stream
                     .write_all(
                         b"GET /versions HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",

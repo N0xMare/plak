@@ -75,7 +75,7 @@ pub(super) fn separate_stop_timestamp(fixture: &Fixture) {
 
 pub(super) fn review_rows(host: &Host) -> Vec<SessionRow> {
     let stream = UnixStream::connect(&host.socket).unwrap();
-    stream.set_read_timeout(Some(WAIT)).unwrap();
+    crate::socket_timeout::allow_closed_peer(stream.set_read_timeout(Some(WAIT))).unwrap();
     let (send, receive, _) = client::connect_directory_with::<PlakExtension>(
         Transport::new(stream.try_clone().unwrap(), stream),
         Hello {
@@ -100,7 +100,7 @@ pub(super) fn review_rows(host: &Host) -> Vec<SessionRow> {
 
 pub(super) fn create(host: &Host, fixture: &Fixture) -> Option<String> {
     let stream = UnixStream::connect(&host.socket).ok()?;
-    stream.set_read_timeout(Some(WAIT)).unwrap();
+    crate::socket_timeout::allow_closed_peer(stream.set_read_timeout(Some(WAIT))).unwrap();
     let (send, receive, _) = client::connect_directory_with::<PlakExtension>(
         Transport::new(stream.try_clone().unwrap(), stream),
         Hello {

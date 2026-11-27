@@ -105,8 +105,7 @@ pub(super) fn start() -> (u16, mpsc::Receiver<&'static str>) {
 
 fn respond(mut stream: TcpStream) -> Option<&'static str> {
     stream.set_nonblocking(false).unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
+    crate::socket_timeout::allow_closed_peer(stream.set_read_timeout(Some(Duration::from_secs(5))))
         .unwrap();
     let mut reader = BufReader::new(&mut stream);
     let mut request = String::new();

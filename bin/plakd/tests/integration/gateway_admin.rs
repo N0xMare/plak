@@ -517,7 +517,8 @@ pub(super) fn oauth_request(listener: &TcpListener, path: &str) -> TcpStream {
         }
     };
     peer.set_nonblocking(false).unwrap();
-    peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    crate::socket_timeout::allow_closed_peer(peer.set_read_timeout(Some(Duration::from_secs(5))))
+        .unwrap();
     let mut reader = BufReader::new(&mut peer);
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();

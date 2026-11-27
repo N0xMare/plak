@@ -39,6 +39,8 @@ mod protocol_13;
 mod reload_rehearsal;
 #[cfg(unix)]
 mod runner_contract;
+#[path = "support/socket_timeout.rs"]
+mod socket_timeout;
 #[cfg(feature = "test-support")]
 mod telemetry_contract;
 #[cfg(all(feature = "test-support", feature = "web"))]

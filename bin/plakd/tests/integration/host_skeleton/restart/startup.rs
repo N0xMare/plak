@@ -75,7 +75,7 @@ fn serving_held(fixture: &Fixture, held: &Held, env: &[(&str, String)]) -> Host 
 
 fn hello(socket: &Path) -> (BufReader<UnixStream>, UnixStream) {
     let stream = UnixStream::connect(socket).unwrap();
-    stream.set_read_timeout(Some(WAIT)).unwrap();
+    crate::socket_timeout::allow_closed_peer(stream.set_read_timeout(Some(WAIT))).unwrap();
     let mut writer = stream.try_clone().unwrap();
     writer
         .write_all(
@@ -186,17 +186,20 @@ fn a_held_start_serves_welcome_and_a_saved_first_page_and_admission_waits() {
     let (mut picker, mut picker_writer) = hello(&host.socket);
     assert!(lifecycle(&frame(&mut picker), "starting"));
     send(&mut picker_writer, 1, &json!({"op":"session_options"}));
-    picker
-        .get_ref()
-        .set_read_timeout(Some(Duration::from_millis(300)))
-        .unwrap();
+    crate::socket_timeout::allow_closed_peer(
+        picker
+            .get_ref()
+            .set_read_timeout(Some(Duration::from_millis(300))),
+    )
+    .unwrap();
     let mut line = String::new();
     assert!(
         picker.read_line(&mut line).is_err(),
         "the picker answered before the start: {line}"
     );
     assert!(held.holding());
-    picker.get_ref().set_read_timeout(Some(WAIT)).unwrap();
+    crate::socket_timeout::allow_closed_peer(picker.get_ref().set_read_timeout(Some(WAIT)))
+        .unwrap();
 
     held.release();
     let answered = until_response(&mut picker, 1);
@@ -245,17 +248,20 @@ fn request(writer: &mut UnixStream, id: u64, op: Op<PlakExtension>) {
 /// Nothing arrives on `reader` while `held` holds: a request it carries is
 /// still waiting.
 fn silent(reader: &mut BufReader<UnixStream>, held: &Held) {
-    reader
-        .get_ref()
-        .set_read_timeout(Some(Duration::from_millis(300)))
-        .unwrap();
+    crate::socket_timeout::allow_closed_peer(
+        reader
+            .get_ref()
+            .set_read_timeout(Some(Duration::from_millis(300))),
+    )
+    .unwrap();
     let mut line = String::new();
     assert!(
         reader.read_line(&mut line).is_err(),
         "answered while held: {line}"
     );
     assert!(held.holding());
-    reader.get_ref().set_read_timeout(Some(WAIT)).unwrap();
+    crate::socket_timeout::allow_closed_peer(reader.get_ref().set_read_timeout(Some(WAIT)))
+        .unwrap();
 }
 
 #[test]
