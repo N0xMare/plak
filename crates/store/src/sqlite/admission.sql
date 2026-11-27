@@ -1,4 +1,5 @@
 CREATE INDEX admission_object_codec ON runtime_objects(codec);
+CREATE INDEX admission_object_length ON runtime_objects(id) WHERE typeof(byte_len)<>'integer';
 CREATE INDEX admission_feed_version ON session_feed(session_id,seq)
  WHERE substr(record,1,13)<>x'7b2276657273696f6e223a312c';
 

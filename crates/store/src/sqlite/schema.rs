@@ -730,7 +730,10 @@ pub(super) fn validate_admission_counts(c: &Connection) -> Result<(), SessionSto
     let matches: bool = c
         .query_row(
             "SELECT sessions=?1 AND branches=?2 AND checkpoints=?3 AND objects=?4
-                 AND object_bytes=?5 AND tombstones=?6 FROM admission_counts WHERE id=1",
+                 AND object_bytes=?5 AND tombstones=?6 AND NOT EXISTS (
+                     SELECT 1 FROM runtime_objects INDEXED BY admission_object_length
+                     WHERE typeof(byte_len)<>'integer'
+                 ) FROM admission_counts WHERE id=1",
             params![
                 i64n(s.sessions)?,
                 i64n(s.branches)?,

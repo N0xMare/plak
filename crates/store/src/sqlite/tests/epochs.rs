@@ -372,6 +372,18 @@ fn bounded_admission_refuses_feed_framing_and_count_drift() -> TestResult {
         assert_eq!(SqliteSessionStore::open(&path).err(), Some(refusal));
     }
     connection.execute("UPDATE session_feed SET record=?1", [original])?;
+    connection.execute(
+        "UPDATE runtime_objects SET byte_len=byte_len || 'x' WHERE id=1",
+        [],
+    )?;
+    assert_eq!(
+        SqliteSessionStore::open(&path).err(),
+        Some(SessionStoreError::corrupt())
+    );
+    connection.execute(
+        "UPDATE runtime_objects SET byte_len=CAST(byte_len AS INTEGER) WHERE id=1",
+        [],
+    )?;
     connection.execute("UPDATE store_meta SET object_bytes=object_bytes+1", [])?;
     assert_eq!(
         SqliteSessionStore::open(&path).err(),
