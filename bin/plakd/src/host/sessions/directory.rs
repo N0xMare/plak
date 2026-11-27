@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Condvar, Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use plakous_host_protocol::{
@@ -26,6 +26,8 @@ mod draft;
 mod files;
 
 const REVALIDATE: Duration = Duration::from_secs(15);
+/// How long a directory read waits for the first projection of a start.
+const FIRST_PROJECTION_WAIT: Duration = Duration::from_secs(10);
 const PROBE_HOLDERS: Duration = Duration::from_millis(250);
 
 type Rows = BTreeMap<String, Summary>;
@@ -41,6 +43,7 @@ struct Summary {
 pub(super) struct Directory {
     inbox: Arc<Inbox>,
     rows: Arc<RwLock<Rows>>,
+    projected: Arc<Projected>,
     changes: watch::Sender<u64>,
     external: Option<External>,
     draft_attention: draft::Stamps,
@@ -72,20 +75,28 @@ impl Directory {
             #[cfg(test)]
             runtime_inspections: Arc::default(),
         };
-        let rows = Arc::new(RwLock::new(source.rebuild().map_err(CliFailure::new)?));
+        // The first projection reads every row; it is built on the directory
+        // thread, so a start serves before it (spec 02 §4.6).
+        let rows = Arc::new(RwLock::new(Rows::new()));
+        let projected = Arc::new(Projected::default());
         #[cfg(test)]
         let runtime_inspections = Arc::clone(&source.runtime_inspections);
         let shared = Arc::clone(&rows);
         let notify = changes.clone();
+        let first = Arc::clone(&projected);
         std::thread::Builder::new()
             .name("plakd-directory".into())
-            .spawn(move || source.run(&events, &shared, &notify))
+            .spawn(move || {
+                let retry = source.first_projection(&shared, &first, &notify);
+                source.run(&events, &shared, &notify, &first, retry);
+            })
             .map_err(|error| {
                 CliFailure::new(format!("could not start session directory: {error}"))
             })?;
         Ok(Self {
             inbox,
             rows,
+            projected,
             changes,
             external: None,
             draft_attention: draft::Stamps::default(),
@@ -96,6 +107,12 @@ impl Directory {
 
     pub(super) fn changes(&self) -> watch::Receiver<u64> {
         self.changes.subscribe()
+    }
+
+    /// Whether the first projection of this start has been published. A
+    /// watch sends nothing before it; its publication is a change.
+    pub(super) fn projected(&self) -> bool {
+        self.projected.done()
     }
 
     pub(super) fn serve(
@@ -163,14 +180,15 @@ impl Directory {
         runner: Option<&str>,
         include_archived: bool,
         runners: &[runner_views::RunnerRow],
-    ) -> Vec<SessionRow> {
-        self.select(workspace, runner, include_archived, |summary| {
+    ) -> Result<Vec<SessionRow>, String> {
+        self.projected.wait(FIRST_PROJECTION_WAIT)?;
+        Ok(self.select(workspace, runner, include_archived, |summary| {
             let mut row = summary.row.clone();
             let runner = &row.runner.runner_id;
             row.runner_status = runner_status(summary, runners);
             row.runner = runner_views::label(runner, runners);
             Some(row)
-        })
+        }))
     }
 
     fn select<T>(
@@ -180,6 +198,10 @@ impl Directory {
         include_archived: bool,
         project: impl FnMut(&Summary) -> Option<T>,
     ) -> Vec<T> {
+        // Callers that must not wait check `projected` first.
+        if self.projected.wait(FIRST_PROJECTION_WAIT).is_err() {
+            return Vec::new();
+        }
         let by_remote_path = runner.is_some_and(|runner| runner != "local");
         let local_identity = workspace
             .filter(|_| !by_remote_path)
@@ -238,6 +260,56 @@ fn runner_status(summary: &Summary, runners: &[runner_views::RunnerRow]) -> Runn
     } else {
         runner_views::status(&summary.row.runner.runner_id, runners)
             .unwrap_or(RunnerStatus::Unknown)
+    }
+}
+
+/// The first projection of a start: absent while it is being read, then
+/// the outcome of its latest attempt.
+#[derive(Default)]
+struct Projected {
+    outcome: Mutex<Option<Result<(), String>>>,
+    settled: Condvar,
+}
+
+impl Projected {
+    fn done(&self) -> bool {
+        matches!(
+            *self.outcome.lock().unwrap_or_else(PoisonError::into_inner),
+            Some(Ok(()))
+        )
+    }
+
+    fn publish(&self, outcome: Result<(), String>) {
+        let mut current = self.outcome.lock().unwrap_or_else(PoisonError::into_inner);
+        if matches!(*current, Some(Ok(()))) {
+            return;
+        }
+        *current = Some(outcome);
+        drop(current);
+        self.settled.notify_all();
+    }
+
+    fn wait(&self, bound: Duration) -> Result<(), String> {
+        let deadline = Instant::now() + bound;
+        let mut outcome = self.outcome.lock().unwrap_or_else(PoisonError::into_inner);
+        loop {
+            match &*outcome {
+                Some(Ok(())) => return Ok(()),
+                Some(Err(error)) => {
+                    return Err(format!("the session directory could not be read: {error}"));
+                }
+                None => {}
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("the session directory is still being read; retry shortly".to_owned());
+            }
+            outcome = self
+                .settled
+                .wait_timeout(outcome, remaining)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
     }
 }
 
@@ -324,11 +396,40 @@ struct Source {
 }
 
 impl Source {
-    fn run(&mut self, events: &Mailbox, shared: &RwLock<Rows>, notify: &watch::Sender<u64>) {
+    /// Builds and publishes the first projection. True when it failed and
+    /// the next revalidation must rebuild.
+    fn first_projection(
+        &mut self,
+        shared: &RwLock<Rows>,
+        projected: &Projected,
+        notify: &watch::Sender<u64>,
+    ) -> bool {
+        match self.rebuild() {
+            Ok(rows) => {
+                *shared.write().unwrap_or_else(PoisonError::into_inner) = rows;
+                projected.publish(Ok(()));
+                bump(notify);
+                false
+            }
+            Err(error) => {
+                eprintln!("plakd host: the session directory could not be read: {error}");
+                projected.publish(Err(error));
+                true
+            }
+        }
+    }
+
+    fn run(
+        &mut self,
+        events: &Mailbox,
+        shared: &RwLock<Rows>,
+        notify: &watch::Sender<u64>,
+        projected: &Projected,
+        mut retry_rebuild: bool,
+    ) {
         let interval = crate::test_hooks::host_lifecycle::directory_revalidation(REVALIDATE);
         let mut next_tick = Instant::now() + interval;
         let mut next_probe = Instant::now() + PROBE_HOLDERS;
-        let mut retry_rebuild = false;
         while let Some(mut batch) = events.take_until(if self.holders.is_empty() {
             next_tick
         } else {
@@ -352,6 +453,7 @@ impl Source {
                 retry_rebuild = match self.rebuild() {
                     Ok(next) => {
                         *shared.write().unwrap_or_else(PoisonError::into_inner) = next;
+                        projected.publish(Ok(()));
                         bump(notify);
                         false
                     }

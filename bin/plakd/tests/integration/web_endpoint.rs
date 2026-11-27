@@ -123,9 +123,10 @@ fn launch_on_with_env(
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
             eprintln!("{line}");
-            if line.starts_with("plakd host: serving on ") {
+            // The endpoint serves before the start's inventories complete.
+            if line.starts_with("plakd host: startup complete") {
                 let _ = ready.send(true);
-            } else {
+            } else if !line.starts_with("plakd host: serving on ") {
                 let _ = forward.send(line);
             }
         }

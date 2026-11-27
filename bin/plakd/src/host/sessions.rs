@@ -52,6 +52,7 @@ pub(super) struct ProductSessions {
     directory: directory::Directory,
     placement: Box<dyn Placement>,
     idle_reason: Mutex<Option<&'static str>>,
+    startup: Arc<super::startup::Startup>,
 }
 
 impl ProductSessions {
@@ -110,7 +111,54 @@ impl ProductSessions {
             directory: directory::Directory::start(services.paths()?, Arc::clone(&tree))?,
             tree,
             idle_reason: Mutex::new(None),
+            startup: Arc::new(super::startup::Startup::ready()),
         })
+    }
+
+    /// Gates opens, creation and runner-dependent lifecycle changes on
+    /// `startup` (spec 02 §4.6).
+    pub(super) fn with_startup(mut self, startup: Arc<super::startup::Startup>) -> Self {
+        self.startup = startup;
+        self
+    }
+
+    /// Waits for the startup inventories before work that depends on them.
+    fn admit(&self, runner_id: &str) -> CliResult<()> {
+        if self.startup.is_ready() {
+            return Ok(());
+        }
+        self.startup.admit(
+            &runner_views::label(runner_id, &self.services.runners().rows()),
+            super::startup::ADMISSION_WAIT,
+        )
+    }
+
+    fn admit_session(&self, session: &str) -> Result<(), RequestRefusal> {
+        if self.startup.is_ready() {
+            return Ok(());
+        }
+        let runner = self.saved_runner(session)?;
+        self.admit(&runner)
+            .map_err(|failure| self.refusal(session, &failure))
+    }
+
+    /// The saved runner of `session` from its product row alone.
+    fn saved_runner(&self, session: &str) -> Result<String, RequestRefusal> {
+        let paths =
+            self.services
+                .paths()
+                .map_err(|failure| RequestRefusal::SessionUnavailable {
+                    detail: failure.message().to_owned(),
+                })?;
+        let record =
+            ProductStore::inspect_session_metadata_read_only(paths, session).map_err(|error| {
+                RequestRefusal::SessionUnavailable {
+                    detail: error.to_string(),
+                }
+            })?;
+        Ok(record
+            .runner
+            .map_or_else(|| "local".to_owned(), |runner| runner.runner_id))
     }
 
     pub(super) fn serve_directory(&mut self, runtime: &tokio::runtime::Handle) -> CliResult<()> {
@@ -280,19 +328,18 @@ impl ProductSessions {
                 .resume_after_loss
                 != Some(crate::product_config::ResumeAfterLoss::Hold);
         let store = self.services.session_records()?;
-        let mut entries = self
-            .with_product(|product| product.continuation_candidates())
-            .map_err(CliFailure::new)?;
         let paths = self.services.paths()?;
+        // Its own store: the inventory runs beside attaches, which resolve
+        // their nodes through the shared metadata handle.
+        let mut product =
+            ProductStore::open(paths).map_err(|error| CliFailure::new(error.to_string()))?;
+        let mut entries = product.continuation_candidates().map_err(CliFailure::new)?;
         for tree_id in self
             .tree
             .handoff_candidate_tree_ids()
             .map_err(|error| CliFailure::new(error.detail))?
         {
-            if let Some(session) = self
-                .with_product(|product| product.head_of_tree(&tree_id))
-                .map_err(CliFailure::new)?
-            {
+            if let Some(session) = product.head_of_tree(&tree_id).map_err(CliFailure::new)? {
                 entries.push(session);
             }
         }
@@ -306,8 +353,8 @@ impl ProductSessions {
             if !record.archived
                 && (plakous_hosted::runtime::root_standing(store.as_ref(), &id)
                     .is_ok_and(|standing| owes_open(standing, continue_losses))
-                    || (self
-                        .with_product(|product| product.head_of_tree(&record.node.tree_id))
+                    || (product
+                        .head_of_tree(&record.node.tree_id)
                         .map_err(CliFailure::new)?
                         .as_deref()
                         == Some(id.as_str())
@@ -551,11 +598,23 @@ impl HostSessions<PlakExtension> for ProductSessions {
         &self,
         session: &str,
         include_unarchived: bool,
+        presentation: bool,
     ) -> Result<
         Option<plakous_hosted::host_service::wire::StoredSessionView<PlakExtension>>,
         RequestRefusal,
     > {
-        self.read_stored(session, include_unarchived)
+        self.read_stored(session, include_unarchived, presentation)
+    }
+
+    fn deferred_open(&self, session: &str) -> Option<CliFailure> {
+        if self.startup.is_ready() {
+            return None;
+        }
+        let runner = self.saved_runner(session).ok()?;
+        self.startup.deferred(&runner_views::label(
+            &runner,
+            &self.services.runners().rows(),
+        ))
     }
 
     fn runner_label(&self, id: &str) -> plakous_host_protocol::wire::RunnerLabel {
@@ -569,6 +628,13 @@ impl HostSessions<PlakExtension> for ProductSessions {
             plakous_hosted::host_service::wire::PickerProgress,
         ) -> Result<(), String>,
     ) -> Result<plakous_host_protocol::wire::SessionOptions, RequestRefusal> {
+        // Picker probes need the runner registry the startup prepares.
+        self.admit("local").map_err(|failure| {
+            failure
+                .wire_refusal()
+                .cloned()
+                .unwrap_or(RequestRefusal::Backpressure)
+        })?;
         self.session_options(workspace, progress)
     }
 
@@ -578,6 +644,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
     }
 
     fn archive(&self, session: &str, archived: bool) -> Result<(), RequestRefusal> {
+        self.admit_session(session)?;
         crate::commands::session::lifecycle::set_archived(&self.services, session, archived)
             .map_err(|error| lifecycle::refusal(session, error))
     }
@@ -588,6 +655,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
         abandon_children: bool,
         abandon_jobs: bool,
     ) -> Result<(), RequestRefusal> {
+        self.admit_session(session)?;
         crate::commands::session::lifecycle::delete_confirmed(
             &self.services,
             session,
@@ -603,12 +671,12 @@ impl HostSessions<PlakExtension> for ProductSessions {
         runner: Option<&str>,
         include_archived: bool,
     ) -> Result<Vec<SessionRow>, String> {
-        Ok(self.directory.rows(
+        self.directory.rows(
             workspace,
             runner,
             include_archived,
             &self.services.runners().rows(),
-        ))
+        )
     }
 
     fn directory_changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
@@ -629,6 +697,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
             .runner
             .as_ref()
             .map_or("local", |runner| runner.runner_id.as_str());
+        self.admit(runner_id)?;
         self.placement
             .validate(
                 &runner_views::label(runner_id, &self.services.runners().rows()),
@@ -653,6 +722,12 @@ impl HostSessions<PlakExtension> for ProductSessions {
             .session_records()?
             .load(session)
             .map_err(CliFailure::new)?;
+        self.admit(
+            record
+                .runner
+                .as_ref()
+                .map_or("local", |runner| runner.runner_id.as_str()),
+        )?;
         let (target, _) =
             crate::carry::rebind::session::rebind_session(&self.services, &record, cause)?;
         Ok(Created {
@@ -680,6 +755,12 @@ impl HostSessions<PlakExtension> for ProductSessions {
                 holder.pid
             )));
         }
+        self.admit(
+            record
+                .runner
+                .as_ref()
+                .map_or("local", |runner| runner.runner_id.as_str()),
+        )?;
         let roots = self.stop_roots(&record)?;
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -815,6 +896,8 @@ impl HostSessions<PlakExtension> for ProductSessions {
         if let Ok(existing) = store.load(&session) {
             return replayed(&existing);
         }
+        self.admit(&creation.runner.runner_id)
+            .map_err(|failure| self.refusal(&session, &failure))?;
         let validated = self.placement.validate(creation.runner, workspace)?;
         let local_workspace = validated
             .runner
@@ -867,6 +950,10 @@ impl plakous_hosted::host_service::wire::DirectoryProjection<PlakExtension>
         seq: u64,
         include_archived: bool,
     ) -> Result<Option<String>, plakous_host_protocol::wire::WireError> {
+        // Publishing the first projection is a directory change.
+        if !self.product.directory.projected() {
+            return Ok(None);
+        }
         let rows = self.product.directory.draft_rows(
             None,
             None,

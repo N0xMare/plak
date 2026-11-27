@@ -12,12 +12,14 @@ pub fn write_lifecycle(
 ) -> plakous_hosted::CliResult<()> {
     use v13::{HostLifecyclePhase as Phase, HostLifecycleReason as Reason};
     let phase = match notice.phase {
+        legacy::HostLifecyclePhase::Starting => Phase::Starting,
         legacy::HostLifecyclePhase::Draining => Phase::Draining,
         legacy::HostLifecyclePhase::Restarting => Phase::Restarting,
         legacy::HostLifecyclePhase::Stopping => Phase::Stopping,
         legacy::HostLifecyclePhase::Running => Phase::Running,
     };
     let reason = match notice.reason {
+        legacy::HostLifecycleReason::Startup => Reason::Startup,
         legacy::HostLifecycleReason::PairedUpgrade => Reason::PairedUpgrade,
         legacy::HostLifecycleReason::CrossKeyUpgrade => Reason::CrossKeyUpgrade,
         legacy::HostLifecycleReason::Shutdown => Reason::Shutdown,

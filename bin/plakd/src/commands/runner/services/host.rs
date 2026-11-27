@@ -2,15 +2,21 @@
 
 use super::{CliResult, RunnerClient, Services, install_reporter, start_probes};
 
-pub(crate) fn prepare(
-    services: &Services,
-    startup: Option<&std::path::Path>,
-) -> CliResult<(Services, std::sync::Arc<plakous::runner::WorkspaceCatalog>)> {
+/// The serving host's runner custody and configured runners, before it
+/// serves. The placement inventory follows off the critical path.
+pub(crate) fn prepare(services: &Services) -> CliResult<Services> {
     let services = custody(services)?;
-    let prepared = crate::commands::runner::registry::prepare(&services, startup)?;
-    let services = prepared.services;
+    crate::commands::runner::registry::configure(&services)
+}
+
+/// The placement and process-stop inventory of [`prepare`]'s services; the
+/// serving host requires its local daemon connection.
+pub(crate) fn inventory(
+    services: &Services,
+) -> CliResult<std::sync::Arc<plakous::runner::WorkspaceCatalog>> {
+    let local = crate::commands::runner::registry::inventory(services, None)?;
     services.runners().require_connection("local", true);
-    Ok((services, prepared.local))
+    Ok(local)
 }
 
 fn custody(services: &Services) -> CliResult<Services> {
@@ -33,7 +39,7 @@ pub(crate) fn start(
     services: &Services,
     local: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
     environment: &super::super::environment::HostEnvironment,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
 ) {
     let environment = environment.clone();
     start_probes(
@@ -43,7 +49,7 @@ pub(crate) fn start(
             let environment = environment.clone();
             Box::pin(async move { bind_local(&services, catalog, &environment, &runtime).await })
         })),
-        runtime.handle(),
+        runtime,
     );
 }
 

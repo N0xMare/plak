@@ -23,3 +23,19 @@ pub(crate) fn record_handoff_budget(elapsed: std::time::Duration, remaining: std
         let _ = std::fs::write(path, value.to_string());
     }
 }
+
+/// Holds the start's inventories until the release file exists, after
+/// announcing the hold beside it, so a fixture can act while they wait.
+pub(crate) fn startup_held() {
+    let Some(release) = super::hook_environment("PLAK_TEST_HOST_STARTUP_HOLD") else {
+        return;
+    };
+    let release = std::path::PathBuf::from(release);
+    let mut held = release.clone().into_os_string();
+    held.push(".held");
+    let _ = std::fs::write(held, []);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while !release.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}

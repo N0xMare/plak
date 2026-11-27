@@ -65,6 +65,17 @@ where
     /// Publishes advisory product state only to handshaken connections.
     /// It does not touch admission, sessions, drafts or their outcomes.
     pub fn publish_lifecycle(&self, notice: HostLifecycle<P>) {
+        self.deliver_lifecycle(notice, true);
+    }
+
+    /// Delivers `notice` to the connections already handshaken and seeds no
+    /// later one: a connection admitted afterwards reads no notice as the
+    /// settled phase.
+    pub fn settle_lifecycle(&self, notice: HostLifecycle<P>) {
+        self.deliver_lifecycle(notice, false);
+    }
+
+    fn deliver_lifecycle(&self, notice: HostLifecycle<P>, seed: bool) {
         let mut latest = self
             .lifecycle_latest
             .lock()
@@ -80,7 +91,7 @@ where
             }
             queue.push_back(notice.clone());
         }
-        *latest = Some(notice);
+        *latest = seed.then_some(notice);
         drop(deliveries);
         drop(latest);
         self.changed();

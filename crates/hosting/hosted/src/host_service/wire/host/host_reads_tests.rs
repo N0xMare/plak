@@ -220,6 +220,38 @@ fn a_mid_drain_directory_connection_gets_the_current_phase_before_later_notices(
     }
 }
 
+#[test]
+fn a_settled_notice_reaches_seeded_connections_and_seeds_no_later_one() {
+    let (host, _) = fixture(limits());
+    host.publish_lifecycle(lifecycle_notice(1));
+    let early = Output::default();
+    let mut seeded = host.connect(
+        early.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    host.settle_lifecycle(lifecycle_notice(2));
+    seeded.flush().unwrap();
+    assert_eq!(
+        early.take(),
+        [
+            HostFrame::from(lifecycle_notice(1)),
+            HostFrame::from(lifecycle_notice(2))
+        ]
+    );
+    assert_eq!(host.lifecycle(), None);
+    let late = Output::default();
+    let mut later = host.connect(
+        late.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    later.flush().unwrap();
+    assert!(late.take().is_empty(), "a settled phase seeds no notice");
+}
+
 #[tokio::test(start_paused = true)]
 async fn lifecycle_advisories_preserve_order_and_join_transport_attempts_not_admission() {
     let (host, state) = fixture(limits());

@@ -163,7 +163,7 @@ impl Web {
             let (pipe, stderr) = (child.stderr.take().unwrap(), Arc::clone(&stderr));
             std::thread::spawn(move || {
                 for line in BufReader::new(pipe).lines().map_while(Result::ok) {
-                    if line.starts_with("plakd host: serving on ") {
+                    if line.starts_with("plakd host: startup complete") {
                         let _ = ready.send(true);
                     }
                     stderr.lock().unwrap().push(line);

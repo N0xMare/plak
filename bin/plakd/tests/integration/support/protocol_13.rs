@@ -81,10 +81,6 @@ pub(crate) fn decode(
                         blobs,
                     }
                 }
-                F::HostLifecycle {
-                    phase: v13::HostLifecyclePhase::Starting,
-                    ..
-                } => return Ok(None),
                 frame @ F::HostLifecycle { .. } => {
                     let mut value = to_value(&frame)?;
                     if let Some(fields) = value.as_object_mut() {

@@ -231,7 +231,9 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
 
     /// Read stored attach facts without opening a runtime or taking a lease.
     /// Unless `include_unarchived`, return none before projecting an
-    /// unarchived session's transcript.
+    /// unarchived session's transcript. Without `presentation` the view
+    /// carries no presentation snapshot: a paged viewport supplies the
+    /// transcript, and the whole saved presentation is never built.
     ///
     /// # Errors
     /// Product metadata or transcript facts could not be read.
@@ -239,8 +241,16 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
         &self,
         _session: &str,
         _include_unarchived: bool,
+        _presentation: bool,
     ) -> Result<Option<StoredSessionView<P>>, RequestRefusal> {
         Ok(None)
+    }
+
+    /// Why opening `session` must wait now, answered before its slot is
+    /// touched. An attach deferred so is served from saved history instead
+    /// of waiting; the open itself still waits or refuses.
+    fn deferred_open(&self, _session: &str) -> Option<CliFailure> {
+        None
     }
 
     /// Read the bounded placement picker without opening a session.

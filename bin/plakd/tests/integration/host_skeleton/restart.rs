@@ -11,6 +11,7 @@ mod changed;
 mod lifecycle;
 mod probes;
 mod retained_jobs;
+mod startup;
 
 pub(super) fn output(fixture: &Fixture, arguments: &[&str]) -> std::process::Output {
     fixture.command().args(arguments).output().unwrap()

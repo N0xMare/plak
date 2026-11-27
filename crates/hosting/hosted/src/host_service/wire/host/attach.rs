@@ -104,6 +104,13 @@ where
         if let Some(target) = self.stored_target(node, &id, cached.as_ref()) {
             return target;
         }
+        // A start that has not finished its inventories serves saved history
+        // without touching the slot, so no open failure is recorded.
+        if let Some(deferred) = self.sessions.deferred_open(&id) {
+            return self
+                .stored_target(node, &id, Some(&deferred))
+                .unwrap_or_else(|| Target::Refused(self.sessions.refusal(&id, &deferred)));
+        }
         match slot.resident_at_handoff() {
             Ok((resident, from_open)) => {
                 let opened = Undelivered {
@@ -167,7 +174,7 @@ where
     ) -> Option<Target<P>> {
         // Ownership refusals must be rechecked when their holder goes away.
         let failure = failure.filter(|failure| failure.code() != Some("tree_hosted_elsewhere"));
-        let view = match self.sessions.stored_view(id, failure.is_some()) {
+        let view = match self.sessions.stored_view(id, failure.is_some(), false) {
             Ok(view) => view?,
             Err(refusal) => return Some(Target::Refused(refusal)),
         };
@@ -200,6 +207,17 @@ where
         {
             Ok(page) => page,
             Err(reason) => return Some(Target::Refused(reason)),
+        };
+        // Only a product without a paged viewport needs the whole saved
+        // presentation.
+        let view = if page.is_none() {
+            match self.sessions.stored_view(id, failure.is_some(), true) {
+                Ok(Some(view)) => view,
+                Ok(None) => return None,
+                Err(refusal) => return Some(Target::Refused(refusal)),
+            }
+        } else {
+            view
         };
         Some(Target::Stored(StoredAttachment::new(
             view, refusal, failure, page,

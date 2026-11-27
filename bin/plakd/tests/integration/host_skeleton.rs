@@ -217,11 +217,28 @@ fn await_serving_host((child, lines): (Child, mpsc::Receiver<String>)) -> Result
         .and_then(|rest| rest.split(" (host ").next())
         .unwrap_or_else(|| panic!("start line: {line}"));
     assert!(line.contains(", instance "), "{line}");
+    // The socket serves before the start's inventories; fixtures act on a
+    // host that has finished starting unless they hold the start themselves.
+    await_startup(&lines)?;
     Ok(Host {
         child: Some(child),
         socket: PathBuf::from(socket),
         lines,
     })
+}
+
+fn await_startup(lines: &mpsc::Receiver<String>) -> Result<(), String> {
+    loop {
+        let line = lines
+            .recv_timeout(WAIT)
+            .map_err(|error| format!("host startup inventories: {error}"))?;
+        if line.starts_with("plakd host: startup complete") {
+            return Ok(());
+        }
+        if line.starts_with("plakd host: startup failed") {
+            return Err(line);
+        }
+    }
 }
 
 #[test]

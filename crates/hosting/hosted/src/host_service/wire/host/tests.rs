@@ -118,6 +118,10 @@ struct Script {
     pending_stops: std::sync::atomic::AtomicBool,
     opens: AtomicUsize,
     stored_reads: AtomicUsize,
+    /// Whether each stored read asked for the whole saved presentation.
+    stored_presentations: Mutex<Vec<bool>>,
+    /// Opens wait for a start's inventories.
+    defer_opens: std::sync::atomic::AtomicBool,
     dormant_stops: AtomicUsize,
     stop_intents: AtomicUsize,
     /// Sessions whose open fails, with the failure.
@@ -305,8 +309,14 @@ impl HostSessions<Core> for Fake {
         &self,
         session: &str,
         include_unarchived: bool,
+        presentation: bool,
     ) -> Result<Option<StoredSessionView<Core>>, RequestRefusal> {
         self.0.stored_reads.fetch_add(1, Ordering::SeqCst);
+        self.0
+            .stored_presentations
+            .lock()
+            .unwrap()
+            .push(presentation);
         let archived = self
             .0
             .rows
@@ -386,6 +396,13 @@ impl HostSessions<Core> for Fake {
                     })
             })
             .map(|row| row.session.clone()))
+    }
+
+    fn deferred_open(&self, _: &str) -> Option<CliFailure> {
+        self.0
+            .defer_opens
+            .load(Ordering::SeqCst)
+            .then(|| CliFailure::new("the host is starting"))
     }
 
     fn open(&self, session: &str) -> CliResult<OpenedSession<Core>> {
@@ -2693,6 +2710,39 @@ fn a_background_open_moves_readonly_links_to_a_fresh_live_attachment() {
     attached(&out.take(), 2);
     assert!(connection.node.is_some());
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+    connection.leave();
+}
+
+/// A start that has not read its inventories serves the saved view without
+/// an open and without recording a failed open; once it has, the same
+/// attach opens live.
+#[test]
+fn a_deferred_open_serves_saved_history_without_touching_the_slot() {
+    let (host, fake) = host(&["s1"]);
+    fake.0.defer_opens.store(true, Ordering::SeqCst);
+    let out = Out::default();
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
+    assert!(connection.readonly.is_some() && connection.node.is_none());
+    assert!(host.slot("s1").open_failure().is_none());
+    assert_eq!(
+        fake.0.stored_presentations.lock().unwrap().first(),
+        Some(&false),
+        "the saved read starts without the whole presentation"
+    );
+    assert!(!host.rows(None, None, false).unwrap()[0].needs_operator);
+    fake.0.defer_opens.store(false, Ordering::SeqCst);
+    request(&mut connection, 2, Op::Attach { node: node("s1") });
+    attached(&out.take(), 2);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    assert!(connection.node.is_some());
     connection.leave();
 }
 

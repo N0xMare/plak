@@ -279,6 +279,22 @@ impl ProductStore {
         })
     }
 
+    /// [`Self::inspect_session_read_only`] without the transcript, queue,
+    /// prompt history or views: the session row's own facts, validated as a
+    /// full load validates them, for a saved read that pages its transcript.
+    pub fn inspect_session_metadata_read_only(
+        paths: &PlakPaths,
+        id: &str,
+    ) -> Result<SessionRecord, ProductStoreOpenError> {
+        sessions::canonical_product_session_id(id).map_err(ProductStoreOpenError::unavailable)?;
+        Self::read_only_snapshot(paths, |snapshot| {
+            let session = load_record_row(snapshot, id)?;
+            session.validate_for_store()?;
+            validate_create_binding(snapshot, &session.id, &session.create_operation_id)?;
+            Ok(session)
+        })
+    }
+
     /// Lists the ids of one workspace's sessions under the same read-only
     /// snapshot discipline as [`Self::inspect_session_read_only`], so a short
     /// id resolves without opening a writable store.
@@ -662,42 +678,7 @@ fn load_record(
     verified: &mut views::VerifiedSubmissions,
     id: &str,
 ) -> Result<SessionRecord, String> {
-    let mut session = connection
-            .query_row(
-                "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display, title_override, archived, account_choices FROM sessions WHERE id = ?1",
-                [id],
-                |row| {
-                    let locator: Option<String> = row.get(11)?;
-                    Ok(SessionRecord {
-                        store_revision: from_i64(row.get(0)?)?,
-                        id: id.to_owned(),
-                        create_operation_id: row.get(1)?,
-                        workspace_root: PathBuf::from(row.get::<_, String>(2)?),
-                        created_at_unix: from_i64(row.get(3)?)?,
-                        updated_at_unix: from_i64(row.get(4)?)?,
-                        account: row.get(5)?, model: row.get(6)?, effort: row.get(7)?, title: row.get(8)?,
-                        composition: ProductCompositionSelection::parse_config(&row.get::<_, String>(12)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                        target_selection: serde_json::from_str(&row.get::<_, String>(13)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                        source_product_session_id: row.get(9)?, source_workflow_operation_id: row.get(10)?,
-                        plakous_locator: locator.map(|value| value.parse::<SessionLocator>().map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?,
-                        frozen_tools: row.get::<_, Option<String>>(14)?.map(|value| plakous_hosted::frozen_tools::FrozenRootTools::decode(&value).map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?,
-                        transcript: sessions::ProductTranscript::default(), first_prompt: None, prompt_history: Vec::new(), pending_queue: Vec::new(), queue_commands: sessions::QueueCommands::default(), queue_projection_debt: false,
-                        queue_drain_state: QueueDrainState::LiveAutoDrain,
-                        root_turn_count: 0,
-                        child_wake_suppressed: false,
-                        tool_call_count: 0,
-                        compaction_count: 0,
-                        carry_intent: row.get::<_, Option<String>>(15)?.map(|value| plakous_hosted::sessions::CarryIntent::decode(&value).map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?,
-                        node: decode_node(row, 16)?,
-                        root_profile: decode_root_profile(row, 18)?,
-                        runner: decode_runner_display(row, 19)?,
-                        title_override: row.get(20)?,
-                        archived: row.get(21)?,
-                        account_choices: decode_account_choices(row.get(22)?)?,
-                    })
-                },
-            )
-            .map_err(|error| if matches!(error, rusqlite::Error::QueryReturnedNoRows) { "session not found".to_owned() } else { "product session row is invalid".to_owned() })?;
+    let mut session = load_record_row(connection, id)?;
     session.pending_queue = load_queue(connection, id)?;
     let (transcript, views, queue_commands) = views::transcript_of(connection, verified, id)?;
     session.transcript = transcript;
@@ -724,6 +705,45 @@ fn load_record(
         .retain(|item| !session.queue_commands.is_consumed(item));
     session.pause_restored_work();
     Ok(session)
+}
+
+fn load_record_row(connection: &Connection, id: &str) -> Result<SessionRecord, String> {
+    connection
+        .query_row(
+            "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display, title_override, archived, account_choices FROM sessions WHERE id = ?1",
+            [id],
+            |row| {
+                let locator: Option<String> = row.get(11)?;
+                Ok(SessionRecord {
+                    store_revision: from_i64(row.get(0)?)?,
+                    id: id.to_owned(),
+                    create_operation_id: row.get(1)?,
+                    workspace_root: PathBuf::from(row.get::<_, String>(2)?),
+                    created_at_unix: from_i64(row.get(3)?)?,
+                    updated_at_unix: from_i64(row.get(4)?)?,
+                    account: row.get(5)?, model: row.get(6)?, effort: row.get(7)?, title: row.get(8)?,
+                    composition: ProductCompositionSelection::parse_config(&row.get::<_, String>(12)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    target_selection: serde_json::from_str(&row.get::<_, String>(13)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    source_product_session_id: row.get(9)?, source_workflow_operation_id: row.get(10)?,
+                    plakous_locator: locator.map(|value| value.parse::<SessionLocator>().map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?,
+                    frozen_tools: row.get::<_, Option<String>>(14)?.map(|value| plakous_hosted::frozen_tools::FrozenRootTools::decode(&value).map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?,
+                    transcript: sessions::ProductTranscript::default(), first_prompt: None, prompt_history: Vec::new(), pending_queue: Vec::new(), queue_commands: sessions::QueueCommands::default(), queue_projection_debt: false,
+                    queue_drain_state: QueueDrainState::LiveAutoDrain,
+                    root_turn_count: 0,
+                    child_wake_suppressed: false,
+                    tool_call_count: 0,
+                    compaction_count: 0,
+                    carry_intent: row.get::<_, Option<String>>(15)?.map(|value| plakous_hosted::sessions::CarryIntent::decode(&value).map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?,
+                    node: decode_node(row, 16)?,
+                    root_profile: decode_root_profile(row, 18)?,
+                    runner: decode_runner_display(row, 19)?,
+                    title_override: row.get(20)?,
+                    archived: row.get(21)?,
+                    account_choices: decode_account_choices(row.get(22)?)?,
+                })
+            },
+        )
+        .map_err(|error| if matches!(error, rusqlite::Error::QueryReturnedNoRows) { "session not found".to_owned() } else { "product session row is invalid".to_owned() })
 }
 
 fn validate_loaded_bindings(

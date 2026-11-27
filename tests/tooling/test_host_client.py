@@ -128,12 +128,17 @@ class ReferenceClientTests(unittest.TestCase):
 
         self.drain = threading.Thread(target=drain, daemon=True)
         self.drain.start()
+        self.socket = None
         while True:
             line = self.lines.get(timeout=15)
             self.assertIsNotNone(line, "host exited before serving")
             if line.startswith("plakd host: serving on "):
                 self.socket = line.removeprefix("plakd host: serving on ").split(" (host ")[0]
+            # The socket serves before the start's inventories complete.
+            if line.startswith("plakd host: startup complete"):
+                self.assertIsNotNone(self.socket, "host completed its start before serving")
                 break
+            self.assertFalse(line.startswith("plakd host: startup failed"), line)
 
     def start_runner(self, home):
         # Own the runner before starting the host. The host's detached

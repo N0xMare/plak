@@ -15,6 +15,7 @@ impl ProductSessions {
         &self,
         id: &str,
         include_unarchived: bool,
+        presentation: bool,
     ) -> Result<Option<StoredSessionView<PlakExtension>>, RequestRefusal> {
         let unavailable = |detail| RequestRefusal::SessionUnavailable { detail };
         let paths = self
@@ -28,8 +29,13 @@ impl ProductSessions {
         {
             return Ok(None);
         }
-        let record = ProductStore::inspect_session_read_only(paths, id)
-            .map_err(|error| unavailable(error.into()))?;
+        // A paged viewport supplies the transcript: read only the row.
+        let record = if presentation {
+            ProductStore::inspect_session_read_only(paths, id)
+        } else {
+            ProductStore::inspect_session_metadata_read_only(paths, id)
+        }
+        .map_err(|error| unavailable(error.into()))?;
         if !record.archived && !include_unarchived {
             return Ok(None);
         }
@@ -54,7 +60,8 @@ impl ProductSessions {
             root_effort: record.effort.clone(),
             ..Default::default()
         };
-        let snapshot = plakous_hosted::runtime::session_restore_snapshot(&record);
+        let snapshot =
+            presentation.then(|| plakous_hosted::runtime::session_restore_snapshot(&record));
         let context = if record.runner.is_some() {
             paths.for_remote_workspace(&record.workspace_root)
         } else {
@@ -80,17 +87,18 @@ impl ProductSessions {
                 account_choices: record.account_choices,
             },
         );
+        let mut observations = vec![
+            SessionObservation::SessionInfo(info),
+            SessionObservation::Extension(
+                crate::surface_protocol::SurfaceObservation::SessionProfile(profile),
+            ),
+        ];
+        observations.extend(snapshot.map(SessionObservation::PresentationSnapshot));
         Ok(Some(StoredSessionView {
             archived: record.archived,
             session: record.id,
             root,
-            observations: vec![
-                SessionObservation::SessionInfo(info),
-                SessionObservation::Extension(
-                    crate::surface_protocol::SurfaceObservation::SessionProfile(profile),
-                ),
-                SessionObservation::PresentationSnapshot(snapshot),
-            ],
+            observations,
         }))
     }
 }
@@ -123,7 +131,10 @@ mod tests {
             let database = paths.product_database();
             let opens = crate::store::open_counts::get(&database);
             assert_eq!(
-                product.read_stored(&record.id, false).unwrap().is_some(),
+                product
+                    .read_stored(&record.id, false, true)
+                    .unwrap()
+                    .is_some(),
                 archived
             );
             assert_eq!(
@@ -131,11 +142,29 @@ mod tests {
                 usize::from(archived),
                 "an unarchived attach must not open a stored-history connection"
             );
-            let view = product.read_stored(&record.id, true).unwrap().unwrap();
+            let view = product
+                .read_stored(&record.id, true, true)
+                .unwrap()
+                .unwrap();
             assert_eq!(view.session, record.id);
             assert_eq!(view.archived, archived);
             assert!(view.observations.iter().any(|event| matches!(event,
             SessionObservation::PresentationSnapshot(snapshot) if serde_json::to_string(snapshot).unwrap().contains("persisted fact"))));
+            let paged = product
+                .read_stored(&record.id, true, false)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                (paged.session, paged.archived),
+                (record.id.clone(), archived)
+            );
+            assert!(
+                !paged
+                    .observations
+                    .iter()
+                    .any(|event| matches!(event, SessionObservation::PresentationSnapshot(_))),
+                "a paged saved read must not build the whole presentation"
+            );
             assert_unrecorded_root_template_is_null(view.observations);
             assert_eq!(services.product_store_opens(), 0);
             assert!(!paths.runtime_database().exists());

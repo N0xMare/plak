@@ -31,6 +31,14 @@ pub(crate) fn run(
                     .map(PathBuf::from);
                 stderr.push(line);
                 if let Some(socket) = socket {
+                    if let Err(failure) = await_startup(&lines) {
+                        stderr.push(failure);
+                        return AgentOutcome {
+                            status: child.wait().unwrap(),
+                            lines: Vec::new(),
+                            stderr: stderr.join("\n"),
+                        };
+                    }
                     break socket;
                 }
             }

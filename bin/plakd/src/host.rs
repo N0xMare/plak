@@ -26,6 +26,7 @@ pub(crate) mod send;
 mod sessions;
 mod socket;
 mod starter;
+mod startup;
 mod store_revisions;
 mod wake;
 
@@ -201,10 +202,8 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         &runtime,
         HostSignals { reload, stop },
         web_policy.zip(listeners.web.as_ref()),
-        &environment,
         &binary,
     )?;
-    let owed = opened.product.owed()?;
     announce_host(&listeners.control, &environment, paths, &custody);
     let _store_monitor = runtime.spawn(crate::runtime_headroom::watch(
         paths.clone(),
@@ -214,7 +213,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         listeners,
         ownership,
         opened,
-        owed,
+        environment,
         runtime,
         stop,
         binary,
@@ -261,7 +260,7 @@ struct RunningHost {
     listeners: HostListeners,
     ownership: HostOwnership,
     opened: OpenedHost,
-    owed: Vec<String>,
+    environment: environment::HostEnvironment,
     runtime: tokio::runtime::Runtime,
     stop: crate::web::StopProbe,
     binary: String,
@@ -273,7 +272,7 @@ impl RunningHost {
             mut listeners,
             ownership,
             opened,
-            owed,
+            environment,
             runtime,
             stop,
             binary,
@@ -282,20 +281,26 @@ impl RunningHost {
             services,
             terminals,
             host,
-            product: _,
+            product,
+            startup,
             web,
             idle_reload,
         } = opened;
         let paths = services.paths()?;
-        let scanning = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        scan(
-            &host,
-            owed,
-            move || stop.stopped(),
-            &services,
-            runtime.handle(),
-            Arc::clone(&scanning),
-        );
+        // The start counts as a scan until its inventories are read, so an
+        // auto-started host cannot go idle before it knows its debt.
+        let scanning = Arc::new(std::sync::atomic::AtomicUsize::new(1));
+        lifecycle::starting(&host);
+        let completing = complete_startup(StartupWork {
+            services: services.clone(),
+            product,
+            host: Arc::clone(&host),
+            startup: Arc::clone(&startup),
+            environment,
+            runtime: runtime.handle().clone(),
+            scanning: Arc::clone(&scanning),
+            stopped: Arc::new(move || stop.stopped()),
+        });
         let reload_requests = runtime.spawn(requested_reload::serve(
             Arc::clone(&host),
             paths.clone(),
@@ -306,9 +311,10 @@ impl RunningHost {
         ownership.home.running()?;
         // The web endpoint serves beside the control socket and stops with it.
         let web = web.map(|web| runtime.spawn(web.serve()));
+        let failed = Arc::clone(&startup);
         let stopping = runtime.block_on(listeners.control.serve(
             &host,
-            move || stop.stopped(),
+            move || stop.stopped() || failed.failure().is_some(),
             idle,
             scanning,
             || {
@@ -316,6 +322,7 @@ impl RunningHost {
                 let _ = ownership.home.stopping();
             },
         ));
+        startup.stop();
         lifecycle::stopping(&host);
         runtime.block_on(host.wait_lifecycle_delivery(Duration::from_secs(1)));
         stop_listeners(&runtime, reload_requests, web, idle_reload);
@@ -326,13 +333,93 @@ impl RunningHost {
         runtime.block_on(terminals.stop());
         // Joined release closes the host to new sessions.
         hand_off(&host, stopping);
+        // The start checks for a stop between its steps; none of its steps
+        // may run on a runtime that has shut down.
+        let _ = completing.join();
         eprintln!(
             "plakd host: stopped in {} ms",
             stopping.elapsed().as_millis()
         );
         shutdown_runtime(runtime);
-        Ok(ProcessOutcome::Success)
+        match startup.failure() {
+            Some(failure) => Err(CliFailure::new(format!(
+                "plakd host could not complete its start: {failure}"
+            ))),
+            None => Ok(ProcessOutcome::Success),
+        }
     }
+}
+
+/// What the start completes after the control socket serves.
+struct StartupWork {
+    services: Services,
+    product: Arc<sessions::ProductSessions>,
+    host: Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
+    startup: Arc<startup::Startup>,
+    environment: environment::HostEnvironment,
+    runtime: tokio::runtime::Handle,
+    scanning: Arc<std::sync::atomic::AtomicUsize>,
+    stopped: Arc<dyn Fn() -> bool + Send + Sync>,
+}
+
+/// The start's inventories, on a thread of their own (spec 02 §4.6): the
+/// runner placement and process-stop inventory, then the runner probes,
+/// then the continuation inventory. Only then are opens admitted, the
+/// `running` notice sent and the start scan begun. A failed inventory
+/// stops the host.
+fn complete_startup(work: StartupWork) -> std::thread::JoinHandle<()> {
+    let started = Instant::now();
+    std::thread::spawn(move || {
+        let StartupWork {
+            services,
+            product,
+            host,
+            startup,
+            environment,
+            runtime,
+            scanning,
+            stopped,
+        } = work;
+        crate::test_hooks::host_lifecycle::startup_held();
+        let inventories = (|| -> CliResult<Option<Vec<String>>> {
+            if stopped() {
+                return Ok(None);
+            }
+            let local = runner::host::inventory(&services)?;
+            if stopped() {
+                return Ok(None);
+            }
+            runner::host::start(&services, local, &environment, &runtime);
+            let owed = product.owed()?;
+            Ok((!stopped()).then_some(owed))
+        })();
+        match inventories {
+            Ok(Some(owed)) => {
+                if startup.complete(|| lifecycle::running(&host)) {
+                    eprintln!(
+                        "plakd host: startup complete in {} ms",
+                        started.elapsed().as_millis()
+                    );
+                    host.changed();
+                    let stopped = Arc::clone(&stopped);
+                    scan(
+                        &host,
+                        owed,
+                        move || stopped(),
+                        &services,
+                        &runtime,
+                        Arc::clone(&scanning),
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(failure) => {
+                eprintln!("plakd host: startup failed: {}", failure.message());
+                startup.fail(failure.message().to_owned());
+            }
+        }
+        scanning.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    })
 }
 
 struct HostSignals {
@@ -345,6 +432,7 @@ struct OpenedHost {
     terminals: Arc<terminals::TerminalRegistry>,
     host: Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
     product: Arc<sessions::ProductSessions>,
+    startup: Arc<startup::Startup>,
     web: Option<crate::web::WebEndpoint>,
     idle_reload: Option<tokio::task::JoinHandle<()>>,
 }
@@ -355,13 +443,13 @@ fn open_host(
     runtime: &tokio::runtime::Runtime,
     signals: HostSignals,
     web: Option<(crate::web::WebPolicy, &Arc<crate::web::Listener>)>,
-    environment: &environment::HostEnvironment,
     binary: &str,
 ) -> CliResult<OpenedHost> {
     let paths = services.paths()?;
     crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
     let (services, terminals) = terminals::TerminalRegistry::compose(services, host_generation())?;
-    let (services, local) = runner::host::prepare(&services, None)?;
+    let services = runner::host::prepare(&services)?;
+    let startup = Arc::new(startup::Startup::starting());
     let session_runtime = Some(runtime.handle().clone());
     let mut sessions = match &web {
         Some((policy, _)) => sessions::ProductSessions::with_switches(
@@ -371,18 +459,19 @@ fn open_host(
             policy.switches,
         ),
         None => sessions::ProductSessions::new(&services, idle_release, session_runtime),
-    }?;
+    }?
+    .with_startup(Arc::clone(&startup));
     sessions.serve_directory(runtime.handle())?;
     let product = Arc::new(sessions);
     let host = SessionHost::new_shared(product.clone(), binary.to_owned(), terminals.generation());
     terminals.serve(&host, runtime.handle())?;
     let (web, idle_reload) = compose_web(runtime, &services, web, &host, signals)?;
-    runner::host::start(&services, local, environment, runtime);
     Ok(OpenedHost {
         services,
         terminals,
         host,
         product,
+        startup,
         web,
         idle_reload,
     })

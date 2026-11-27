@@ -8,6 +8,7 @@ pub use plakous_host_protocol::wire::BridgeUnavailableReason;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HostLifecyclePhase {
+    Starting,
     Draining,
     Restarting,
     Stopping,
@@ -17,6 +18,7 @@ pub enum HostLifecyclePhase {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HostLifecycleReason {
+    Startup,
     PairedUpgrade,
     CrossKeyUpgrade,
     Shutdown,

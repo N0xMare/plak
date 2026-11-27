@@ -15,3 +15,5 @@ pub(crate) fn record_handoff_budget(
     _remaining: std::time::Duration,
 ) {
 }
+
+pub(crate) const fn startup_held() {}

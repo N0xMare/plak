@@ -208,6 +208,38 @@ pub(crate) fn prepare(
     services: &Services,
     startup: Option<&std::path::Path>,
 ) -> CliResult<Prepared> {
+    let services = configure(services)?;
+    let local = inventory(&services, startup)?;
+    Ok(Prepared { services, local })
+}
+
+/// The configured runners and the machine-overlap guard: cheap reads of the
+/// configuration and pins, before any session or placement admission.
+pub(crate) fn configure(services: &Services) -> CliResult<Services> {
+    let paths = services.paths()?;
+    let services = services.with_runner_overlap(overlap_guard(paths)?);
+    for runner in configured_runners(paths)? {
+        services.runners().configure(runner);
+    }
+    let configured_paths = paths.clone();
+    services.runners().configured_with(Arc::new(move || {
+        configured_runners(&configured_paths).map_err(|_| PlacementFailure::RunnerUnreachable {
+            phase: plakous::runner::ProbePhase::Options,
+            timed_out: false,
+        })
+    }));
+    Ok(services)
+}
+
+/// The persisted placement and process-stop inventory: requires a
+/// connection to every runner with recorded stop debt, and returns the local
+/// workspace catalog of the recent local placements. It reads every placed
+/// tree, so a serving host runs it off its startup critical path, before
+/// any runner probe.
+pub(crate) fn inventory(
+    services: &Services,
+    startup: Option<&std::path::Path>,
+) -> CliResult<Arc<WorkspaceCatalog>> {
     let paths = services.paths()?;
     let product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
@@ -259,24 +291,10 @@ pub(crate) fn prepare(
     if omitted != 0 {
         tracing::warn!(target: "plak.runner", omitted, "inadmissible recent workspaces omitted from local catalog");
     }
-    let services = services.with_runner_overlap(overlap_guard(paths)?);
-    for runner in configured_runners(paths)? {
-        services.runners().configure(runner);
-    }
-    let configured_paths = paths.clone();
-    services.runners().configured_with(Arc::new(move || {
-        configured_runners(&configured_paths).map_err(|_| PlacementFailure::RunnerUnreachable {
-            phase: plakous::runner::ProbePhase::Options,
-            timed_out: false,
-        })
-    }));
     for id in required {
         services.runners().require_connection(&id, true);
     }
-    Ok(Prepared {
-        services,
-        local: Arc::new(local),
-    })
+    Ok(Arc::new(local))
 }
 
 /// Reconfirm identity and roots before publishing a bound connection. An

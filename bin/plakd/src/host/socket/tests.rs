@@ -443,6 +443,7 @@ impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessi
         &self,
         session: &str,
         _: bool,
+        _: bool,
     ) -> Result<Option<StoredSessionView<PlakExtension>>, plakous_host_protocol::wire::RequestRefusal>
     {
         use plakous_host_protocol::{

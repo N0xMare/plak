@@ -173,9 +173,15 @@ no compatible field for the version evidence, and the host does not substitute
 its own Git version.
 
 A planned stop emits `stopping` with reason `shutdown` and no active
-countdown. Other phases and reasons remain decodable but are reserved and
-are not emitted, including `draining`, `restarting`, and the paired
-successor's `starting` and `running` notices.
+countdown. A starting host answers Welcome before its startup inventories
+complete: a connection admitted then receives `starting` with reason
+`startup`, and `running` with reason `startup` once they complete. Until
+then a root attach answers a read-only saved first page, and opens, prompts
+and new sessions are refused with placement `runner_unreachable`, phase
+`reconcile`; after `running`, send `retry_attach` for a live attachment. A
+connection admitted after the start completed receives no startup notice.
+Other phases and reasons remain decodable but are reserved and are not
+emitted, including `draining`, `restarting` and the paired upgrade reasons.
 A bridge that cannot reach Welcome uses the typed discovery refusal.
 The topology refusal code `step_held` is reserved and no longer emitted.
 

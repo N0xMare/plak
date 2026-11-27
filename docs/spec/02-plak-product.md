@@ -1919,7 +1919,11 @@ rows are not evidence of current work. The notice is never persisted.
 Routing/ownership refusals (such as `tree_hosted_elsewhere`) and a stopping
 host retain their refusals rather than creating a saved-history attachment.
 A plain attach retries the open through the existing serialized slot and
-serves saved history only if that fresh attempt fails. While the startup scan
+serves saved history only if that fresh attempt fails. While the start's
+inventories are incomplete, root attach serves saved history without an open
+attempt and without marking the slot failed; its failure is the retryable
+placement refusal `runner_unreachable` with phase `reconcile`. After
+`running`, `retry_attach` or a fresh attach opens it live. While the startup scan
 still owns a failed slot's automatic retries, plain attach instead reads the
 cached failure without attempting another open. When that slot opens, existing
 read-only links receive `moved` to reattach live. A failed child-node attach
@@ -4325,8 +4329,10 @@ the neutral envelope carries the product's lifecycle extension.
 `seconds_remaining` is zero and `deadline_at` is omitted on frames this
 build emits. Both fields remain decodable.
 
-This build announces only `stopping` / `shutdown`, for every planned stop
-including the stop of a restart upgrade; all other phases are reserved. Socket and web
+This build announces `stopping` / `shutdown` for every planned stop
+including the stop of a restart upgrade, and `starting` / `startup` then
+`running` / `startup` around the start's inventories (§4.6, **Startup
+readiness**); all other phases and reasons are reserved. Socket and web
 writers make a bounded final send attempt before closing. Connection joins and
 advisory delivery spend the same host-wide stop budget: handoff receives only
 the time remaining since stop was observed, less the existing stop margin; slow or lost peers
@@ -4335,7 +4341,9 @@ acknowledge a prompt, authorize replay, or alter admission. The native client
 keeps lifecycle in a separate latest-only slot (`try_host_lifecycle`), never in
 the bounded operator-stream queue; unread notices coalesce. New
 admitted connections are seeded with the current phase, including a directory
-connection arriving during stop; registration cannot race publication and miss it. Failure without a
+connection arriving during stop; registration cannot race publication and miss it.
+The `running` notice goes only to connections seeded with `starting`; a
+connection admitted after the start completed receives no startup notice. Failure without a
 notice remains possible. A destination serves ordinary Welcome; committed,
 ready carried-root aliases use the existing `RequestRefusal::Moved`, not a new
 successor field. The served product listeners match versions exactly, without
@@ -6375,8 +6383,30 @@ settles asynchronously after endpoint binding, before local admission.
   dormant session is `released`; one the host does not know is
   `unknown_session`. The release writes nothing of its own: it is the idle
   release's joined quit.
-- **Start scan.** Before admitting work (and, on a cold start, before serving),
-  the host reads which of the directory's
+- **Startup readiness.** The control socket and the web endpoint serve as
+  soon as custody, the state-key locks, store schema and revisions, stopped
+  store revisions and the listeners are settled. Welcome and exact-node saved
+  reads do not wait for the start's inventories: the runner placement and
+  process-stop inventory with the local workspace catalog, the first
+  directory projection, and the continuation inventory of the start scan.
+  These run in the background, placement first so the runner probes start
+  early; every runner probe still follows endpoint binding. Each connection
+  admitted before they complete is seeded with `host_lifecycle` `starting` /
+  `startup` and receives `running` / `startup` when they complete; the host
+  then logs `plakd host: startup complete in <ms> ms`. Until then:
+  attach of a known node resolves only that node's tree head and serves its
+  saved first page read-only, reading the session row and the paged history
+  rather than the whole saved presentation; a session open, `new_session`,
+  dormant Stop, archive, delete, rebind and the placement picker wait up to
+  30 s and then refuse with the retryable reconciliation placement refusal,
+  so no turn is admitted and no runner effect depends on unread stop or
+  recovery evidence; a directory list waits up to 10 s for the first
+  projection and a directory watch sends its first snapshot when the
+  projection is published; and an auto-started host cannot idle-exit. A
+  failed inventory logs `plakd host: startup failed: <why>` and stops the
+  host as a planned stop with a failed exit; a stop during the start
+  suppresses `running`. Advisory notices still never decide admission.
+- **Start scan.** Before admitting work, the host reads which of the directory's
   sessions the last host left a continuation that runs by itself: a root
   whose latest loss is a planned handoff, a root continuation decided and
   not yet admitted (a crash left it pending), and, under `[host]
@@ -6535,7 +6565,7 @@ keeps its separate readiness path.
   seconds of the host budget after session joins. It prints
   `plakd host: serving on <socket> (host <host id>, instance <instance>);
   gateway: <configured address>; tools get <source>` once
-  it accepts.
+  it accepts, before its startup inventories complete.
 
 `SIGUSR1` reloads UI assets only (§4.5). It deliberately differs from
 `SIGHUP`, which remains a planned handoff. With `--ui`, use `systemctl
