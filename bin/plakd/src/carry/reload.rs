@@ -121,7 +121,7 @@ pub(crate) fn reopen_probe(services: &crate::shell::services::Services, id: &str
                 children: Some(Box::new(children)),
             });
         }
-        probe_root(services, paths, record, false)
+        probe_root(services, paths, record, None)
     };
     verdict().unwrap_or_else(ReopenProbe::refused)
 }
@@ -142,13 +142,15 @@ pub(crate) struct CheckReopenReport {
 pub(crate) fn check_reopen(
     services: &crate::shell::services::Services,
     id: &str,
+    commands: &super::placement::RunnerCommands,
 ) -> CheckReopenReport {
     let probe = || -> Result<CheckReopenReport, String> {
         let (paths, record) = probe_session(services, id)?;
         crate::test_hooks::gate_upgrade_reopen(&record.id)?;
         let children = inspect_children(paths, &record)?;
         let mut qualification = children.qualify();
-        let root = probe_root(services, paths, record, true).unwrap_or_else(ReopenProbe::refused);
+        let root = probe_root(services, paths, record, Some(commands))
+            .unwrap_or_else(ReopenProbe::refused);
         let (verdict, root) = match std::mem::take(&mut qualification.regressions).into_report() {
             Some(regressions) => {
                 let reason = regressions.to_string();
@@ -216,7 +218,7 @@ fn probe_root(
     services: &crate::shell::services::Services,
     paths: &PlakPaths,
     record: SessionRecord,
-    restart_probe: bool,
+    restart: Option<&super::placement::RunnerCommands>,
 ) -> Result<ReopenProbe, String> {
     let (_, recorded, _, views) =
         crate::store::ProductStore::inspect_projection_read_only(paths, &record.id)?;
@@ -226,12 +228,13 @@ fn probe_root(
     let head = views.as_ref().map_or(recorded, |views| {
         plakous_hosted::runtime::projected_head(recorded, views)
     });
-    let verify = if restart_probe {
-        crate::commands::session::verify_restart_reopen
-    } else {
-        crate::commands::session::verify_exact_reopen
-    };
-    verify(services, record, head).map_err(|error| error.message().to_owned())
+    match restart {
+        Some(commands) => {
+            crate::commands::session::verify_restart_reopen(services, record, head, commands)
+        }
+        None => crate::commands::session::verify_exact_reopen(services, record, head),
+    }
+    .map_err(|error| error.message().to_owned())
 }
 
 impl From<plakous_hosted::runtime::ReopenVerdict> for ReopenProbe {

@@ -92,9 +92,11 @@ impl Command {
             Self::SessionCheckReopen {
                 session,
                 store_probe,
+                runner_commands,
             } => Self::SessionCheckReopen {
                 session,
                 store_probe: store_probe.map(at),
+                runner_commands,
             },
             Self::Host(mut host) => {
                 if let Some(web) = &mut host.web {
@@ -340,6 +342,7 @@ pub(crate) enum Command {
     SessionCheckReopen {
         session: String,
         store_probe: Option<PathBuf>,
+        runner_commands: crate::carry::placement::RunnerCommands,
     },
     CarryProbe {
         path: PathBuf,

@@ -13,6 +13,8 @@ use crate::shell::services::Services;
 #[derive(Clone)]
 pub(crate) struct Remote {
     pub(crate) id: String,
+    /// The configured name, which `[runners.<name>]` keys.
+    pub(crate) name: String,
     pub(crate) config: crate::product_config::RunnerConfig,
     pub(crate) pin: super::PairedRunner,
 }
@@ -92,6 +94,7 @@ pub(crate) fn paired_remote(
         {
             return Ok(Remote {
                 id: id.into(),
+                name,
                 config,
                 pin,
             });
@@ -375,6 +378,7 @@ mod tests {
         let config = crate::product_config::ProductConfig::load(&paths).unwrap();
         let remote = Remote {
             id: "runner".into(),
+            name: "alpha".into(),
             config: config.runners["alpha"].clone(),
             pin: read_pin(&paths, "alpha").unwrap(),
         };

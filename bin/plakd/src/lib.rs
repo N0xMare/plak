@@ -425,9 +425,15 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             &mut io::stdout().lock(),
         );
     }
-    if let Command::SessionCheckReopen { session, .. } = &command {
+    if let Command::SessionCheckReopen {
+        session,
+        runner_commands,
+        ..
+    } = &command
+    {
         let mut stdout = io::stdout().lock();
-        serde_json::to_writer(&mut stdout, &carry::check_reopen(&services, session))
+        let report = carry::check_reopen(&services, session, runner_commands);
+        serde_json::to_writer(&mut stdout, &report)
             .map_err(|_| CliFailure::new("stdout failed"))?;
         writeln!(stdout).map_err(|_| CliFailure::new("stdout failed"))?;
         return Ok(ProcessOutcome::Success);

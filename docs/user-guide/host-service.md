@@ -161,13 +161,27 @@ such a child, restore the original evaluator file with its exact bytes, or
 close the child if you no longer need it.
 
 For a paired placement, `check-reopen` needs the candidate runner daemon
-already serving. Advance the paired runner's dedicated link to the candidate,
-then run `<candidate-plakd> runner serve` on the runner machine under the same
-runner account and product home, and leave it running. The old host's existing
-connection still uses the old daemon. The probe will not start a daemon itself.
+already serving, and it will not start one itself. Start it on the runner
+machine, under the same runner account and product home, without touching
+the runner's link: `<candidate-plakd> runner connect --stdio </dev/null`
+starts the candidate's daemon beside the old one and returns. Then point the
+probe at it with `--runner-command <runner>=<candidate-plakd>`, using the
+runner's name from `[runners]` and the candidate's absolute path on the
+runner machine. The old host keeps using the old daemon. Rerun a probe only
+for a session that has changed since; nothing needs probing once the host
+has stopped, since the stop itself records the hand-off.
+
+Just before stopping the host, move each paired runner's link to the
+candidate's snapshot. From then on the old host cannot open a new connection
+to that runner, so do it last.
 
 Then stop the host, take a backup while nothing writes the stores, move the
-stable link and start the service:
+stable link and start the service. The backup is needed when
+`store rehearse` reports a pending revision or runtime bootstrap. Without
+either, the new build leaves the stores at the old build's revisions, so you
+may skip it: going back means pointing the link at the old snapshot and
+starting the service again. Still check that nothing writes the stores
+before the start.
 
 ```sh
 systemctl --user stop plakd-host.service
@@ -199,7 +213,8 @@ the stop; the continuation turn sees that it was interrupted.
 If the new build fails to start, look at its log before doing anything else.
 If it never started, point the link back at the old snapshot and start the
 service. Once it may have opened the stores, repair and start it again, or
-start another build that supports the same store revisions. The backup is for
+start another build that supports the same store revisions. When the
+upgrade applied no revision, the old build is such a build. The backup is for
 disaster recovery only: stop everything using the home, restore all three
 database files from one backup, and start the old build. Writes after the
 backup are lost.

@@ -2490,6 +2490,11 @@ image on the same stores. Its pre-stop probes (`session check-binding`,
 `session check-reopen`, `store rehearse`) open the stores read-only, write
 only a new private directory directly under the home, take no custody and
 start no runner; `--store-probe` accepts only such a directory.
+`check-reopen --runner-command <runner>=<path>` replaces only the executable
+that the strict runner ssh dial runs for `runner connect --stdio --no-start`.
+The path is absolute and limited to letters, digits and `/._+-`, because the
+runner machine's shell reads it. The dial is still read-only, and the
+runner's pinned identity, machine and roots still apply.
 Standalone writers hold the home's writer admission lock shared; an
 operator holds it exclusively, with both host locks free, while it takes
 the stopped backup. `plakd host wake` is an ordinary same-user client of

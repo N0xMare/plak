@@ -104,6 +104,7 @@ pub(crate) fn verify_restart_reopen(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,
     head: plakous::sessions::SessionLocator,
+    commands: &crate::carry::placement::RunnerCommands,
 ) -> CliResult<crate::carry::ReopenProbe> {
     let placement = crate::carry::placement::Placement::prepare(
         services,
@@ -112,6 +113,7 @@ pub(crate) fn verify_restart_reopen(
             .as_ref()
             .map_or("local", |runner| runner.runner_id.as_str()),
         &record.workspace_root,
+        commands,
     )?;
     let services = &placement.services;
     verify_reopen(services, record, head, true)

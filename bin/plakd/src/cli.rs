@@ -1042,6 +1042,10 @@ enum SessionAction {
         session: String,
         #[arg(long)]
         store_probe: Option<std::path::PathBuf>,
+        /// Dial this executable on the named paired runner instead of its
+        /// configured command (repeatable `NAME=PATH`).
+        #[arg(long = "runner-command", value_name = "NAME=PATH")]
+        runner_command: Vec<String>,
     },
     #[command(hide = true)]
     CheckBinding {
@@ -1180,9 +1184,11 @@ impl SessionAction {
             Self::CheckReopen {
                 session,
                 store_probe,
+                runner_command,
             } => Ok(Command::SessionCheckReopen {
                 session,
                 store_probe,
+                runner_commands: crate::carry::placement::RunnerCommands::parse(&runner_command)?,
             }),
             Self::CheckBinding { .. } => Ok(Command::CommandHelp {
                 command: "session".to_owned(),

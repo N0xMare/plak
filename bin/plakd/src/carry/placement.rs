@@ -8,6 +8,48 @@ use crate::commands::runner::{dial, registry};
 use crate::shell::services::Services;
 use crate::{CliFailure, CliResult};
 
+/// Runner executables a qualification dials instead of a paired runner's
+/// configured command, by configured runner name: the candidate's own image
+/// on the runner machine, so the probe reaches the candidate's already running
+/// exact-triple daemon while the command link still names the incumbent.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct RunnerCommands(Vec<(String, String)>);
+
+impl RunnerCommands {
+    /// Parses repeated `NAME=PATH` values: an absolute path of plain
+    /// characters, since the runner machine's shell reads the remote command.
+    pub(crate) fn parse(values: &[String]) -> Result<Self, String> {
+        let mut commands = Vec::with_capacity(values.len());
+        for value in values {
+            let refused = || {
+                format!(
+                    "--runner-command {value}: expected NAME=PATH with an absolute path of letters, digits and / . _ + -"
+                )
+            };
+            let (name, path) = value.split_once('=').ok_or_else(refused)?;
+            let plain = |text: &str| {
+                text.bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"/._+-".contains(&byte))
+            };
+            if name.is_empty() || !plain(name) || !path.starts_with('/') || !plain(path) {
+                return Err(refused());
+            }
+            if commands.iter().any(|(known, _)| known == name) {
+                return Err(format!("--runner-command names runner {name} twice"));
+            }
+            commands.push((name.to_owned(), path.to_owned()));
+        }
+        Ok(Self(commands))
+    }
+
+    fn get(&self, name: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .find(|(known, _)| known == name)
+            .map(|(_, path)| path.as_str())
+    }
+}
+
 pub(crate) struct Placement {
     pub(crate) services: Services,
     // The client and its executor outlive configuration construction.
@@ -16,7 +58,12 @@ pub(crate) struct Placement {
 }
 
 impl Placement {
-    pub(crate) fn prepare(services: &Services, id: &str, workspace: &Path) -> CliResult<Self> {
+    pub(crate) fn prepare(
+        services: &Services,
+        id: &str,
+        workspace: &Path,
+        commands: &RunnerCommands,
+    ) -> CliResult<Self> {
         if id == "local" {
             return Ok(Self {
                 services: services.clone(),
@@ -25,6 +72,7 @@ impl Placement {
             });
         }
         let remote = registry::paired_remote(services.paths()?, id).map_err(refused)?;
+        let command = commands.get(&remote.name).unwrap_or(&remote.config.command);
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -32,7 +80,7 @@ impl Placement {
             .map_err(|error| CliFailure::new(error.to_string()))?;
         let dialed = runtime.block_on(async {
             tokio::time::timeout(Duration::from_secs(25), async {
-                let dialed = dial::qualify(services.paths()?, &remote.config.ssh, &remote.config.command).await?;
+                let dialed = dial::qualify(services.paths()?, &remote.config.ssh, command).await?;
                 if dialed.hello.runner_id != remote.id || dialed.hello.machine_id.as_deref() != Some(remote.pin.machine_id.as_str()) {
                     return Err(CliFailure::new("check_reopen_runner_identity: re-pair the configured runner using the retained build"));
                 }

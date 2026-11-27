@@ -5972,13 +5972,20 @@ runner or evaluator, resolve no credential and dispatch no model request:
   whether revisions or the bootstrap are pending and the `stores` path.
 - `plakd session check-binding --gating [--store-probe <stores>]` (§4.5)
   reports the candidate's verdict for every gating head.
-- `plakd session check-reopen <id> [--store-probe <stores>]` reports the
+- `plakd session check-reopen <id> [--store-probe <stores>]
+  [--runner-command <runner>=<path>]...` reports the
   candidate's exact-reopen verdict for one root and every open child branch
   of its tree, under the reopen-probe rules of §2.5.1. On a paired placement
   it connects read-only to an already running candidate daemon and refuses
-  if none answers. Advance the paired runner's dedicated link to the
-  candidate and start that candidate executable with `plakd runner serve`
-  on the runner machine, under its existing product home. Leave the source
+  if none answers. Before the stop, start the candidate's exact-triple
+  daemon on the runner machine with the candidate executable (`plakd runner
+  serve`, or `plakd runner connect --stdio`, which starts it), under the
+  runner's existing product home and beside the incumbent daemon, without
+  moving the runner's dedicated link. `--runner-command` dials the given
+  absolute path on the named configured runner instead of its configured
+  command, so the probe reaches that daemon while the link still names the
+  incumbent; the runner's identity, machine and roots must still match its
+  pairing. Leave the source
   daemon running for its existing connections and retained jobs. Without a source
   baseline every build-attributable child fault refuses; a missing,
   unreadable or byte-mismatched evaluator artifact under a matching
@@ -5991,9 +5998,13 @@ verdict: the operator compares the candidate's gating rows with the
 source's own `check-binding --all` audit, and a row the source verified
 that the candidate no longer can is a refusal. A typed `unsettled_work`
 verdict is not a refusal for a root whose tree has an identified
-interrupted child and no admitted root turn. The operator records a cheap
-head and revision stamp of the live stores with the verdicts and requires
-it unchanged immediately before the stop.
+interrupted child and no admitted root turn. The operator records, with each
+root's verdict, a cheap stamp of that root's tree (its session heads, their
+branch revisions and the tree revision) and its placement, and requires every
+stamp unchanged immediately before the stop; only a root whose stamp changed,
+or that has no verdict, is probed again, still before the stop. The planned
+stop itself writes handoff records, so a stamp is never compared after the
+stop and nothing is probed while the host is down.
 
 The stop is the unit's planned SIGTERM (`systemctl --user stop` or
 `restart`, `launchctl kill SIGTERM`), bounded as **Stopping** describes:
@@ -6011,9 +6022,14 @@ home-wide and per-key host locks are free, the standalone writer lock
 store file open for writing. `plakd store backup <dir> --stopped` holds both
 host locks and the writer lock while taking one synced, bounded SQLite
 snapshot of each of the three stores, including committed WAL contents
-(§2.5). This stopped backup is the
-recovery authority for the cut. Then the stable host link moves to the
-candidate and the unit starts.
+(§2.5). The stopped backup is the recovery authority for a cut whose
+candidate will apply a stopped-store revision or the runtime bootstrap.
+A non-migrating restart (the same state key, no pending revision and no
+pending bootstrap, as the candidate's `store rehearse` reports) may omit it:
+its candidate leaves the store revisions as the source wrote them, so the
+recovery is to relink and restart the source on the unchanged stores, under
+the reverse-restart limits below. Writer vacancy is still proved before the
+start. Then the stable host link moves to the candidate and the unit starts.
 
 The candidate starts as any host does: stopped-store revisions under the
 writer lock with their synced pre-revision copies (§2.5), the runtime
@@ -6023,7 +6039,9 @@ Before the candidate process has been started, a failure restores the
 source links and starts the source build. Once the candidate may have
 opened the stores, including a start that failed or never answered Welcome,
 recovery is fix-forward: repair the cause and start the candidate or another
-build that supports the committed revisions. Restoring the stopped backup is
+build that supports the committed revisions. After a non-migrating restart
+the source still supports them, so relinking and restarting the source is
+also a recovery. Restoring the stopped backup is
 manual disaster recovery: stop every user of the home, restore all three
 stores from one backup set, then start the source build. Writes after the
 backup are lost and restoring one store alone does not roll back the
@@ -6035,7 +6053,11 @@ is replayed. `plakd host wake --session <id> --text <text>` submits one
 prompt to a session through the running host as an ordinary client with a
 fresh submission id, for example to tell a waiting operator session the
 rollout finished. It never starts a host; a lost answer is reported as
-unknown and is not resent.
+unknown and is not resent. An operator agent can therefore request a restart
+and end its turn: the tooling waits, without a fixed delay, until no admitted
+root turn remains (the requester's own included), runs the restart, and once
+a host serves sends the outcome (committed, refused or held, with the reason)
+to the requesting session at most once.
 
 A changed local-runner protocol still needs its jobs settled first: the
 candidate's startup reports older-protocol jobs `OutcomeUnknown` (see
@@ -6069,10 +6091,12 @@ sidecars and runner links on the same home, then reconnect to the affected
 root. Keep the original and successor runner stores intact; do not clear the
 fence or substitute an older copy of either store.
 
-A paired runner's dedicated link advances to the candidate's snapshot before
-the host stop. The source's existing connection keeps talking to the
-incumbent daemon, which keeps its jobs; the candidate's start dials the
-advanced link. Operator tooling checks that the incumbent host can still
+A paired runner's candidate daemon starts beside the incumbent's before the
+candidate is qualified, and the runner's dedicated link advances to the
+candidate's snapshot immediately before the host stop: from then on the source
+opens no new connection to that runner. The source's existing connection
+keeps talking to the incumbent daemon, which keeps its jobs; the candidate's
+start dials the advanced link and finds its daemon already running. Operator tooling checks that the incumbent host can still
 list the runner through the advanced link and that the candidate qualifies
 it with its installed command, exact revision, flavor, protocol and pinned
 identity and roots. An unreachable enrolled runner without a durable

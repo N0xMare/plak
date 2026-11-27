@@ -83,6 +83,89 @@ fn paired_check_reopen_refuses_without_starting_the_candidate_daemon() {
 }
 
 #[test]
+fn paired_check_reopen_reaches_a_prestarted_candidate_daemon_by_explicit_command() {
+    let Some(fixture) = fixture() else { return };
+    let _cleanup = HomeHost(fixture.home());
+    let image = replacement_image(&fixture).canonicalize().unwrap();
+    let paired = Paired::new(&fixture);
+    fixture.write_script(&json!({
+        "version": 1, "repeat_last_step": true, "steps": [{"output": {"text": ANSWER}}]
+    }));
+    let mut environment = candidate_environment(&image).to_vec();
+    environment.push(("PATH", paired.path.clone()));
+    let mut host = start_env(&fixture, &[], &environment);
+    let mut client = Client::connect(&host);
+    runner::remote_ready(&mut client, &paired.id);
+    let mut request = new_session(&fixture.workspace());
+    if let Op::NewSession { runner, .. } = &mut request {
+        *runner = plakous_host_protocol::wire::RunnerLabel {
+            name: "remote".into(),
+            runner_id: paired.id.clone(),
+        };
+    }
+    let Outcome::Ok(Answer::Created { session, node, .. }) = client.request(1, request) else {
+        panic!("paired session was not created");
+    };
+    let attachment = client.attach(2, &node);
+    client.prompt(3, attachment, "save a paired session", ANSWER);
+    profiles::wait_idle(&mut client, &session);
+    drop(client);
+    stop(&mut host);
+
+    let builds = paired.runner.home.join("runner/builds");
+    let inventory = || std::fs::read_dir(&builds).unwrap().count();
+    let incumbent = std::fs::read_link(&paired.link).unwrap();
+    let explicit = format!("remote={}", image.display());
+    let probe = || {
+        let output = image_command(&fixture, &image)
+            .envs(environment.clone())
+            .args([
+                "session",
+                "check-reopen",
+                &session,
+                "--runner-command",
+                &explicit,
+            ])
+            .output()
+            .unwrap();
+        serde_json::from_slice::<serde_json::Value>(&output.stdout)
+            .unwrap_or_else(|error| panic!("check-reopen: {error}: {output:?}"))
+    };
+    // Without a running candidate daemon the explicit command still starts nothing.
+    let report = probe();
+    assert_eq!(report["verdict"], "refused", "{report}");
+    assert!(
+        report["reason"]
+            .as_str()
+            .unwrap()
+            .contains("check_reopen_runner_qualification"),
+        "{report}"
+    );
+    assert_eq!(inventory(), 1, "the probe started a runner daemon");
+
+    // The operator starts the candidate's exact-triple daemon beside the
+    // incumbent's; the command link stays on the incumbent.
+    let started = image_command(&fixture, &image)
+        .envs(candidate_environment(&image))
+        .env("PLAK_HOME", &paired.runner.home)
+        .args(["runner", "connect", "--stdio"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .status()
+        .unwrap();
+    assert!(started.success());
+    assert_eq!(inventory(), 2);
+    let report = probe();
+    assert_eq!(report["verdict"], "opens", "{report}");
+    assert_eq!(inventory(), 2);
+    assert_eq!(std::fs::read_link(&paired.link).unwrap(), incumbent);
+    assert!(
+        paired.runner.pid().is_some(),
+        "the incumbent daemon stopped"
+    );
+}
+
+#[test]
 fn local_and_paired_background_jobs_survive_a_changed_triple_restart() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());

@@ -37,8 +37,44 @@ fn restart_upgrade_verbs_parse_and_the_handoff_verbs_are_gone() {
     ));
     assert!(matches!(
         parse(args(&["session", "check-reopen", "s", "--store-probe", "/tmp/r/stores"])).unwrap(),
-        Command::SessionCheckReopen { session, store_probe: Some(_) } if session == "s"
+        Command::SessionCheckReopen { session, store_probe: Some(_), .. } if session == "s"
     ));
+    assert!(matches!(
+        parse(args(&["session", "check-reopen", "s", "--runner-command", "mac=/opt/snap/plakd"])).unwrap(),
+        Command::SessionCheckReopen { runner_commands, .. }
+            if runner_commands == crate::carry::placement::RunnerCommands::parse(&["mac=/opt/snap/plakd".to_owned()]).unwrap()
+    ));
+    for refused in [
+        "mac",
+        "mac=relative/plakd",
+        "=/opt/plakd",
+        "mac=/opt/a b",
+        "mac=/opt/$(x)",
+    ] {
+        assert!(
+            parse(args(&[
+                "session",
+                "check-reopen",
+                "s",
+                "--runner-command",
+                refused
+            ]))
+            .is_err(),
+            "{refused}"
+        );
+    }
+    assert!(
+        parse(args(&[
+            "session",
+            "check-reopen",
+            "s",
+            "--runner-command",
+            "mac=/a",
+            "--runner-command",
+            "mac=/b"
+        ]))
+        .is_err()
+    );
     for removed in [
         &["host", "upgrade", "--expect-binary", "0123456789ab"][..],
         &["host", "upgrade-verdict"],
