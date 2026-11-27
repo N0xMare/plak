@@ -344,7 +344,7 @@ async fn sigkill_additive_admission_revision_preserves_the_current_store() -> Te
                 .recover_commit(advancing_checkpoint_id()?)
                 .await?
                 .receipt(),
-            &committed
+            committed
         );
         assert_eq!(feed(&path)?, before);
     }

@@ -495,10 +495,10 @@ pub(super) fn verify_shape_pragmas(c: &Connection) -> Result<(), SessionStoreErr
 }
 
 pub(super) fn verify_exact_schema(c: &Connection) -> Result<(), SessionStoreError> {
-    if admission_revision(c)? != AdmissionRevision::Indexed {
-        Err(SessionStoreError::UnsupportedSchema)
-    } else {
+    if admission_revision(c)? == AdmissionRevision::Indexed {
         Ok(())
+    } else {
+        Err(SessionStoreError::UnsupportedSchema)
     }
 }
 

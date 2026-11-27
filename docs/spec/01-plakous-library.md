@@ -2182,14 +2182,16 @@ old-boot renewal/release refuses as superseded. Binding rotation and subsequent
 branch acquisition are separate transactions.
 
 The runtime schema is exact and does not encode the checkpoint writer epoch
-in its DDL. A read-only preflight recognizes the exact supported legacy
-DDL before opening a writer. The one-time bootstrap takes exclusive SQLite
+in its DDL. A read-only preflight recognizes the exact supported prior shapes
+before opening a writer. Stopped-store bootstrap takes exclusive SQLite
 ownership after a short bounded lock retry, syncs a pre-change backup, and
-rebuilds the object table in a single transaction. It verifies the exact
-schema, retained object headers and counts, and foreign keys without changing
-retained addresses, payloads, or receipt seals.
+applies the pending changes in one transaction. It rebuilds the object table
+only for the legacy shape with a codec constraint. The additive admission
+revision installs indexes and seeds independent row and byte counts. Bootstrap
+verifies the exact schema, retained version framing, counts and foreign keys
+without changing retained addresses, payloads, or receipt seals.
 The prior shape remains authoritative until commit; after commit older builds
-refuse the new shape. Ordinary library open refuses legacy DDL with
+refuse the new shape. Ordinary library open refuses a pending revision with
 `BootstrapRequired`. A library embedder MUST close all handles to the store,
 then call `SessionBackend::bootstrap_sqlite` explicitly before opening it
 with the new build. If another handle prevents exclusive ownership, bootstrap
@@ -2205,6 +2207,15 @@ decoding dispatches on the record's own version; the same version may span
 checkpoint epochs. A read authenticates the bytes and checks the relational
 header. A change to persisted runtime encoding bumps its epoch only when
 the bytes change; it does not move the state key.
+
+Once bootstrap is complete, runtime admission seeks the unreadable codec
+ranges in the object index and probes a partial index for noncanonical feed
+prefixes. It compares the writer's stored counts against independent counts
+maintained by SQLite triggers in the same transactions as the rows. This
+checks logical drift without scanning retained history; it does not diagnose
+physical damage on pages that admission does not read. An explicit read-only
+audit recomputes counts from retained rows and checks SQLite integrity,
+foreign keys, object content, receipts and the feed.
 
 Every object and embedded reference in a closure uses its root's epoch,
 including derived addresses and named-state and operation-ledger proofs.
