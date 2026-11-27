@@ -354,13 +354,31 @@ async fn sigkill_additive_admission_revision_preserves_the_current_store() -> Te
         assert!(SqliteSessionStore::bootstrap_pending(&backup)?);
         assert_eq!(feed(&backup)?, before);
         let backup_bytes = fs::read(&backup)?;
+        let retry_backup = path.with_extension("pre-admission-revision-1.sqlite3");
+        let old_retry = if cut == "before-commit" {
+            kill_at(&path, "bootstrap", cut)?;
+            let bytes = fs::read(&retry_backup)?;
+            Connection::open(&path)?.execute(
+                "UPDATE store_meta SET semantic_mutations=semantic_mutations+1",
+                [],
+            )?;
+            Some(bytes)
+        } else {
+            None
+        };
         SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
         assert_eq!(fs::read(&codec_backup)?, codec_bytes);
         assert_eq!(fs::read(&backup)?, backup_bytes);
-        let retry_backup = path.with_extension("pre-admission-revision-1.sqlite3");
-        assert_eq!(retry_backup.exists(), cut == "before-commit");
-        if retry_backup.exists() {
+        assert!(
+            !path
+                .with_extension("pre-admission-revision-2.sqlite3")
+                .exists()
+        );
+        if let Some(old_retry) = old_retry {
+            assert_ne!(fs::read(&retry_backup)?, old_retry);
             assert_eq!(feed(&retry_backup)?, before);
+        } else {
+            assert!(!retry_backup.exists());
         }
         SqliteSessionStore::audit(&path)?;
         let store = SqliteSessionStore::open(&path)?;
@@ -383,6 +401,34 @@ async fn sigkill_additive_admission_revision_preserves_the_current_store() -> Te
         super::remove_admission_revision(&Connection::open(&path)?)?;
         assert!(SqliteSessionStore::bootstrap_pending(&path)?);
         assert_eq!(feed(&path)?, post_revision);
+    }
+    Ok(())
+}
+
+#[test]
+fn unreadable_neutral_store_refuses_twice_without_publishing_copies() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let path = legacy(directory.path())?;
+    SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
+    super::remove_admission_revision(&Connection::open(&path)?)?;
+    let future = RUNTIME_FORMAT_EPOCH + 1;
+    Connection::open(&path)?.execute(
+        "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(20,?1,zeroblob(32),0)",
+        [future],
+    )?;
+    for _ in 0..2 {
+        assert_eq!(
+            SqliteSessionStore::bootstrap_stopped(&path, |_| panic!(
+                "invalid store reached commit"
+            )),
+            Err(SessionStoreError::UnsupportedRuntimeEpoch(future))
+        );
+        assert!(SqliteSessionStore::bootstrap_pending(&path)?);
+        for entry in fs::read_dir(directory.path())? {
+            let name = entry?.file_name();
+            assert!(!name.to_string_lossy().contains("pre-admission-revision"));
+            assert!(!name.to_string_lossy().starts_with(".runtime-bootstrap-"));
+        }
     }
     Ok(())
 }

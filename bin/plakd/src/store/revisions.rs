@@ -13,24 +13,13 @@ use crate::{CliFailure, CliResult};
 pub(crate) const STORE_STEMS: [&str; 2] = ["product", "subagents"];
 
 pub(crate) fn runtime_backup_name(name: &str) -> bool {
-    let Some(stem) = name.strip_suffix(".sqlite3") else {
-        return false;
-    };
-    [
-        "runtime.pre-codec-bootstrap",
-        "runtime.pre-admission-revision",
-    ]
-    .into_iter()
-    .any(|prefix| {
-        stem.strip_prefix(prefix).is_some_and(|suffix| {
-            suffix.is_empty()
-                || suffix.strip_prefix('-').is_some_and(|retry| {
-                    retry
-                        .parse::<u64>()
-                        .is_ok_and(|n| n > 0 && n.to_string() == retry)
-                })
-        })
-    })
+    matches!(
+        name,
+        "runtime.pre-codec-bootstrap.sqlite3"
+            | "runtime.pre-codec-bootstrap-1.sqlite3"
+            | "runtime.pre-admission-revision.sqlite3"
+            | "runtime.pre-admission-revision-1.sqlite3"
+    )
 }
 
 pub(crate) fn backup_count(paths: &PlakPaths) -> usize {

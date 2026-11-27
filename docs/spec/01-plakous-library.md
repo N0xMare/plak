@@ -2184,9 +2184,11 @@ branch acquisition are separate transactions.
 The runtime schema is exact and does not encode the checkpoint writer epoch
 in its DDL. A read-only preflight recognizes the exact supported prior shapes
 before opening a writer. Stopped-store bootstrap takes exclusive SQLite
-ownership after a short bounded lock retry, syncs a pre-change backup, and
-applies the pending changes in one transaction. Pending detection examines the
-schema, not retained rows. The additive admission revision builds indexes,
+ownership after a short bounded lock retry, stages a synced pre-change backup,
+and applies the pending changes in one transaction. It publishes the backup
+after validation and before commit. Pending detection examines the schema,
+not retained rows; the stopped transition also checks a readable writer
+marker before copying where one exists. The additive admission revision builds indexes,
 seeds independent row and byte counts, and checks the resulting schema,
 version framing and accounting before commit. It changes no source table
 or payload, so it does not redo foreign-key validation. The legacy bootstrap

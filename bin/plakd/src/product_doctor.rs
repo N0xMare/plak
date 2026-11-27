@@ -555,6 +555,16 @@ pub(crate) fn inspect_runtime_audit(path: &Path) -> DoctorCheck {
             "retained runtime data passed verification",
             None,
         ),
+        Err(error) if error.kind() == plakous::sessions::AgentSessionsErrorKind::NotFound => {
+            DoctorCheck::new(
+                kind,
+                "state",
+                Severity::Ok,
+                "missing",
+                "no retained runtime data",
+                Some("created by the first stateful command"),
+            )
+        }
         Err(error)
             if error.kind() == plakous::sessions::AgentSessionsErrorKind::BootstrapRequired =>
         {

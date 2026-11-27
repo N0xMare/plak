@@ -356,10 +356,7 @@ pub(super) fn admit_readable_records(
     revision: AdmissionRevision,
 ) -> Result<(), SessionStoreError> {
     if revision != AdmissionRevision::Legacy {
-        let epoch = writer_epoch(c)?;
-        if !reads_checkpoint_epoch(epoch) {
-            return Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch));
-        }
+        require_readable_writer(c)?;
     }
     // Seek the three disjoint ranges outside the two readable epochs. NOT IN
     // cannot skip the supported entries in an ordinary covering index.
@@ -381,6 +378,14 @@ pub(super) fn admit_readable_records(
         return Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch));
     }
     feed::require_readable_versions(c, revision == AdmissionRevision::Indexed)
+}
+
+pub(super) fn require_readable_writer(c: &Connection) -> Result<(), SessionStoreError> {
+    let epoch = writer_epoch(c)?;
+    if !reads_checkpoint_epoch(epoch) {
+        return Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch));
+    }
+    Ok(())
 }
 
 /// Admits shape, schema, domain and counter integrity. Retained state over

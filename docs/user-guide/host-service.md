@@ -247,8 +247,10 @@ The pre-upgrade copies sit beside the databases in `~/.plak/state/<key>/`,
 named `product.pre-revision-<source>.sqlite3`,
 `subagents.pre-revision-<source>.sqlite3`, `runtime.pre-codec-bootstrap.sqlite3`
 for the legacy codec-table bootstrap, and `runtime.pre-admission-revision.sqlite3`
-for the additive admission revision. A retried runtime revision adds a
-numeric suffix rather than replacing a published copy. These copies are for
+for the additive admission revision. Validation failures do not publish a
+copy. A retry keeps the first copy and can refresh just one retry copy,
+with suffix `-1` before `.sqlite3`. Do not open that copy as a live database.
+These copies are for
 manual disaster recovery, not automatic rollback. `plakd doctor` reports how many are retained
 in the current state directory. To go back, stop the host and other store
 users, move each revised database and its SQLite WAL/SHM files aside, restore

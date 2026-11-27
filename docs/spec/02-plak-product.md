@@ -1167,8 +1167,10 @@ completes the remaining revision on startup.
 Stopped runtime revisions (chapter 01 §5.2) likewise keep synced copies
 beside the live store: `runtime.pre-codec-bootstrap.sqlite3` for the legacy
 codec-table bootstrap and `runtime.pre-admission-revision.sqlite3` for the
-additive admission revision. A retry uses a numeric suffix rather than
-replacing a published copy.
+additive admission revision. Validation failures do not publish the staged
+snapshot. A retry preserves the first copy and atomically refreshes at most
+one retry copy, with suffix `-1` before `.sqlite3`. Existing SQLite sidecars
+at the retry slot prevent its replacement.
 
 After the first revision commit, same-key recovery is fix-forward: start the
 destination or another build supporting the committed revision. Before any
@@ -1177,7 +1179,7 @@ at that build. The copy is for manual disaster recovery only: stop all users
 of the store, restore the pre-upgrade copy, then run the older build. Writes
 after the copy are lost; restoring just one store does not roll back changes
 in the other stores. No host restores a copy automatically. On startup the
-host removes abandoned copy staging and never removes published copies;
+host removes abandoned copy staging and does not remove published copies;
 `store rehearse` directories belong to the operator.
 `plakd doctor` reports retained copies in the current state directory.
 An operator may remove them after verifying the new host and deciding not
@@ -8320,7 +8322,8 @@ locations (`PLAK_HOME`, `XDG_STATE_HOME`) without creating them.
 
 `doctor --audit-runtime` adds a `runtime_audit` row for the full read-only
 runtime-store audit (chapter 01 §5.2). It reports verification, a pending
-bootstrap or a refusal. It uses the normal doctor severity and exit status;
+bootstrap or a refusal; an absent or fresh runtime store is `OK missing`.
+It uses the normal doctor severity and exit status;
 `--json` still emits one report object, including on audit refusal. The audit
 scans retained data: a long snapshot can delay WAL checkpoint completion on
 a serving host, so prefer a stopped store or a consistent copy.

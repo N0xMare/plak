@@ -1244,20 +1244,27 @@ fn doctor_accepts_current_config_without_a_hypothetical_downgrade_warning() {
 }
 
 #[test]
-fn doctor_json_includes_a_refused_runtime_audit() {
+fn doctor_json_distinguishes_missing_and_refused_runtime_audits() {
     let home = isolated_home_dir();
     let _gateway = local_gateway(home.path());
-    let out = run_plak(home.path(), &["doctor", "--json", "--audit-runtime"]);
-    assert!(!out.status.success());
-    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let row = report["checks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| row["check"] == "runtime_audit")
-        .unwrap();
-    assert_eq!(row["severity"], "error");
-    assert_eq!(row["result"], "refused");
+    let paths = plakd::home::paths::PlakPaths::explicit(home.path().to_path_buf());
+    for (severity, result) in [("ok", "missing"), ("error", "refused")] {
+        if severity == "error" {
+            std::fs::create_dir_all(paths.state_dir()).unwrap();
+            std::fs::write(paths.runtime_database(), b"not a runtime database").unwrap();
+        }
+        let out = run_plak(home.path(), &["doctor", "--json", "--audit-runtime"]);
+        assert_eq!(out.status.success(), severity == "ok", "{}", stderr(&out));
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let row = report["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["check"] == "runtime_audit")
+            .unwrap();
+        assert_eq!(row["severity"], severity);
+        assert_eq!(row["result"], result);
+    }
 }
 
 #[test]
