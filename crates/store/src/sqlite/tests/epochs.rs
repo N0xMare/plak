@@ -87,10 +87,18 @@ fn advancing_checkpoint_id() -> TestResult<CheckpointId> {
 }
 
 fn commit_request(old: &LoadedBranch, lease: BranchLease) -> TestResult<CommitCheckpoint> {
+    commit_to(old, lease, advancing_checkpoint_id()?)
+}
+
+fn commit_to(
+    old: &LoadedBranch,
+    lease: BranchLease,
+    checkpoint_id: CheckpointId,
+) -> TestResult<CommitCheckpoint> {
     let before = old.checkpoint().checkpoint().manifest();
     let mut topology = before.topology();
     topology.parent_checkpoint_id = Some(topology.checkpoint_id);
-    topology.checkpoint_id = advancing_checkpoint_id()?;
+    topology.checkpoint_id = checkpoint_id;
     topology.branch_revision += 1;
     topology.lease_fence = lease.fence().get();
     topology.commit_identity = Digest::sha256(
@@ -316,10 +324,13 @@ async fn sigkill_additive_admission_revision_preserves_the_current_store() -> Te
         let directory = tempfile::tempdir()?;
         let path = legacy(directory.path())?;
         SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
+        let codec_backup = path.with_extension("pre-codec-bootstrap.sqlite3");
+        let codec_bytes = fs::read(&codec_backup)?;
         let store = SqliteSessionStore::open(&path)?;
         let lease = lease(&store).await?;
         let prior = store.load_branch(selector()?, "reopen").await?;
-        let committed = store.commit(commit_request(&prior, lease)?).await?;
+        let committed = store.commit(commit_request(&prior, lease.clone())?).await?;
+        store.release(lease).await?;
         store.shutdown().await?;
         drop(store);
         super::remove_admission_revision(&Connection::open(&path)?)?;
@@ -328,15 +339,27 @@ async fn sigkill_additive_admission_revision_preserves_the_current_store() -> Te
             SqliteSessionStore::open(&path).err(),
             Some(SessionStoreError::BootstrapRequired)
         );
+        assert_eq!(
+            SqliteSessionStore::audit(&path),
+            Err(SessionStoreError::BootstrapRequired)
+        );
         kill_at(&path, "bootstrap", cut)?;
         assert_eq!(
             SqliteSessionStore::bootstrap_pending(&path)?,
             cut == "before-commit"
         );
-        let backup = path.with_extension("pre-codec-bootstrap.sqlite3");
+        let backup = path.with_extension("pre-admission-revision.sqlite3");
         assert!(SqliteSessionStore::bootstrap_pending(&backup)?);
         assert_eq!(feed(&backup)?, before);
+        let backup_bytes = fs::read(&backup)?;
         SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
+        assert_eq!(fs::read(&codec_backup)?, codec_bytes);
+        assert_eq!(fs::read(&backup)?, backup_bytes);
+        let retry_backup = path.with_extension("pre-admission-revision-1.sqlite3");
+        assert_eq!(retry_backup.exists(), cut == "before-commit");
+        if retry_backup.exists() {
+            assert_eq!(feed(&retry_backup)?, before);
+        }
         SqliteSessionStore::audit(&path)?;
         let store = SqliteSessionStore::open(&path)?;
         assert_eq!(
@@ -346,8 +369,52 @@ async fn sigkill_additive_admission_revision_preserves_the_current_store() -> Te
                 .receipt(),
             committed
         );
-        assert_eq!(feed(&path)?, before);
+        let lease = lease(&store).await?;
+        let next = store.load_branch(selector()?, "reopen").await?;
+        store
+            .commit(commit_to(&next, lease, fixture::id(86_002)?)?)
+            .await?;
+        store.shutdown().await?;
+        drop(store);
+        let post_revision = feed(&path)?;
+        assert_ne!(post_revision, before);
+        super::remove_admission_revision(&Connection::open(&path)?)?;
+        assert!(SqliteSessionStore::bootstrap_pending(&path)?);
+        assert_eq!(feed(&path)?, post_revision);
     }
+    Ok(())
+}
+
+#[test]
+fn indexed_admission_refuses_future_and_fractional_object_codecs() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let path = legacy(directory.path())?;
+    SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
+    let connection = Connection::open(&path)?;
+    let future = RUNTIME_FORMAT_EPOCH + 1;
+    for (codec, expected) in [
+        (
+            rusqlite::types::Value::Integer(i64::from(future)),
+            SessionStoreError::UnsupportedRuntimeEpoch(future),
+        ),
+        (
+            rusqlite::types::Value::Real(f64::from(PREVIOUS_RUNTIME_FORMAT_EPOCH) + 0.5),
+            SessionStoreError::corrupt(),
+        ),
+    ] {
+        connection.execute(
+            "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(20,?1,zeroblob(32),0)",
+            [codec],
+        )?;
+        connection.execute("UPDATE store_meta SET objects=objects+1", [])?;
+        assert_eq!(SqliteSessionStore::open(&path).err(), Some(expected));
+        connection.execute(
+            "DELETE FROM runtime_objects WHERE id=last_insert_rowid()",
+            [],
+        )?;
+        connection.execute("UPDATE store_meta SET objects=objects-1", [])?;
+    }
+    SqliteSessionStore::audit(path)?;
     Ok(())
 }
 

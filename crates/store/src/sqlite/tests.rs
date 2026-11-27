@@ -7,7 +7,8 @@ use std::fs;
 use std::num::NonZeroU64;
 
 fn remove_admission_revision(connection: &Connection) -> TestResult {
-    let mut statement = connection.prepare(
+    let transaction = connection.unchecked_transaction()?;
+    let mut statement = transaction.prepare(
         "SELECT type,name FROM sqlite_schema WHERE name GLOB 'admission_*'
          ORDER BY CASE type WHEN 'table' THEN 1 ELSE 0 END",
     )?;
@@ -18,8 +19,9 @@ fn remove_admission_revision(connection: &Connection) -> TestResult {
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     for (kind, name) in objects {
-        connection.execute_batch(&format!("DROP {kind} {name};"))?;
+        transaction.execute_batch(&format!("DROP {kind} {name};"))?;
     }
+    transaction.commit()?;
     Ok(())
 }
 

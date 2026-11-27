@@ -1244,6 +1244,23 @@ fn doctor_accepts_current_config_without_a_hypothetical_downgrade_warning() {
 }
 
 #[test]
+fn doctor_json_includes_a_refused_runtime_audit() {
+    let home = isolated_home_dir();
+    let _gateway = local_gateway(home.path());
+    let out = run_plak(home.path(), &["doctor", "--json", "--audit-runtime"]);
+    assert!(!out.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let row = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["check"] == "runtime_audit")
+        .unwrap();
+    assert_eq!(row["severity"], "error");
+    assert_eq!(row["result"], "refused");
+}
+
+#[test]
 fn key_clear_fails_closed_when_gateway_env_still_wins() {
     let dir = isolated_home_dir();
     let home = dir.path();

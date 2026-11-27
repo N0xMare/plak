@@ -12,6 +12,27 @@ use crate::{CliFailure, CliResult};
 
 pub(crate) const STORE_STEMS: [&str; 2] = ["product", "subagents"];
 
+pub(crate) fn runtime_backup_name(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".sqlite3") else {
+        return false;
+    };
+    [
+        "runtime.pre-codec-bootstrap",
+        "runtime.pre-admission-revision",
+    ]
+    .into_iter()
+    .any(|prefix| {
+        stem.strip_prefix(prefix).is_some_and(|suffix| {
+            suffix.is_empty()
+                || suffix.strip_prefix('-').is_some_and(|retry| {
+                    retry
+                        .parse::<u64>()
+                        .is_ok_and(|n| n > 0 && n.to_string() == retry)
+                })
+        })
+    })
+}
+
 pub(crate) fn backup_count(paths: &PlakPaths) -> usize {
     std::fs::read_dir(paths.state_dir())
         .into_iter()
@@ -20,7 +41,7 @@ pub(crate) fn backup_count(paths: &PlakPaths) -> usize {
         .filter(|entry| {
             entry.file_type().is_ok_and(|kind| kind.is_file())
                 && entry.file_name().to_str().is_some_and(|name| {
-                    name == "runtime.pre-codec-bootstrap.sqlite3"
+                    runtime_backup_name(name)
                         || STORE_STEMS.into_iter().any(|stem| {
                             name.strip_prefix(&format!("{stem}.pre-revision-"))
                                 .and_then(|name| name.strip_suffix(".sqlite3"))

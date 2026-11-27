@@ -15,6 +15,8 @@ fn startup_discards_abandoned_copies_but_keeps_live_and_final_copies() {
     fs::write(&final_copy, b"published").unwrap();
     let runtime_copy = state.join("runtime.pre-codec-bootstrap.sqlite3");
     fs::write(&runtime_copy, b"published runtime").unwrap();
+    let admission = state.join("runtime.pre-admission-revision-1.sqlite3");
+    fs::write(&admission, b"published admission").unwrap();
     let abandoned_runtime = state.join(".runtime-bootstrap-2147483647-0");
     fs::create_dir(&abandoned_runtime).unwrap();
     fs::write(abandoned_runtime.join("copy.sqlite3-journal"), b"scratch").unwrap();
@@ -27,7 +29,8 @@ fn startup_discards_abandoned_copies_but_keeps_live_and_final_copies() {
     assert!(active_runtime.exists());
     assert_eq!(fs::read(final_copy).unwrap(), b"published");
     assert_eq!(fs::read(runtime_copy).unwrap(), b"published runtime");
-    assert_eq!(crate::store::revisions::backup_count(&paths), 2);
+    assert_eq!(fs::read(admission).unwrap(), b"published admission");
+    assert_eq!(crate::store::revisions::backup_count(&paths), 3);
 }
 
 #[test]
@@ -38,6 +41,11 @@ fn startup_reclaims_only_unlocked_legacy_probe_copies() {
         let path = paths.home().join(name);
         fs::create_dir_all(path.join("stores")).unwrap();
         fs::write(path.join("stores/product.sqlite3-wal"), []).unwrap();
+        fs::write(
+            path.join("stores/runtime.pre-admission-revision-1.sqlite3-wal"),
+            [],
+        )
+        .unwrap();
         fs::write(path.join("scratch-request"), []).unwrap();
         path
     };

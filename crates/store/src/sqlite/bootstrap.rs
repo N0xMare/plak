@@ -10,10 +10,10 @@ use rusqlite::backup::{Backup, StepResult};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 
 use super::{
-    ADMISSION_REVISION, AdmissionRevision, SCHEMA, SessionStoreError, SqlitePersistenceShape,
-    SqliteSessionStore, admit_readable_records, classify_bootstrap_connection,
-    initialize_writer_epoch, map_io, map_sqlite, validate_admission_counts, verify_contents,
-    verify_exact_schema, verify_foreign_keys, verify_sqlite_runtime,
+    ADMISSION_REVISION, AdmissionRevision, SCHEMA, SessionStoreError, SqliteSessionStore,
+    admit_readable_records, classify_bootstrap_connection, initialize_writer_epoch, map_io,
+    map_sqlite, validate_admission_counts, verify_contents, verify_exact_schema,
+    verify_foreign_keys, verify_sqlite_runtime,
 };
 
 const LOCK_WAIT: Duration = Duration::from_secs(1);
@@ -34,10 +34,7 @@ impl SqliteSessionStore {
             return Ok(false);
         };
         let snapshot = reader.unchecked_transaction().map_err(map_sqlite)?;
-        let (shape, revision) = classify_bootstrap_connection(&snapshot)?;
-        if shape == SqlitePersistenceShape::Current {
-            admit_readable_records(&snapshot, revision)?;
-        }
+        let (_, revision) = classify_bootstrap_connection(&snapshot)?;
         Ok(revision != AdmissionRevision::Indexed)
     }
 
@@ -86,7 +83,7 @@ fn run_with_deadline(
             }
             Ok(Some((mut writer, revision))) => {
                 if live {
-                    backup(&writer, path)?;
+                    backup(&writer, path, revision)?;
                 } else if let Some(deadline) = work_deadline {
                     writer
                         .progress_handler(4096, Some(move || Instant::now() >= deadline))
@@ -124,9 +121,6 @@ fn retain_exclusive(
         .transaction_with_behavior(TransactionBehavior::Exclusive)
         .map_err(bootstrap_lock_error)?;
     let (_, revision) = classify_bootstrap_connection(&lock)?;
-    if revision != AdmissionRevision::Indexed {
-        admit_readable_records(&lock, revision)?;
-    }
     lock.commit().map_err(bootstrap_lock_error)?;
     if revision == AdmissionRevision::Indexed {
         return Ok(None);
@@ -173,10 +167,10 @@ fn migrate(
     verify_exact_schema(&tx)?;
     admit_readable_records(&tx, AdmissionRevision::Indexed)?;
     validate_admission_counts(&tx)?;
-    if full_verification {
-        verify_contents(&tx)?;
-    } else {
-        verify_foreign_keys(&tx)?;
+    match (revision, full_verification) {
+        (AdmissionRevision::Legacy, true) => verify_contents(&tx)?,
+        (AdmissionRevision::Legacy, false) => verify_foreign_keys(&tx)?,
+        _ => {}
     }
     cut("before-commit");
     tx.commit().map_err(map_sqlite)?;
@@ -225,7 +219,11 @@ fn table_ddl(name: &str) -> Result<&'static str, SessionStoreError> {
         .ok_or_else(SessionStoreError::corrupt)
 }
 
-fn backup(connection: &Connection, database: &Path) -> Result<(), SessionStoreError> {
+fn backup(
+    connection: &Connection,
+    database: &Path,
+    revision: AdmissionRevision,
+) -> Result<(), SessionStoreError> {
     let parent = database
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
@@ -233,11 +231,12 @@ fn backup(connection: &Connection, database: &Path) -> Result<(), SessionStoreEr
     let staging = private_staging(parent)?;
     let pending = staging.join("copy.sqlite3");
     let result = copy_into(connection, &pending).and_then(|()| {
-        fs::rename(
-            &pending,
-            database.with_extension("pre-codec-bootstrap.sqlite3"),
-        )
-        .map_err(map_io)?;
+        let stem = if revision == AdmissionRevision::Legacy {
+            "pre-codec-bootstrap"
+        } else {
+            "pre-admission-revision"
+        };
+        publish_copy(&pending, database, stem)?;
         File::open(parent)
             .and_then(|directory| directory.sync_all())
             .map_err(map_io)
@@ -245,6 +244,24 @@ fn backup(connection: &Connection, database: &Path) -> Result<(), SessionStoreEr
     let _ = fs::remove_file(&pending);
     let _ = fs::remove_dir(&staging);
     result
+}
+
+fn publish_copy(pending: &Path, database: &Path, stem: &str) -> Result<(), SessionStoreError> {
+    // A crash before migration commits can leave a published copy. It may no
+    // longer match the writable source, so publish a fresh copy without replacing it.
+    for retry in 0..=u64::MAX {
+        let extension = if retry == 0 {
+            format!("{stem}.sqlite3")
+        } else {
+            format!("{stem}-{retry}.sqlite3")
+        };
+        match fs::hard_link(pending, database.with_extension(extension)) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(map_io(error)),
+        }
+    }
+    Err(SessionStoreError::BackendUnavailable)
 }
 
 fn private_staging(parent: &Path) -> Result<PathBuf, SessionStoreError> {

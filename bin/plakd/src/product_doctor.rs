@@ -37,6 +37,7 @@ pub enum CheckKind {
     ProductDatabase,
     RuntimeDatabase,
     RuntimeStore,
+    RuntimeAudit,
     SubagentsDatabase,
     TelemetryDatabase,
     SecretsDirectory,
@@ -68,6 +69,7 @@ impl CheckKind {
             Self::SubagentsDatabase => "subagents_db",
             Self::RuntimeDatabase => "runtime_db",
             Self::RuntimeStore => "runtime_store",
+            Self::RuntimeAudit => "runtime_audit",
             Self::TelemetryDatabase => "telemetry_db",
             Self::SecretsDirectory => "secrets_dir",
             Self::SessionsDirectory => "sessions_dir",
@@ -540,6 +542,40 @@ pub fn inspect_runtime_store(path: &Path) -> RuntimeStoreStatus {
     use plakous::sessions::SessionBackend;
 
     inspect_runtime_store_with_bounds(path, SessionBackend::default_sqlite_retention_bounds())
+}
+
+pub(crate) fn inspect_runtime_audit(path: &Path) -> DoctorCheck {
+    let kind = CheckKind::RuntimeAudit;
+    match plakous::sessions::rehearsal::audit_runtime_sqlite(path) {
+        Ok(()) => DoctorCheck::new(
+            kind,
+            "state",
+            Severity::Ok,
+            "verified",
+            "retained runtime data passed verification",
+            None,
+        ),
+        Err(error)
+            if error.kind() == plakous::sessions::AgentSessionsErrorKind::BootstrapRequired =>
+        {
+            DoctorCheck::new(
+                kind,
+                "state",
+                Severity::Error,
+                "bootstrap pending",
+                error.to_string(),
+                Some("stop the host and apply the revision with a build that supports it"),
+            )
+        }
+        Err(error) => DoctorCheck::new(
+            kind,
+            "state",
+            Severity::Error,
+            "refused",
+            error.to_string(),
+            None,
+        ),
+    }
 }
 
 pub(crate) fn inspect_runtime_store_with_bounds(

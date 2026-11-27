@@ -594,6 +594,7 @@ impl SqliteSessionStore {
     }
 
     /// Audits all retained runtime data in one read-only snapshot.
+    /// A long snapshot can delay WAL checkpoint completion on a serving host.
     ///
     /// # Errors
     /// Refuses missing stores, pending revisions, and integrity or storage failures.
@@ -601,8 +602,12 @@ impl SqliteSessionStore {
         let connection =
             Self::open_inspection(path.as_ref())?.ok_or(SessionStoreError::NotFound)?;
         let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
-        if classify_connection(&snapshot)? != SqlitePersistenceShape::Current {
+        let (shape, revision) = classify_bootstrap_connection(&snapshot)?;
+        if shape != SqlitePersistenceShape::Current {
             return Err(SessionStoreError::NotFound);
+        }
+        if revision != AdmissionRevision::Indexed {
+            return Err(SessionStoreError::BootstrapRequired);
         }
         verify_database(&snapshot)
     }
@@ -610,8 +615,7 @@ impl SqliteSessionStore {
     /// Opens or creates a private fresh-schema database.
     ///
     /// This admits bounded shape, exact schema, and counters. It does not
-    /// reconstruct every retained object; complete verification is not a
-    /// product operation.
+    /// reconstruct every retained object; use the read-only audit for that.
     ///
     /// # Errors
     ///

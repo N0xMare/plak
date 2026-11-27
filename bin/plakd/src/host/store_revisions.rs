@@ -64,7 +64,7 @@ pub(super) fn upgrade_stopped(
 pub(super) struct Rehearsal {
     /// Whether the product or tree store needs a revision this build applies.
     revisions_pending: bool,
-    /// Whether the runtime store needs this build's codec bootstrap.
+    /// Whether the runtime store needs a stopped bootstrap or admission revision.
     runtime_bootstrap_pending: bool,
     /// The directory to pass to `--store-probe`.
     stores: std::path::PathBuf,

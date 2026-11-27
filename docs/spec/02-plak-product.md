@@ -1164,8 +1164,11 @@ revision; a crash after commit does not rerun its steps. The stores commit
 independently: after an interruption between commits, the destination build
 completes the remaining revision on startup.
 
-The one-time runtime object table bootstrap (chapter 01 §5.2) likewise
-keeps a synced `runtime.pre-codec-bootstrap.sqlite3` beside the live store.
+Stopped runtime revisions (chapter 01 §5.2) likewise keep synced copies
+beside the live store: `runtime.pre-codec-bootstrap.sqlite3` for the legacy
+codec-table bootstrap and `runtime.pre-admission-revision.sqlite3` for the
+additive admission revision. A retry uses a numeric suffix rather than
+replacing a published copy.
 
 After the first revision commit, same-key recovery is fix-forward: start the
 destination or another build supporting the committed revision. Before any
@@ -1179,6 +1182,13 @@ host removes abandoned copy staging and never removes published copies;
 `plakd doctor` reports retained copies in the current state directory.
 An operator may remove them after verifying the new host and deciding not
 to restore the earlier state.
+
+The additive runtime admission revision alone has a lossless stopped-store
+reversal: drop its `admission_*` triggers, indexes and counter table in one
+transaction. This restores the encoding-neutral schema while preserving
+runtime writes after the revision. It is not a rollback of other stores or
+of a codec-table bootstrap. Use an older build only if it also supports the
+state key, record encodings and other stores' revisions.
 
 Before the stop of a restart upgrade, source and candidate run independent
 read-only binding inspections (§4.5). Neither borrows the other build's
@@ -2923,7 +2933,7 @@ version. There is no top-level prompt positional or terminal resume command.
 | `run [--account\|--provider <id>] [--account <kind>=<ref>]... [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] [--leave-jobs-running] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
 | `agent [--account\|--provider <id>] [--account <kind>=<ref>]... [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>]` | the long-lived JSONL host client |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
-| `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags; reports the gateway or its refusal |
+| `doctor [--json] [--audit-runtime]` | local health diagnosis (§7.3), gateway status and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); opt in to a full read-only runtime audit |
 | `store backup <dir> [--stopped] [--budget-secs <secs>]` | read-only snapshot of the three current stores and a SHA-256 manifest (§2.5); retry `store_backup_busy` (exit 8), investigate `store_backup_destination` or `store_backup_source` (exit 1) |
 | `gateway init [--tcp <ip:port>]` | writes `<home>/gateway.toml` and creates `<home>/gateway/`; does not open the credential store. The file names no key directory |
 | `gateway serve` | foreground service; exclusive holder lock, then listeners |
@@ -8307,6 +8317,13 @@ database, telemetry store or optional directory is normal: the row is `OK` with
 the result `missing` and the remedy that state is created by the first stateful
 command (for the config file, `plakd config init`). Doctor reads the configured
 locations (`PLAK_HOME`, `XDG_STATE_HOME`) without creating them.
+
+`doctor --audit-runtime` adds a `runtime_audit` row for the full read-only
+runtime-store audit (chapter 01 §5.2). It reports verification, a pending
+bootstrap or a refusal. It uses the normal doctor severity and exit status;
+`--json` still emits one report object, including on audit refusal. The audit
+scans retained data: a long snapshot can delay WAL checkpoint completion on
+a serving host, so prefer a stopped store or a consistent copy.
 
 The free-space row remains advisory during a storage outage: quotas and
 allocation failures can refuse a write even when the volume reports free

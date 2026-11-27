@@ -7,7 +7,7 @@ use std::path::Path;
 use rustix::fs::{Mode, OFlags};
 
 use crate::home::paths::PlakPaths;
-use crate::store::revisions::STORE_STEMS;
+use crate::store::revisions::{STORE_STEMS, runtime_backup_name};
 
 pub(super) fn lock_marker(path: &Path, exclusive: bool) -> Option<File> {
     let fd = rustix::fs::open(
@@ -106,7 +106,17 @@ fn discard_probe(directory: &Path) {
         discard_sqlite(&stores, &format!("{stem}.sqlite3"));
     }
     discard_sqlite(&stores, "runtime.sqlite3");
-    discard_sqlite(&stores, "runtime.pre-codec-bootstrap.sqlite3");
+    for entry in fs::read_dir(&stores).into_iter().flatten().flatten() {
+        if let Some(name) = entry.file_name().to_str() {
+            let base = ["-wal", "-shm", "-journal"]
+                .into_iter()
+                .find_map(|suffix| name.strip_suffix(suffix))
+                .unwrap_or(name);
+            if runtime_backup_name(base) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
     if fs::remove_dir(&stores).is_ok() {
         let _ = fs::remove_file(directory.join("service.json"));
         let _ = fs::remove_file(marker);

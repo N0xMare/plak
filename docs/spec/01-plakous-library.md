@@ -2093,11 +2093,11 @@ integer primary key, unique `(kind,codec,digest)` address and `byte_len`.
 `runtime_object_bytes` stores the payload by integer id; edges and checkpoint
 roots still reference the unique address. Accounting sums metadata lengths plus
 37 bytes per edge, without reading payload pages. Full verification checks
-payload presence, canonical bytes, exact lengths and foreign keys. It is test
-support only (the store's hidden `open_verified`), not a product operation and
-not on the facade: it runs inside the writer's admission transaction, so on a
-live store it would hold the writer lock for an O(store) reconstruction under
-the readiness window. Ordinary open admits shape, schema and counters; cold
+payload presence, canonical bytes, exact lengths and foreign keys. Verifying
+inside a writer's admission transaction (the store's hidden `open_verified`)
+is test support only: it holds the writer lock under the readiness window.
+The product audit instead verifies in a read-only snapshot without taking
+writer authority. Ordinary open admits shape, schema and counters; cold
 loads and checkpoint-materializing inspections validate their full object graphs.
 Recovery-status diagnostics validate only their addressed metadata and obligation
 paths (§5.5).
@@ -2185,19 +2185,23 @@ The runtime schema is exact and does not encode the checkpoint writer epoch
 in its DDL. A read-only preflight recognizes the exact supported prior shapes
 before opening a writer. Stopped-store bootstrap takes exclusive SQLite
 ownership after a short bounded lock retry, syncs a pre-change backup, and
-applies the pending changes in one transaction. It rebuilds the object table
-only for the legacy shape with a codec constraint. The additive admission
-revision installs indexes and seeds independent row and byte counts. Bootstrap
-verifies the exact schema, retained version framing, counts and foreign keys
-without changing retained addresses, payloads, or receipt seals.
+applies the pending changes in one transaction. Pending detection examines the
+schema, not retained rows. The additive admission revision builds indexes,
+seeds independent row and byte counts, and checks the resulting schema,
+version framing and accounting before commit. It changes no source table
+or payload, so it does not redo foreign-key validation. The legacy bootstrap
+also rebuilds the codec-constrained object table and checks foreign keys.
+Neither operation changes retained addresses, payloads, or receipt seals.
 The prior shape remains authoritative until commit; after commit older builds
 refuse the new shape. Ordinary library open refuses a pending revision with
 `BootstrapRequired`. A library embedder MUST close all handles to the store,
 then call `SessionBackend::bootstrap_sqlite` explicitly before opening it
 with the new build. If another handle prevents exclusive ownership, bootstrap
 returns `BootstrapBusy`. The paired product upgrade rehearses the same
-transition and verifies all retained content on a detached copy before
-draining the live owner (chapter 06 §6.3).
+transition and admission checks on a detached copy before draining the live
+owner (chapter 06 §6.3). Rehearsing the legacy table rebuild also verifies all
+retained content. For the additive revision, that separate full verification
+is available through the operator audit.
 Unknown schema versions are `UnsupportedSchema`. A runtime store reads the
 current and immediately preceding checkpoint encodings, and writes only the
 current encoding. Read-only admission refuses retained payloads outside that
@@ -2215,7 +2219,8 @@ maintained by SQLite triggers in the same transactions as the rows. This
 checks logical drift without scanning retained history; it does not diagnose
 physical damage on pages that admission does not read. An explicit read-only
 audit recomputes counts from retained rows and checks SQLite integrity,
-foreign keys, object content, receipts and the feed.
+foreign keys, object content, receipts and the feed. A long audit can delay WAL
+checkpoint completion on a serving host.
 
 Every object and embedded reference in a closure uses its root's epoch,
 including derived addresses and named-state and operation-ledger proofs.

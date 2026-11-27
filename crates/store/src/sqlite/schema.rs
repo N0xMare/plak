@@ -440,7 +440,7 @@ pub(super) fn verify_foreign_keys(c: &Connection) -> Result<(), SessionStoreErro
 fn load_verified_objects(c: &Connection) -> Result<(), SessionStoreError> {
     let mut children = load_all_children(c)?;
     let mut s = c
-        .prepare("SELECT o.kind,o.codec,o.digest,p.bytes,o.byte_len FROM runtime_objects o LEFT JOIN runtime_object_bytes p USING(id) ORDER BY o.kind,o.codec,o.digest")
+        .prepare("SELECT o.kind,o.codec,o.digest,p.bytes,o.byte_len FROM runtime_objects o LEFT JOIN runtime_object_bytes p USING(id) ORDER BY o.id")
         .map_err(map_sqlite)?;
     let mut rows = s.query([]).map_err(map_sqlite)?;
     while let Some(r) = rows.next().map_err(map_sqlite)? {
@@ -511,21 +511,42 @@ pub(super) enum AdmissionRevision {
     Indexed,
 }
 
+type SchemaObjects = Vec<(String, String, String, String)>;
+
+struct ReferenceSchemas {
+    neutral: SchemaObjects,
+    indexed: SchemaObjects,
+}
+
+fn reference_schemas() -> Result<&'static ReferenceSchemas, SessionStoreError> {
+    static REFERENCE: std::sync::OnceLock<Result<ReferenceSchemas, SessionStoreError>> =
+        std::sync::OnceLock::new();
+    REFERENCE
+        .get_or_init(|| {
+            let connection = Connection::open_in_memory().map_err(map_sqlite)?;
+            connection.execute_batch(SCHEMA).map_err(map_sqlite)?;
+            let neutral = schema_objects(&connection)?;
+            connection
+                .execute_batch(ADMISSION_REVISION)
+                .map_err(map_sqlite)?;
+            let indexed = schema_objects(&connection)?;
+            Ok(ReferenceSchemas { neutral, indexed })
+        })
+        .as_ref()
+        .map_err(|error| *error)
+}
+
 /// Legacy lacks the writer marker and constrains the object codec in DDL.
 pub(super) fn admission_revision(c: &Connection) -> Result<AdmissionRevision, SessionStoreError> {
-    let reference = Connection::open_in_memory().map_err(map_sqlite)?;
-    reference.execute_batch(SCHEMA).map_err(map_sqlite)?;
-    let mut expected = schema_objects(&reference)?;
+    let reference = reference_schemas()?;
     let actual = schema_objects(c)?;
-    if actual == expected {
-        return Ok(AdmissionRevision::Neutral);
-    }
-    reference
-        .execute_batch(ADMISSION_REVISION)
-        .map_err(map_sqlite)?;
-    if actual == schema_objects(&reference)? {
+    if actual == reference.indexed {
         return Ok(AdmissionRevision::Indexed);
     }
+    if actual == reference.neutral {
+        return Ok(AdmissionRevision::Neutral);
+    }
+    let mut expected = reference.neutral.clone();
     expected.retain(|(_, name, _, _)| name != "runtime_writer");
     let object_sql = &mut expected
         .iter_mut()
@@ -552,9 +573,7 @@ pub(super) fn admission_revision(c: &Connection) -> Result<AdmissionRevision, Se
     Ok(AdmissionRevision::Legacy)
 }
 
-fn schema_objects(
-    c: &Connection,
-) -> Result<Vec<(String, String, String, String)>, SessionStoreError> {
+fn schema_objects(c: &Connection) -> Result<SchemaObjects, SessionStoreError> {
     let mut statement = c
         .prepare(
             "SELECT type,name,tbl_name,sql FROM sqlite_schema

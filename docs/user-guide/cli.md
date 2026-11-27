@@ -83,8 +83,8 @@ A host upgrade is a restart of the host service on the same stores; see
 [upgrade](host-service.md#upgrade-reload-and-logs). `plakd host wake --session
 <id> --text <text>` submits one prompt to a session through the running host
 and never starts one. Use `plakd doctor --audit-runtime` to scan and verify the
-retained runtime store in a read-only snapshot; this can take time on large
-stores. `plakd store rehearse --into <dir>`, `plakd session
+retained runtime store in a read-only snapshot. A long audit can delay WAL
+checkpoint completion on a serving host. `plakd store rehearse --into <dir>`, `plakd session
 check-binding --gating` and `plakd session check-reopen <id>` check a new build
 against a serving home without writing its stores; `plakd doctor --json` and
 `plakd gateway check --json` print their reports as JSON.

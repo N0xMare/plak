@@ -735,18 +735,39 @@ sessions to another key, use
 ## `... was created by an incompatible plakd build; move it aside to start fresh`
 
 A database in this build's own state directory is at a schema this build does
-not read. That only happens to a damaged or hand-placed file. Move the named
-file (and its `-wal` and `-shm` companions) out of the directory and run plakd
-again; it creates a fresh store.
+not read. If this follows a same-key update, start a build that supports the
+revision. Moving the named file (and its `-wal` and `-shm` companions) aside
+starts fresh; it is not a way to recover its data.
 
 ## Store integrity refusal after a same-key runtime bootstrap
 
-An older build treats the new runtime table shape as an integrity error.
-Keep the existing state and start the newer build that supports it. If you
-must restore the previous shape, first stop the host and all other store
-users. Move the runtime database and its SQLite sidecars aside, then restore
-`runtime.pre-codec-bootstrap.sqlite3` as `runtime.sqlite3`. This loses
-subsequent runtime writes and does not roll back the product or tree stores.
+An older build can report an integrity error for the newer runtime shape.
+**Do not follow its advice to move the runtime database aside.** That would
+start an empty store. Keep the existing state and start a build that supports
+it.
+
+To back out **only the additive admission revision**, confirm the older build
+reads the same key, checkpoint and feed encodings, and product and tree
+revisions. Stop the host and every other store user, and take a separate
+stopped backup. From the current state directory, use a recent SQLite CLI
+to drop the admission triggers, indexes and counter table in one transaction:
+
+```sh
+ddl=$(sqlite3 -bail -readonly runtime.sqlite3 "
+  SELECT printf('DROP %s \"%w\";', type, name)
+  FROM sqlite_schema WHERE name GLOB 'admission_*'
+    AND type IN ('trigger', 'index', 'table')
+  ORDER BY type = 'table';") || exit 1
+test -n "$ddl" || exit 1
+printf 'BEGIN EXCLUSIVE;\n%s\nCOMMIT;\n' "$ddl" | sqlite3 -bail runtime.sqlite3
+```
+
+Do not restart until SQLite reports success. This restores the exact
+encoding-neutral schema without discarding any runtime writes, even writes
+made after the revision. It does not reverse a codec bootstrap or revise
+the product or tree stores. To undo the legacy codec-table bootstrap instead,
+restore the appropriate `runtime.pre-codec-bootstrap.sqlite3` copy while
+all store users are stopped. Restoring a copy loses subsequent runtime writes.
 
 ## A reasoning model needs `--effort`
 
