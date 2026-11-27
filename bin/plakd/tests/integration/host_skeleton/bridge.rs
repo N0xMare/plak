@@ -4,6 +4,8 @@ use std::io::Read as _;
 use std::os::unix::fs::PermissionsExt as _;
 use std::time::{Duration, Instant};
 
+use plakous_host_protocol::views::transcript::{RowKey, TranscriptRow, TranscriptScope};
+
 use super::*;
 
 mod client_fixtures;
@@ -109,12 +111,23 @@ impl Bridge {
     }
 
     fn next(&self) -> HostFrame<PlakExtension> {
+        self.next_before(Instant::now() + WAIT)
+            .expect("bridge frame")
+    }
+
+    fn next_before(
+        &self,
+        deadline: Instant,
+    ) -> Result<HostFrame<PlakExtension>, mpsc::RecvTimeoutError> {
         loop {
-            let line = self.lines.recv_timeout(WAIT).expect("bridge frame");
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .ok_or(mpsc::RecvTimeoutError::Timeout)?;
+            let line = self.lines.recv_timeout(remaining)?;
             if let Some(frame) = crate::protocol_13::decode(&line)
                 .unwrap_or_else(|error| panic!("stdout was not protocol-only: {error}: {line}"))
             {
-                return frame;
+                return Ok(frame);
             }
         }
     }
@@ -570,13 +583,39 @@ fn the_stdio_bridge_relays_the_client_handshake_and_leaves_a_busy_root_running_o
     stop(&mut host);
 }
 
+fn is_stop_notice(row: &TranscriptRow) -> bool {
+    matches!(row, TranscriptRow::Notice(notice) if notice.text.starts_with("stopped:"))
+}
+
+fn stop_notice_keys(
+    attachment: u64,
+    mut next: impl FnMut() -> HostFrame<PlakExtension>,
+) -> Vec<RowKey> {
+    let mut keys = Vec::new();
+    loop {
+        if let HostFrame::Snapshot(page) = next()
+            && page.attachment == attachment
+            && page.scope == TranscriptScope::Root
+        {
+            keys.extend(
+                page.items
+                    .into_iter()
+                    .filter(|item| is_stop_notice(&item.row))
+                    .map(|item| item.key),
+            );
+            if page.last {
+                return keys;
+            }
+        }
+    }
+}
+
 #[test]
 fn a_stopped_session_has_one_canonical_notice_in_the_fresh_wire_baseline() {
     use plakous_host_protocol::SessionObservation;
-    use plakous_host_protocol::views::transcript::{Lane, TranscriptRow, TranscriptScope};
+    use plakous_host_protocol::views::transcript::Lane;
     use plakous_hosted::runtime::RootTranscript;
 
-    let stopped = |row: &TranscriptRow| matches!(row, TranscriptRow::Notice(notice) if notice.text.starts_with("stopped:"));
     let Some(fixture) = fixture() else { return };
     fixture.write_script(&json!({"version": 1, "steps": [{"output": {"text": ANSWER}}]}));
     let mut host = start(&fixture);
@@ -588,7 +627,8 @@ fn a_stopped_session_has_one_canonical_notice_in_the_fresh_wire_baseline() {
     else {
         panic!("no created session");
     };
-    let Outcome::Ok(Answer::Attached { attachment }) = bridge.request(2, Op::Attach { node })
+    let Outcome::Ok(Answer::Attached { attachment }) =
+        bridge.request(2, Op::Attach { node: node.clone() })
     else {
         panic!("not attached");
     };
@@ -632,16 +672,26 @@ fn a_stopped_session_has_one_canonical_notice_in_the_fresh_wire_baseline() {
                 live.remove(&key);
             }
             let mut canonical = false;
-            for item in patch.upserts.into_iter().filter(|item| stopped(&item.row)) {
+            for item in patch
+                .upserts
+                .into_iter()
+                .filter(|item| is_stop_notice(&item.row))
+            {
                 canonical |= !RootTranscript::is_provisional(item.key);
                 live.insert(item.key);
             }
             canonical
         };
-    // A resync may supersede a queued patch. See the live settlement first,
-    // then verify the independently rebuilt baseline.
+    // A resync may supersede a queued patch. Give live settlement a chance
+    // to arrive first, but always read the baseline to diagnose missing settlement.
+    let deadline = Instant::now() + Duration::from_secs(5);
     while !answered || !settled {
-        match bridge.next() {
+        let frame = match bridge.next_before(deadline) {
+            Ok(frame) => frame,
+            Err(mpsc::RecvTimeoutError::Timeout) => break,
+            Err(error) => panic!("bridge closed while waiting for stop settlement: {error}"),
+        };
+        match frame {
             HostFrame::Response { id: 4, outcome } => {
                 assert_eq!(
                     outcome,
@@ -671,30 +721,25 @@ fn a_stopped_session_has_one_canonical_notice_in_the_fresh_wire_baseline() {
             blobs: Vec::new(),
         },
     });
-    let mut keys = Vec::new();
-    loop {
-        if let HostFrame::Snapshot(page) = bridge.next()
-            && page.scope == TranscriptScope::Root
-        {
-            keys.extend(
-                page.items
-                    .into_iter()
-                    .filter(|item| stopped(&item.row))
-                    .map(|item| item.key),
-            );
-            if page.last {
-                break;
-            }
-        }
-    }
+    let resync = stop_notice_keys(attachment, || bridge.next());
+    let mut fresh = Client::connect(&host);
+    let fresh_attachment = fresh.attach(1, &node);
+    let attach = stop_notice_keys(fresh_attachment, || fresh.next());
+    let live: Vec<_> = live.into_iter().collect();
     assert_eq!(
-        keys.len(),
+        resync.len(),
         1,
-        "stop notice keys in the fresh baseline: {keys:?}"
+        "stop notice keys: resync={resync:?}, fresh attach={attach:?}, live={live:?}"
     );
-    assert_eq!(keys[0].lane, Lane::Product);
-    assert!(!RootTranscript::is_provisional(keys[0]));
-    assert_eq!(live.into_iter().collect::<Vec<_>>(), keys);
+    assert_eq!(attach, resync, "fresh attach stop notice keys");
+    assert_eq!(resync[0].lane, Lane::Product);
+    assert!(!RootTranscript::is_provisional(resync[0]));
+    assert!(answered, "no stop response before resync; keys: {resync:?}");
+    assert_eq!(
+        live, resync,
+        "live stop notice did not settle before resync"
+    );
+    drop(fresh);
     bridge.finish();
     stop(&mut host);
 }

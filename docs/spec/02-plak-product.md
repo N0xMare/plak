@@ -2689,9 +2689,12 @@ An unsaved notice receives its provisional identity once; projector reloads
 carry that identity with the pending notice rather than allocating one from
 the rebuilt window length. A reload shows the pending notices after the
 committed rows, in key order, and drops a named pending notice whose identity
-the store already holds; that notice is shown once, at its committed key. A
-reopen that cannot read the committed intents keeps the projection it shows
-and logs `transcript.reload_deferred` instead. A debug build asserts that a
+the store already holds; that notice is shown once, at its committed key.
+A live operator notice settles by intent identity in one patch that deletes
+its provisional key and upserts its committed key; a protocol 13 attach or repair
+baseline captured before that patch shows only the provisional key for that
+notice. A reopen that cannot read the committed intents keeps the projection
+it shows and logs `transcript.reload_deferred` instead. A debug build asserts that a
 pending notice never sorts before the rows already shown; a release build
 gives such a notice a fresh provisional key. Skipped headers and blank thinking rows claim no
 stored presentation key. A debug build asserts that the stored projection's

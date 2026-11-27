@@ -95,6 +95,8 @@ pub(super) fn commit_notice_intents<P: plakous_host_protocol::ProtocolExtension>
     if save && commit_session_update(store, home, session, |_| true).is_err() {
         return false;
     }
+    // Uncommitted intents queue up to MAX_PENDING_NOTICE_INTENTS; the tracked
+    // keys self-prune as notices settle or leave the bounded presentation.
     let notice_ids = events
         .presentations
         .lock()
