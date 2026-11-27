@@ -1,9 +1,10 @@
 plakd doctor — local health checks
 
 USAGE:
-  plakd doctor [--json]
+  plakd doctor [--json] [--audit-runtime]
 
   --json prints the same checks and exit status as one JSON object.
+  --audit-runtime scans and verifies the retained runtime store in a read-only snapshot.
 
   When an OpenRouter key and default model are set, probes catalog keys via discovery GETs only (no inference).
 
