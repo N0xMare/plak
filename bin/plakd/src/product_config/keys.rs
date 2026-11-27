@@ -528,7 +528,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         field: ConfigField::ChildRetentionDays,
         kind: "integer",
         constraint: "1..=65535",
-        doc: "Days before a sealed dormant child conversation is retired.",
+        doc: "Days before a sealed dormant child conversation is retired, unless superseded by nonzero runtime_store.child_retention_hours.",
         example: "7",
         scope: ConfigScope::Epoch,
     },

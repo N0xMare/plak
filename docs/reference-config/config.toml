@@ -50,7 +50,7 @@ workspace_idle_seconds = 600
 # type: integer · default: 4096 · 1..=65535
 workspace_budget_mib = 4096
 
-# Days before a sealed dormant child conversation is retired.
+# Days before a sealed dormant child conversation is retired, unless superseded by nonzero runtime_store.child_retention_hours.
 # type: integer · default: 7 · 1..=65535
 child_retention_days = 7
 

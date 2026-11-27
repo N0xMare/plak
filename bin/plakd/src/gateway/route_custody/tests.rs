@@ -99,6 +99,18 @@ fn a_tcp_gateway_needs_a_key() {
     assert!(HostCustody::resolve(&paths).is_err());
 }
 
+#[test]
+fn omitted_and_zero_retention_hours_keep_the_epoch_age() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = home(&directory);
+    let state = directory.path().join("host-state");
+    for setting in ["", "[runtime_store]\nchild_retention_hours = 0\n"] {
+        std::fs::write(paths.config_file(), setting).unwrap();
+        let services = Services::for_home_with_state(paths.clone(), state.clone());
+        assert_eq!(services.child_retirement_policy().unwrap().2, None);
+    }
+}
+
 /// A host keeps the custody it started with: a config that later breaks or
 /// loses `[gateway]` neither flips it to local custody nor makes it open the
 /// store or read `secrets/`.

@@ -576,7 +576,8 @@ async fn historical_child_retirement_waits_for_the_cursor_but_not_for_a_later_wo
         .unwrap();
     tree.record_turn_completed(&child).unwrap();
     tree.settle_for_test();
-    tree.attempt_mut_for_test(&child).ended_at = Some(1);
+    tree.attempt_mut_for_test(&child).ended_at =
+        Some(plakous::model::now_unix_millis() - 13 * 3_600_000);
     let mail = tree.pending_result_mail("root").remove(0).message_id;
     tree.record_command(AgentCommand::intent(
         "carrier",
@@ -608,17 +609,18 @@ async fn historical_child_retirement_waits_for_the_cursor_but_not_for_a_later_wo
         .unwrap();
     let working = parent.locator();
     assert!(sessions.head_running_turn(working).await.unwrap().is_some());
-    let collect = || {
+    let hours = Some(std::time::Duration::from_hours(12));
+    let collect = |age| {
         driver.collect_dormant_children(
             &sessions,
             true,
             false,
-            None,
+            age,
             std::collections::BTreeSet::new(),
             Some(working),
         )
     };
-    collect().await.unwrap();
+    collect(hours).await.unwrap();
     assert!(sessions.head_is_quiescent(child_locator).await.unwrap());
 
     // The historical tree had already projected the earlier terminal, but
@@ -627,7 +629,9 @@ async fn historical_child_retirement_waits_for_the_cursor_but_not_for_a_later_wo
         .mutate_and_settle(move |tree| tree.seed_feed_cursor(&sid, tail.get()))
         .await
         .unwrap();
-    collect().await.unwrap();
+    collect(None).await.unwrap();
+    assert!(sessions.head_is_quiescent(child_locator).await.unwrap());
+    collect(hours).await.unwrap();
     assert!(
         driver
             .read(|tree| tree.retired_children().contains_key(&child))

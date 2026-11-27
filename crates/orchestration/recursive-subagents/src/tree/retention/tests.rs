@@ -10,6 +10,10 @@ fn child_retention_requires_delivery_and_sealed_work() {
     tree.record_turn_completed(&child.agent_id).unwrap();
     tree.settle_for_test();
     assert_eq!(
+        tree.due_children(u64::MAX, Some(std::time::Duration::from_hours(12))),
+        Vec::<String>::new()
+    );
+    assert_eq!(
         tree.prepare_child_retention(u64::MAX).unwrap(),
         [] as [crate::tree::retention::RetirementTicket; 0]
     );
@@ -50,8 +54,20 @@ fn child_retention_age_override_uses_attempt_end_and_keeps_the_epoch_fallback() 
         tree.due_children(due_at - 1, Some(age)),
         Vec::<String>::new()
     );
-    assert_eq!(tree.due_children(due_at, Some(age)), [child.agent_id]);
+    assert_eq!(
+        tree.due_children(due_at, Some(age)).as_slice(),
+        std::slice::from_ref(&child.agent_id)
+    );
     assert_eq!(tree.due_children(due_at, None), Vec::<String>::new());
+    let past_epoch_age = ended + 7 * 86_400_000 + 1;
+    assert_eq!(tree.due_children(past_epoch_age, None), [child.agent_id]);
+    assert_eq!(
+        tree.due_children(
+            past_epoch_age,
+            Some(std::time::Duration::from_hours(8 * 24))
+        ),
+        Vec::<String>::new()
+    );
 }
 
 #[test]

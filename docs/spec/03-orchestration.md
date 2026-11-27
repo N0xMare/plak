@@ -189,8 +189,9 @@ normal reload; settings then apply to new sessions.
 Once canonical carry creation commits, any completion failure retains and
 selects its successor identity with a repair notice; it is not a refusal that
 allows a later reload to carry the source again.
-The source keeps its tree and frozen bounds; no config edit silently changes
-an existing tree. Unchanged settings keep exact reopen. A successor epoch may
+The source keeps its tree and frozen bounds; config edits do not modify a
+stored epoch. The home may override the retirement age for existing trees
+(§6.7). Unchanged settings keep exact reopen. A successor epoch may
 also install on a quiescent tree during a model rebind that stays on it; that
 epoch keeps the tree's roster (working set, cards, bounds, tool tables,
 account roster and root template) and moves only the root's account, model
@@ -264,9 +265,10 @@ No reader sees "the" snapshot; each names whose epoch it reads:
 - **A node's bind, reopen and lifecycle** use the node's own epoch: its card's
   tools, tier, composition and frozen tool tables, its turn ceiling, its mint
   hook and its transient-resume bound.
-- **Housekeeping** uses the current epoch: retention, checkout reclamation and
-  its idle interval. So do the root's own surfaces (the profile, the root
-  template, the settings cards and the carry comparison).
+- **Housekeeping** uses the current epoch: retention (with a home-wide age
+  override, §6.7), checkout reclamation and its idle interval. So do the root's
+  own surfaces (the profile, the root template, the settings cards and the
+  carry comparison).
 - **The reopen gate** checks the digest of every retained epoch.
 
 `append_epoch` adds the next epoch and makes it current. The root moves to it
@@ -2252,14 +2254,13 @@ adoptable and usable as spawn inputs through the launch repository.
 ### 6.7 Conversation retention
 
 With home `runtime_store.retire_finished_children` enabled, the attached host
-retires sealed, delivered dormant child conversations once the current
-attempt's recorded terminal time reaches the retention age. Delivery, sealing
+retires sealed, delivered dormant child conversations once the retention age
+has elapsed since the current attempt's recorded end. Delivery, sealing
 and reads do not restart that clock. A nonzero home
-`runtime_store.child_retention_hours` overrides the epoch's
-`orchestration.child_retention_days` for both existing and new trees. Serving
-hosts read the override at startup. The epoch's
-`orchestration.child_retention_count` still applies oldest first independently
-of age. Close requests retirement immediately,
+`runtime_store.child_retention_hours`, read at host startup, overrides the
+epoch's `orchestration.child_retention_days` for both existing and new trees.
+The epoch's `orchestration.child_retention_count` still applies oldest first
+independently of age. Close requests retirement immediately,
 subject to the same settled-owner and coverage proofs. Live, undelivered,
 recovery-required, unfacted-command, waited-on and unsealed children are not
 collected. Leaf children are collected before their parents. An acknowledged

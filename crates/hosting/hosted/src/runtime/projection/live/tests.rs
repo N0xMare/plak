@@ -5,6 +5,99 @@ use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
 use crate::session_store::MemoryStore;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[tokio::test]
+async fn housekeeping_applies_the_home_retention_age_to_a_reopened_tree() {
+    use crate::agent_tree::{MemoryTreeStore, ProductAgentTree, TreeStore as _};
+    use crate::agent_tree_protocol::{SpawnAgentRequest, WriterMode};
+    use plakous::sessions::{CreateSessionOutcome, CreateSessionRequest, SessionOperationId};
+    use plakous_offline_crash_harness::{
+        BoundaryController, protocol::CrashBoundary, text_runtime_binding,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path();
+    let roots = ProductStateRoots::with_doubles(path.to_owned(), path.join("state"))
+        .with_finished_child_retirement(true, false, None);
+    let sessions = roots.runtime_sessions().unwrap();
+    let create = async |id: &str| {
+        let controller = BoundaryController::quiet_from_evidence_path(
+            CrashBoundary::None,
+            path.join(format!("{id}.jsonl")),
+        )
+        .unwrap();
+        let binding = text_runtime_binding(path, controller, "fixture", "fixture").unwrap();
+        let request = CreateSessionRequest::new(SessionOperationId::new(id).unwrap(), binding);
+        let CreateSessionOutcome::Created { session, .. } = sessions.create(request).await.unwrap()
+        else {
+            panic!("creation did not mint a session");
+        };
+        session.release().await.unwrap()
+    };
+    let parent = create("age-override-parent").await;
+    let locator = create("age-override-child").await;
+    let tree_id = parent.session_id().to_string();
+    let mut tree = ProductAgentTree::bootstrap_root_for_test(
+        &tree_id,
+        "root",
+        "owner",
+        path.to_owned(),
+        "selected",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let child = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .unwrap()
+        .agent_id;
+    tree.bind_session_locator(&child, locator.to_string())
+        .unwrap();
+    tree.record_turn_completed(&child).unwrap();
+    tree.settle_for_test();
+    let result = tree.pending_result_mail("root").remove(0);
+    tree.acknowledge_mail(&result.message_id).unwrap();
+    tree.attempt_mut_for_test(&child).ended_at =
+        Some(plakous::model::now_unix_millis() - 13 * 3_600_000);
+
+    let trees = Arc::new(MemoryTreeStore::new());
+    let revision = trees.save_in_custody(&tree).unwrap();
+    tree.acknowledge_revision(revision);
+    let tree = ProductAgentTree::reopen(trees.load(&tree_id).unwrap().unwrap());
+    let runtime = crate::topology_runtime::insert_root_with(&tree_id, tree, trees, None)
+        .await
+        .unwrap();
+    let mut target = LiveTarget {
+        store: roots.session_records(),
+        roots,
+        sessions: Arc::clone(&sessions),
+        product_id: tree_id.clone(),
+        followed: parent,
+        tree_id: tree_id.clone(),
+        publish_cursor: Arc::new(|_| {}),
+        emit_settled: Arc::new(|_| {}),
+    };
+    target.tree_housekeeping().await.unwrap();
+    let kept = sessions.head_is_quiescent(locator).await;
+    target.roots =
+        target
+            .roots
+            .with_finished_child_retirement(true, false, Some(Duration::from_hours(12)));
+    target.tree_housekeeping().await.unwrap();
+    let retired = runtime
+        .read(|tree| tree.retired_children().contains_key(&child))
+        .unwrap();
+    crate::topology_runtime::force_release(&tree_id).await;
+    assert!(kept.unwrap());
+    assert!(retired);
+    assert_eq!(
+        sessions
+            .child_retirement_revision(locator)
+            .await
+            .unwrap_err()
+            .kind(),
+        plakous::sessions::AgentSessionsErrorKind::NotFound
+    );
+}
+
 #[derive(Default)]
 struct TargetCheckGate {
     entered: Notify,
