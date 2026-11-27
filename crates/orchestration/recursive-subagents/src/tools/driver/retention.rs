@@ -93,14 +93,15 @@ impl TreeDriver {
         sessions: &AgentSessions,
         enabled: bool,
         requires_archive_receipt: bool,
+        max_age: Option<Duration>,
         occupied: std::collections::BTreeSet<String>,
         root: Option<SessionLocator>,
     ) -> Result<(), TopologyError> {
         let now = plakous::model::now_unix_millis();
         let heads = if enabled {
-            self.certify_historical_carriers(sessions, now, root, &occupied)
+            self.certify_historical_carriers(sessions, now, max_age, root, &occupied)
                 .await?;
-            self.read(|tree| tree.child_retirement_heads(now, &occupied))?
+            self.read(|tree| tree.child_retirement_heads(now, max_age, &occupied))?
         } else {
             Vec::new()
         };
@@ -150,7 +151,7 @@ impl TreeDriver {
             }
         }
         let tickets = self
-            .prepare_due_retirements(now, approved, &occupied, requires_archive_receipt)
+            .prepare_due_retirements(now, max_age, approved, &occupied, requires_archive_receipt)
             .await?;
         for ticket in tickets {
             let agent = &ticket.agent_id;
@@ -179,11 +180,12 @@ impl TreeDriver {
         &self,
         sessions: &AgentSessions,
         now: u64,
+        max_age: Option<Duration>,
         root: Option<SessionLocator>,
         occupied: &std::collections::BTreeSet<String>,
     ) -> Result<(), TopologyError> {
         let mut certified: Vec<HistoricalCarrierBatch> = Vec::new();
-        for batch in self.read(|tree| tree.historical_carriers(now, root, occupied))? {
+        for batch in self.read(|tree| tree.historical_carriers(now, max_age, root, occupied))? {
             let key = format!("{}@{}", batch.branch, batch.cursor);
             if !self.retry_ready(&batch.recipient, Action::Certify, &key) {
                 continue;
@@ -229,6 +231,7 @@ impl TreeDriver {
     async fn prepare_due_retirements(
         &self,
         now: u64,
+        max_age: Option<Duration>,
         mut approved: crate::tree::retention::ApprovedHeads,
         occupied: &std::collections::BTreeSet<String>,
         requires_archive_receipt: bool,
@@ -251,9 +254,10 @@ impl TreeDriver {
                 });
             }
             let mut snapshot = None;
-            let result = tree.prepare_child_retention_guarded(now, Some(&approved), |before| {
-                snapshot = Some(before.clone());
-            });
+            let result =
+                tree.prepare_child_retention_guarded(now, max_age, Some(&approved), |before| {
+                    snapshot = Some(before.clone());
+                });
             let result = result.and_then(|mut tickets| {
                 let (mut unguarded, mut invalid) = (Vec::new(), Vec::new());
                 tickets.retain(|ticket| {
@@ -585,7 +589,7 @@ mod tests {
         let (tree, child) = due_child(root.path(), locator);
         let driver = driver_on(tree, Arc::new(MemoryTreeStore::new()));
         driver
-            .collect_dormant_children(&sessions, true, true, BTreeSet::new(), None)
+            .collect_dormant_children(&sessions, true, true, None, BTreeSet::new(), None)
             .await
             .unwrap();
         assert!(
@@ -632,7 +636,7 @@ mod tests {
                 },
             )]);
             let tickets = tree
-                .prepare_child_retention_guarded(u64::MAX, Some(&approved), |_| {})
+                .prepare_child_retention_guarded(u64::MAX, None, Some(&approved), |_| {})
                 .unwrap();
             let driver = driver_on(tree, Arc::new(MemoryTreeStore::new()));
             driver
@@ -649,7 +653,13 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 driver
-                    .prepare_due_retirements(u64::MAX, BTreeMap::new(), &BTreeSet::new(), true)
+                    .prepare_due_retirements(
+                        u64::MAX,
+                        None,
+                        BTreeMap::new(),
+                        &BTreeSet::new(),
+                        true
+                    )
                     .await
                     .unwrap(),
                 []

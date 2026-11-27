@@ -271,6 +271,7 @@ pub struct ProductConfig {
     pub telemetry_max_bytes: u64,
     pub(crate) runtime_store_bounds: [std::num::NonZeroUsize; 4],
     pub(crate) retire_finished_children: bool,
+    pub(crate) child_retention_hours: u16,
     pub(crate) retire_requires_archive_receipt: bool,
     pub telemetry_max_age_days: u64,
     /// `[mcp] client_id_metadata_url`: the Client ID Metadata Document an
@@ -426,6 +427,9 @@ impl ProductConfig {
             ConfigField::RuntimeStoreRetireFinishedChildren => {
                 self.retire_finished_children = source.retire_finished_children;
             }
+            ConfigField::RuntimeStoreChildRetentionHours => {
+                self.child_retention_hours = source.child_retention_hours;
+            }
             ConfigField::RuntimeStoreRetireRequiresArchiveReceipt => {
                 self.retire_requires_archive_receipt = source.retire_requires_archive_receipt;
             }
@@ -566,6 +570,7 @@ impl ProductConfig {
             skills_enabled: true,
             telemetry_max_bytes: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_BYTES,
             retire_finished_children: false,
+            child_retention_hours: 0,
             retire_requires_archive_receipt: false,
             runtime_store_bounds:
                 plakous::sessions::SessionBackend::default_sqlite_retention_bounds(),
@@ -880,6 +885,9 @@ impl ProductConfig {
             ConfigField::CompactionEnabled => Value::from(self.compaction_enabled),
             ConfigField::RuntimeStoreRetireFinishedChildren => {
                 Value::from(self.retire_finished_children)
+            }
+            ConfigField::RuntimeStoreChildRetentionHours => {
+                Value::from(i64::from(self.child_retention_hours))
             }
             ConfigField::RuntimeStoreRetireRequiresArchiveReceipt => {
                 Value::from(self.retire_requires_archive_receipt)
@@ -1389,6 +1397,7 @@ impl ProductConfig {
             | ConfigField::RuntimeStoreMaxObjectBytes
             | ConfigField::RuntimeStoreMaxSessions
             | ConfigField::RuntimeStoreRetireFinishedChildren
+            | ConfigField::RuntimeStoreChildRetentionHours
             | ConfigField::RuntimeStoreRetireRequiresArchiveReceipt => {
                 self.assign_runtime_store(key, value)?;
             }
@@ -1431,6 +1440,12 @@ impl ProductConfig {
         match key.field {
             ConfigField::RuntimeStoreRetireFinishedChildren => {
                 self.retire_finished_children = value.boolean()?;
+            }
+            ConfigField::RuntimeStoreChildRetentionHours => {
+                self.child_retention_hours = value
+                    .integer()
+                    .and_then(|hours| u16::try_from(hours).ok())
+                    .ok_or_else(|| format!("{} must be an integer in 0..=65535", key.path))?;
             }
             ConfigField::RuntimeStoreRetireRequiresArchiveReceipt => {
                 self.retire_requires_archive_receipt = value.boolean()?;

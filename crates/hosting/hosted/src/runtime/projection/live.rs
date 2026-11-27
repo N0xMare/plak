@@ -93,6 +93,7 @@ impl LiveTarget {
                     &self.sessions,
                     self.roots.retire_finished_children,
                     self.roots.retire_requires_archive_receipt,
+                    self.roots.child_retention_age,
                     Some(self.followed),
                 )
                 .await;

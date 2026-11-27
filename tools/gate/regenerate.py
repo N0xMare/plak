@@ -63,6 +63,15 @@ def nextest() -> None:
     )
 
 
+def reference() -> None:
+    subprocess.run(
+        ["cargo", "test", "--locked", "--offline", "-p", "plakd", "reference"],
+        cwd=ROOT,
+        check=True,
+        env=dict(os.environ, PLAK_REGENERATE_REFERENCE_CONFIGS="1"),
+    )
+
+
 def wire() -> None:
     output = subprocess.check_output(
         [
@@ -144,6 +153,7 @@ def main() -> None:
         "bindings": bindings,
         "nextest": nextest,
         "prompts": prompts,
+        "reference": reference,
         "wire": wire,
     }
     parser = argparse.ArgumentParser(description=__doc__)

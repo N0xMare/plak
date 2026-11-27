@@ -412,6 +412,7 @@ impl ProductTopologyRuntime {
         sessions: &plakous::sessions::AgentSessions,
         enabled: bool,
         requires_archive_receipt: bool,
+        max_age: Option<std::time::Duration>,
         root: Option<plakous::sessions::SessionLocator>,
     ) -> Result<(), String> {
         use crate::protocol::{TopologyError, TopologyErrorCode};
@@ -452,6 +453,7 @@ impl ProductTopologyRuntime {
                         sessions,
                         enabled,
                         requires_archive_receipt,
+                        max_age,
                         occupied,
                         root,
                     )

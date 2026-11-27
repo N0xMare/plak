@@ -1,5 +1,7 @@
 //! Retirement preserves sealed work independently of its conversation.
 
+use std::time::Duration;
+
 use super::{
     BTreeMap, CandidateId, CommandFact, Deserialize, MailDurableState, MessagePurpose, NodeStatus,
     OperationRecord, ProductAgentTree, Serialize, TopologyError, TopologyErrorCode, WorkspaceMode,
@@ -530,7 +532,7 @@ impl ProductAgentTree {
         &mut self,
         now: u64,
     ) -> Result<Vec<RetirementTicket>, TopologyError> {
-        self.prepare_child_retention_guarded(now, None, |_| {})
+        self.prepare_child_retention_guarded(now, None, None, |_| {})
     }
 
     pub(in crate::tree) fn retirement_summary(&self, agent: &str) -> Option<RetiredChild> {
@@ -629,7 +631,7 @@ impl ProductAgentTree {
         })
     }
 
-    fn due_children(&self, now: u64) -> Vec<String> {
+    fn due_children(&self, now: u64, max_age: Option<Duration>) -> Vec<String> {
         let mut eligible: Vec<_> = self
             .nodes
             .values()
@@ -640,6 +642,8 @@ impl ProductAgentTree {
             .collect();
         eligible.sort_by(|(left, a), (right, b)| (left, &a.agent_id).cmp(&(right, &b.agent_id)));
         let policy = self.current_epoch();
+        let max_age = max_age
+            .unwrap_or_else(|| Duration::from_hours(u64::from(policy.child_retention_days) * 24));
         let excess = eligible
             .len()
             .saturating_sub(usize::from(policy.child_retention_count));
@@ -649,8 +653,7 @@ impl ProductAgentTree {
             .filter(|(index, (ended, node))| {
                 *index < excess
                     || node.status == NodeStatus::Closed
-                    || now.saturating_sub(*ended)
-                        >= u64::from(policy.child_retention_days) * 86_400_000
+                    || Duration::from_millis(now.saturating_sub(*ended)) >= max_age
             })
             .map(|(_, (_, node))| node.agent_id.clone())
             .collect()
@@ -659,9 +662,10 @@ impl ProductAgentTree {
     pub(crate) fn child_retirement_heads(
         &self,
         now: u64,
+        max_age: Option<Duration>,
         occupied: &super::BTreeSet<String>,
     ) -> Vec<(String, super::AttemptId, String)> {
-        self.due_children(now)
+        self.due_children(now, max_age)
             .into_iter()
             .filter(|agent| {
                 !occupied.contains(agent)
@@ -685,12 +689,13 @@ impl ProductAgentTree {
     pub(crate) fn prepare_child_retention_guarded(
         &mut self,
         now: u64,
+        max_age: Option<Duration>,
         approved: Option<&ApprovedHeads>,
         before_change: impl FnOnce(&Self),
     ) -> Result<Vec<RetirementTicket>, TopologyError> {
         let mut before_change = Some(before_change);
         let mut tickets = self.outstanding_child_retirement(&mut before_change)?;
-        for agent in self.due_children(now) {
+        for agent in self.due_children(now, max_age) {
             let node = &self.nodes[&agent];
             let (session_revision, summary) = match approved {
                 None => (None, None),

@@ -141,11 +141,12 @@ impl ProductAgentTree {
     pub(crate) fn historical_carriers(
         &self,
         now: u64,
+        max_age: Option<std::time::Duration>,
         root: Option<SessionLocator>,
         occupied: &BTreeSet<String>,
     ) -> Vec<HistoricalCarrierBatch> {
         let mut due: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-        let due_children = self.due_children(now);
+        let due_children = self.due_children(now, max_age);
         for agent in &due_children {
             if !occupied.contains(agent)
                 && let Some(source) = self.retirement_source(agent)

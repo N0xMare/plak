@@ -30,6 +30,7 @@ impl PartialEq for ProductConfig {
             && self.skills_enabled == other.skills_enabled
             && self.runtime_store_bounds == other.runtime_store_bounds
             && self.retire_finished_children == other.retire_finished_children
+            && self.child_retention_hours == other.child_retention_hours
             && self.retire_requires_archive_receipt == other.retire_requires_archive_receipt
             && self.telemetry_max_bytes == other.telemetry_max_bytes
             && self.telemetry_max_age_days == other.telemetry_max_age_days

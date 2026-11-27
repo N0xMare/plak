@@ -869,6 +869,11 @@ Leave retirement off until the archive and receipt backfill run cleanly.
 On an archive-managed home set `runtime_store.retire_requires_archive_receipt = true`
 before enabling `runtime_store.retire_finished_children`, then restart the
 host to apply the settings. A child without an exact receipt is deferred.
+Set `runtime_store.child_retention_hours = 12` in the home config to use
+12 hours from the current attempt's end, including for existing trees.
+The new age takes effect at host restart. Omit the key or set it to `0` to
+use each tree's epoch age. The epoch's count limit and explicit close can
+still make a child eligible sooner.
 Enable `PLAK_LOG=plak.topology=warn` on the host to see rate-limited
 warnings for pending intents blocked by the receipt guard. Inventory pending
 intents before switching it on. An older intent with no receipt must be

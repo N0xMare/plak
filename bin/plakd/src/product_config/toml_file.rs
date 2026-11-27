@@ -175,6 +175,7 @@ struct RuntimeStoreSection {
     #[serde(rename = "max_object_bytes")]
     object_bytes: Entry,
     retire_finished_children: Entry,
+    child_retention_hours: Entry,
     retire_requires_archive_receipt: Entry,
 }
 
@@ -220,6 +221,10 @@ impl RuntimeStoreSection {
         assign(
             "runtime_store.retire_finished_children",
             &self.retire_finished_children,
+        )?;
+        assign(
+            "runtime_store.child_retention_hours",
+            &self.child_retention_hours,
         )?;
         assign(
             "runtime_store.retire_requires_archive_receipt",

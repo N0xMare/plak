@@ -296,6 +296,8 @@ pub enum ConfigField {
     RuntimeStoreMaxSessions,
     /// `[runtime_store] retire_finished_children`.
     RuntimeStoreRetireFinishedChildren,
+    /// `[runtime_store] child_retention_hours`.
+    RuntimeStoreChildRetentionHours,
     /// `[runtime_store] retire_requires_archive_receipt`.
     RuntimeStoreRetireRequiresArchiveReceipt,
     /// `[telemetry] max_age_days`.
@@ -356,6 +358,7 @@ impl ConfigField {
                 | Self::RuntimeStoreMaxObjectBytes
                 | Self::RuntimeStoreMaxSessions
                 | Self::RuntimeStoreRetireFinishedChildren
+                | Self::RuntimeStoreChildRetentionHours
                 | Self::RuntimeStoreRetireRequiresArchiveReceipt
         )
     }
@@ -384,6 +387,7 @@ impl ConfigField {
                     | Self::RuntimeStoreMaxObjectBytes
                     | Self::RuntimeStoreMaxSessions
                     | Self::RuntimeStoreRetireFinishedChildren
+                    | Self::RuntimeStoreChildRetentionHours
                     | Self::RuntimeStoreRetireRequiresArchiveReceipt
             )
     }
@@ -688,6 +692,15 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         constraint: "true or false; home-scoped",
         doc: "Retire settled child runtimes after their result is consumed. Serving hosts read this at startup.",
         example: "false",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "runtime_store.child_retention_hours",
+        field: ConfigField::RuntimeStoreChildRetentionHours,
+        kind: "integer",
+        constraint: "0..=65535; home-scoped",
+        doc: "Override the child retirement age for all attached trees. Zero keeps each tree's epoch age. Serving hosts read this at startup.",
+        example: "0",
         scope: ConfigScope::Immediate,
     },
     ConfigKey {

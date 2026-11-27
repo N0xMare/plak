@@ -1733,11 +1733,13 @@ fn historical_child_retirement_certifies_pre_witness_carriers_with_or_without_tu
             .unwrap()
             .accepted_seq = Some(tree.feed_cursor(ROOT_SESSION) + 1);
         assert_eq!(
-            newer.historical_carriers(u64::MAX, root, &occupied).len(),
+            newer
+                .historical_carriers(u64::MAX, None, root, &occupied)
+                .len(),
             0
         );
 
-        let mut proofs = tree.historical_carriers(u64::MAX, root, &occupied);
+        let mut proofs = tree.historical_carriers(u64::MAX, None, root, &occupied);
         assert_eq!(proofs.len(), 1);
         let proof = proofs.remove(0);
         assert_eq!(proof.cursor, tree.feed_cursor(ROOT_SESSION));
@@ -1746,7 +1748,11 @@ fn historical_child_retirement_certifies_pre_witness_carriers_with_or_without_tu
 
         tree.apply_historical_carriers(&proof, root);
         assert!(tree.retirement_summary(&child).is_some());
-        assert_eq!(tree.historical_carriers(u64::MAX, root, &occupied).len(), 0);
+        assert_eq!(
+            tree.historical_carriers(u64::MAX, None, root, &occupied)
+                .len(),
+            0
+        );
     }
 }
 

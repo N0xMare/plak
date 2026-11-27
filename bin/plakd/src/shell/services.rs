@@ -7,6 +7,7 @@
 //! is re-derived per verb, per attach round, or per turn.
 
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use crate::home::paths::PlakPaths;
 
@@ -37,7 +38,7 @@ pub(crate) struct Services {
     /// every clone: a host resolves it at startup and never re-reads it.
     custody: Arc<OnceLock<crate::gateway::HostCustody>>,
     runtime_store_bounds: Arc<OnceLock<[std::num::NonZeroUsize; 4]>>,
-    child_retirement_policy: Arc<OnceLock<(bool, bool)>>,
+    child_retirement_policy: Arc<OnceLock<(bool, bool, Option<Duration>)>>,
 }
 
 #[derive(Clone)]
@@ -350,7 +351,7 @@ impl Services {
         &self,
         context: &PlakPaths,
     ) -> CliResult<plakous_hosted::agent::ProductStateRoots> {
-        let (retire_finished, require_receipt) = self.child_retirement_policy()?;
+        let (retire_finished, require_receipt, max_age) = self.child_retirement_policy()?;
         let roots = crate::commands::support::product_state_roots_from(
             context,
             self.home.state()?.to_path_buf(),
@@ -359,7 +360,7 @@ impl Services {
             &self.custody()?,
         )?
         .with_runtime_store_bounds(self.runtime_store_bounds()?)
-        .with_finished_child_retirement(retire_finished, require_receipt);
+        .with_finished_child_retirement(retire_finished, require_receipt, max_age);
         let roots = match &*self
             .local_daemon
             .read()
@@ -411,7 +412,7 @@ impl Services {
         Ok(*self.runtime_store_bounds.get_or_init(|| bounds))
     }
 
-    pub(crate) fn child_retirement_policy(&self) -> CliResult<(bool, bool)> {
+    pub(crate) fn child_retirement_policy(&self) -> CliResult<(bool, bool, Option<Duration>)> {
         if let Some(policy) = self.child_retirement_policy.get() {
             return Ok(*policy);
         }
@@ -421,6 +422,8 @@ impl Services {
             (
                 config.retire_finished_children,
                 config.retire_requires_archive_receipt,
+                (config.child_retention_hours != 0)
+                    .then(|| Duration::from_hours(u64::from(config.child_retention_hours))),
             )
         }))
     }

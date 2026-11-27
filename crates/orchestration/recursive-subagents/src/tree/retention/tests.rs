@@ -32,6 +32,29 @@ fn delivered(tree: &mut super::ProductAgentTree) {
 }
 
 #[test]
+fn child_retention_age_override_uses_attempt_end_and_keeps_the_epoch_fallback() {
+    let (_tmp, mut tree) = tree();
+    let child = tree.spawn_agent("root", &spawn_req(), None).unwrap();
+    tree.record_turn_completed(&child.agent_id).unwrap();
+    tree.settle_for_test();
+    delivered(&mut tree);
+
+    let ended = tree
+        .current_attempt(&child.agent_id)
+        .unwrap()
+        .ended_at
+        .unwrap();
+    let age = std::time::Duration::from_hours(12);
+    let due_at = ended + u64::try_from(age.as_millis()).unwrap();
+    assert_eq!(
+        tree.due_children(due_at - 1, Some(age)),
+        Vec::<String>::new()
+    );
+    assert_eq!(tree.due_children(due_at, Some(age)), [child.agent_id]);
+    assert_eq!(tree.due_children(due_at, None), Vec::<String>::new());
+}
+
+#[test]
 fn child_retention_bounds_records_and_never_reuses_identity_or_refunds_budget() {
     let (_tmp, mut tree) = tree();
     tree.snapshot.child_retention_count = 1;
@@ -192,7 +215,9 @@ fn child_retirement_abort_clears_the_ticket_and_restores_followup_for_the_attemp
     tree.settle_for_test();
     delivered(&mut tree);
     let occupied = super::super::BTreeSet::new();
-    let (agent, attempt, locator) = tree.child_retirement_heads(u64::MAX, &occupied).remove(0);
+    let (agent, attempt, locator) = tree
+        .child_retirement_heads(u64::MAX, None, &occupied)
+        .remove(0);
     let approved = super::ApprovedHeads::from([(
         agent,
         super::ApprovedHead {
@@ -204,7 +229,7 @@ fn child_retirement_abort_clears_the_ticket_and_restores_followup_for_the_attemp
     )]);
     let prior_status = tree.node(&id).unwrap().status;
     assert_eq!(
-        tree.prepare_child_retention_guarded(u64::MAX, Some(&approved), |_| {})
+        tree.prepare_child_retention_guarded(u64::MAX, None, Some(&approved), |_| {})
             .unwrap()
             .len(),
         1
@@ -225,7 +250,7 @@ fn child_retirement_abort_clears_the_ticket_and_restores_followup_for_the_attemp
     tree.abort_child_retirement(&id, "exact-locator").unwrap();
     assert_eq!(tree.node(&id).unwrap().status, prior_status);
     assert!(tree.retirement_fault(&id).is_none());
-    assert_eq!(tree.child_retirement_heads(u64::MAX, &occupied), []);
+    assert_eq!(tree.child_retirement_heads(u64::MAX, None, &occupied), []);
     tree.send_agent_message(
         "root",
         &SendAgentMessageRequest {
@@ -255,7 +280,7 @@ fn child_retirement_summary_bound_preserves_pending_and_evicts_oldest_finished()
     tree.settle_for_test();
     delivered(&mut tree);
     let approved = tree
-        .child_retirement_heads(u64::MAX, &super::super::BTreeSet::new())
+        .child_retirement_heads(u64::MAX, None, &super::super::BTreeSet::new())
         .into_iter()
         .map(|(agent, attempt, locator)| {
             (
@@ -269,7 +294,7 @@ fn child_retirement_summary_bound_preserves_pending_and_evicts_oldest_finished()
             )
         })
         .collect();
-    tree.prepare_child_retention_guarded(u64::MAX, Some(&approved), |_| {})
+    tree.prepare_child_retention_guarded(u64::MAX, None, Some(&approved), |_| {})
         .unwrap();
     let mut finished = tree.retired_children()[&id].clone();
     tree.retired_children
@@ -306,11 +331,14 @@ fn child_retirement_and_followup_are_serialized_by_the_attempt() {
         tree.settle_for_test();
         let excluded = super::super::BTreeSet::new();
         assert!(
-            tree.child_retirement_heads(u64::MAX, &excluded).is_empty(),
+            tree.child_retirement_heads(u64::MAX, None, &excluded)
+                .is_empty(),
             "an unconsumed result cannot produce an intent"
         );
         delivered(&mut tree);
-        let (agent, attempt, locator) = tree.child_retirement_heads(u64::MAX, &excluded).remove(0);
+        let (agent, attempt, locator) = tree
+            .child_retirement_heads(u64::MAX, None, &excluded)
+            .remove(0);
         let approved = super::ApprovedHeads::from([(
             agent,
             super::ApprovedHead {
@@ -334,7 +362,7 @@ fn child_retirement_and_followup_are_serialized_by_the_attempt() {
             tree.send_agent_message("root", &request, None).unwrap();
         }
         let tickets = tree
-            .prepare_child_retention_guarded(u64::MAX, Some(&approved), |_| {})
+            .prepare_child_retention_guarded(u64::MAX, None, Some(&approved), |_| {})
             .unwrap();
         if followup_wins {
             assert_eq!(tickets, [] as [super::RetirementTicket; 0]);

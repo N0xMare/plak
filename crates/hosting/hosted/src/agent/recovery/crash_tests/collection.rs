@@ -55,7 +55,7 @@ async fn seed(root: &Path) -> (String, SessionLocator, SessionLocator) {
         .unwrap();
     fixture
         .runtime
-        .collect_dormant_children(&sessions, true, true, None)
+        .collect_dormant_children(&sessions, true, true, None, None)
         .await
         .unwrap();
     assert!(
@@ -117,7 +117,7 @@ fn collector_process() {
         }
         fixture
             .runtime
-            .collect_dormant_children(&sessions, true, true, None)
+            .collect_dormant_children(&sessions, true, true, None, None)
             .await
             .unwrap();
         sessions.reclaim().await.unwrap();
@@ -221,7 +221,7 @@ fn child_retirement_defers_on_an_older_archive_receipt_for_the_same_head() {
         );
         fixture
             .runtime
-            .collect_dormant_children(&sessions, true, true, None)
+            .collect_dormant_children(&sessions, true, true, None, None)
             .await
             .unwrap();
         assert!(sessions.head_is_quiescent(locator).await.unwrap());
@@ -270,7 +270,7 @@ async fn assert_recovery(
         set_digest("invalid");
         fixture
             .runtime
-            .collect_dormant_children(&sessions, false, false, None)
+            .collect_dormant_children(&sessions, false, false, None, None)
             .await
             .unwrap();
         assert!(sessions.head_is_quiescent(removed).await.unwrap());
@@ -286,12 +286,12 @@ async fn assert_recovery(
     );
     fixture
         .runtime
-        .collect_dormant_children(&sessions, true, true, None)
+        .collect_dormant_children(&sessions, true, true, None, None)
         .await
         .unwrap();
     fixture
         .runtime
-        .collect_dormant_children(&sessions, false, true, None)
+        .collect_dormant_children(&sessions, false, true, None, None)
         .await
         .unwrap();
     sessions.reclaim().await.unwrap();

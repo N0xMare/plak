@@ -613,6 +613,7 @@ async fn historical_child_retirement_waits_for_the_cursor_but_not_for_a_later_wo
             &sessions,
             true,
             false,
+            None,
             std::collections::BTreeSet::new(),
             Some(working),
         )
@@ -709,6 +710,7 @@ async fn child_retention_runtime_archive_delete_crash_cuts() {
                 &sessions,
                 false,
                 false,
+                None,
                 std::collections::BTreeSet::new(),
                 None,
             )
@@ -719,6 +721,7 @@ async fn child_retention_runtime_archive_delete_crash_cuts() {
                 &sessions,
                 false,
                 false,
+                None,
                 std::collections::BTreeSet::new(),
                 None,
             )

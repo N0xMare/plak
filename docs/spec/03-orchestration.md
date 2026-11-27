@@ -2252,9 +2252,14 @@ adoptable and usable as spawn inputs through the launch repository.
 ### 6.7 Conversation retention
 
 With home `runtime_store.retire_finished_children` enabled, the attached host
-retires sealed, delivered dormant child conversations after
-`child_retention_days` (default 7), or oldest first above
-`child_retention_count` (default 128). Close requests retirement immediately,
+retires sealed, delivered dormant child conversations once the current
+attempt's recorded terminal time reaches the retention age. Delivery, sealing
+and reads do not restart that clock. A nonzero home
+`runtime_store.child_retention_hours` overrides the epoch's
+`orchestration.child_retention_days` for both existing and new trees. Serving
+hosts read the override at startup. The epoch's
+`orchestration.child_retention_count` still applies oldest first independently
+of age. Close requests retirement immediately,
 subject to the same settled-owner and coverage proofs. Live, undelivered,
 recovery-required, unfacted-command, waited-on and unsealed children are not
 collected. Leaf children are collected before their parents. An acknowledged

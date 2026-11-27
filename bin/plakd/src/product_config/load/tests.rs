@@ -147,6 +147,24 @@ fn child_wake_policy_defaults_true_and_round_trips_as_a_home_key() {
 }
 
 #[test]
+fn child_retention_hours_accepts_only_whole_hours_in_range() {
+    for (value, hours) in [("0", 0), ("12", 12), ("65535", u16::MAX)] {
+        let config = ProductConfig::parse(&format!(
+            "[runtime_store]\nchild_retention_hours = {value}\n"
+        ))
+        .unwrap();
+        assert_eq!(config.child_retention_hours, hours);
+    }
+    for value in ["-1", "65536", "12.5", "\"12h\""] {
+        let error = ProductConfig::parse(&format!(
+            "[runtime_store]\nchild_retention_hours = {value}\n"
+        ))
+        .unwrap_err();
+        assert!(error.contains("runtime_store.child_retention_hours"));
+    }
+}
+
+#[test]
 fn auto_continue_is_immediate_home_only_and_rejects_obsolete_key() {
     let mut config = ProductConfig::default_product();
     config.assign_key("turn.auto_continue", "false").unwrap();

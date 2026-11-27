@@ -358,6 +358,7 @@ raised or enough data is reclaimed (spec 01 §5).
 | `runtime_store.max_objects` | integer | `4194304` | at least 16, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store cap; objects, not disk usage. Serving hosts read these limits at startup. |
 | `runtime_store.max_object_bytes` | integer | `4294967296` | at least 16, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store cap; accounted object payload and edge bytes, not disk usage. Serving hosts read these limits at startup. |
 | `runtime_store.retire_finished_children` | bool | `false` | true or false; home-scoped | Retire settled child runtimes after their result is consumed. Serving hosts read this at startup. |
+| `runtime_store.child_retention_hours` | integer | `0` | 0..=65535; home-scoped | Override the child retirement age for all attached trees. Zero keeps each tree's epoch age. Serving hosts read this at startup. |
 | `runtime_store.retire_requires_archive_receipt` | bool | `false` | true or false; home-scoped | Require a verified archive receipt for the exact child revision before retirement. Serving hosts read this at startup. |
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
@@ -615,6 +616,7 @@ them on each command. Compaction is captured in `HostConfig` by
 | `runtime_store.max_objects` | `host_restart` | Aggregate cap; CLI applies it on its next invocation. |
 | `runtime_store.max_object_bytes` | `host_restart` | Aggregate cap; CLI applies it on its next invocation. |
 | `runtime_store.retire_finished_children` | `host_restart` | Enables new automatic retirement intents; pending intents still settle when their proofs hold. |
+| `runtime_store.child_retention_hours` | `host_restart` | Overrides the epoch's retirement age for all attached trees, including existing ones. |
 | `runtime_store.retire_requires_archive_receipt` | `host_restart` | Requires an exact verified archive receipt for new intents and pending retirement dispatch. |
 | `skills.enabled` | `new_session` | Stored construction/rebind tools. |
 | `telemetry.max_bytes` | `host_restart` | Per-home writer start; CLI per command. |

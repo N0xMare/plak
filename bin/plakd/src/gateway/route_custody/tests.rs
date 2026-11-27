@@ -110,13 +110,16 @@ fn a_latched_gateway_custody_survives_a_config_that_breaks_or_drops_the_gateway(
     std::fs::create_dir_all(&state).unwrap();
     std::fs::write(
         paths.config_file(),
-        "[gateway]\naddress = \"unix:/tmp/plak-latched-gateway.sock\"\n[runtime_store]\nmax_sessions = 41\nretire_finished_children = true\nretire_requires_archive_receipt = true\n",
+        "[gateway]\naddress = \"unix:/tmp/plak-latched-gateway.sock\"\n[runtime_store]\nmax_sessions = 41\nretire_finished_children = true\nretire_requires_archive_receipt = true\nchild_retention_hours = 12\n",
     )
     .unwrap();
     let services = Services::for_home_with_state(paths.clone(), state.clone());
     let started = services.custody().unwrap();
     assert!(started.address().is_some());
-    assert_eq!(services.child_retirement_policy().unwrap(), (true, true));
+    assert_eq!(
+        services.child_retirement_policy().unwrap(),
+        (true, true, Some(std::time::Duration::from_hours(12)))
+    );
     for changed in [
         "[gateway\naddress = 1\n",
         "",
@@ -127,7 +130,10 @@ fn a_latched_gateway_custody_survives_a_config_that_breaks_or_drops_the_gateway(
         assert_eq!(custody.label(), started.label(), "after {changed:?}");
         let _roots = services.state_roots().unwrap();
         assert_eq!(services.runtime_store_bounds().unwrap()[3].get(), 41);
-        assert_eq!(services.child_retirement_policy().unwrap(), (true, true));
+        assert_eq!(
+            services.child_retirement_policy().unwrap(),
+            (true, true, Some(std::time::Duration::from_hours(12)))
+        );
         // No key file exists: a local read would refuse this account.
         {
             use plakous_hosted::platform::OpenAiCredentials as _;
