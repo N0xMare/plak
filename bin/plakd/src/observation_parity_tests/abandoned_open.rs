@@ -105,17 +105,22 @@ fn abandoned_recovery_reaches_host_and_jsonl_once_without_persisting_a_duplicate
                 .count(),
             1
         );
+        let record = recovered.record();
+        let saved: Vec<_> = record
+            .transcript
+            .iter()
+            .filter(|row| {
+                row.text()
+                    .is_some_and(|text| text.contains("recovered an interrupted turn"))
+            })
+            .collect();
+        let Some(HostEvent::Row(live)) = recovered.events.iter().find(recovery_row) else {
+            panic!("missing live JSONL notice");
+        };
         assert_eq!(
-            recovered
-                .record()
-                .transcript
-                .iter()
-                .filter(|row| row
-                    .text()
-                    .is_some_and(|text| text.contains("recovered an interrupted turn")))
-                .count(),
-            0,
-            "abandonment derives no stored notice (submission: {with_submission})"
+            saved,
+            [live],
+            "JSONL and history agree (submission: {with_submission})"
         );
     }
 }

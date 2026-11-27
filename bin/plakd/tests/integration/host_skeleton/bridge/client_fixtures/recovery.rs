@@ -100,14 +100,14 @@ fn flush(bridge: &mut Bridge, journey: &mut Vec<Frame>) {
     }
 }
 
+fn is_recovery_note(row: &TranscriptRow) -> bool {
+    row.text()
+        .is_some_and(|text| text.contains("recovered an interrupted turn"))
+}
+
 fn verify(journey: &[Frame], session: &str) {
-    let mut counts = (0, 0, 0, 0, 0);
-    let mut row_index = None;
-    let mut baseline_index = None;
-    for (index, frame) in journey.iter().enumerate() {
-        if matches!(frame, HostFrame::Snapshot(page) if page.last) {
-            baseline_index = Some(index);
-        }
+    let mut counts = (0, 0, 0, 0);
+    for frame in journey {
         let HostFrame::Event { observation, .. } = frame else {
             continue;
         };
@@ -122,36 +122,34 @@ fn verify(journey: &[Frame], session: &str) {
                 assert_ne!(operations.len(), 0);
                 counts.0 += 1;
             }
-            SessionObservation::Row(row)
-                if row
-                    .text()
-                    .is_some_and(|text| text.contains("recovered an interrupted turn")) =>
-            {
-                counts.1 += 1;
-                row_index = Some(index);
-                let jsonl = plakd::agent_jsonl::project_host_event(
-                    observation,
-                    plakous_host_protocol::envelope::JsonlCorrelation::default(),
-                    Some(session),
-                )
-                .unwrap();
-                assert!(jsonl.contains("recovered an interrupted turn"));
+            SessionObservation::Row(row) if is_recovery_note(row) => {
+                panic!("derived recovery notice was delivered unkeyed: {row:?}");
             }
             SessionObservation::Binding { session_id, .. } => {
                 assert_eq!(session_id.as_deref(), Some(session));
-                counts.2 += 1;
+                counts.1 += 1;
             }
-            SessionObservation::QueueSnapshot { .. } => counts.3 += 1,
-            SessionObservation::PromptHistorySnapshot(_) => counts.4 += 1,
+            SessionObservation::QueueSnapshot { .. } => counts.2 += 1,
+            SessionObservation::PromptHistorySnapshot(_) => counts.3 += 1,
             _ => {}
         }
     }
-    assert_eq!((counts.0, counts.1), (1, 1), "{journey:?}");
-    assert!(counts.2 > 0 && counts.3 > 0 && counts.4 > 0);
-    assert!(
-        baseline_index.unwrap() > row_index.unwrap(),
-        "the later baseline must follow the actual derived row"
-    );
+    assert_eq!(counts.0, 1, "{journey:?}");
+    assert!(counts.1 > 0 && counts.2 > 0 && counts.3 > 0);
+}
+
+fn recovery_page(
+    journey: &[Frame],
+) -> Vec<&plakous_host_protocol::views::transcript::TranscriptItem> {
+    journey
+        .iter()
+        .filter_map(|frame| match frame {
+            HostFrame::Snapshot(page) if page.scope == TranscriptScope::Root => Some(&page.items),
+            _ => None,
+        })
+        .flatten()
+        .filter(|item| is_recovery_note(&item.row))
+        .collect()
 }
 
 #[test]
@@ -186,6 +184,7 @@ fn client_producer_abandoned_open_emits_real_recovery_once_for_both_submission_s
         });
         let mut journey = Vec::new();
         let attachment = baseline(&mut bridge, 2, &mut journey).unwrap();
+        let first_page = journey.len();
         bridge.send(&ClientFrame::Request {
             id: 3,
             op: Op::Intent {
@@ -198,6 +197,7 @@ fn client_producer_abandoned_open_emits_real_recovery_once_for_both_submission_s
             },
         });
         baseline(&mut bridge, 3, &mut journey);
+        let resync_page = journey.len();
         flush(&mut bridge, &mut journey);
         bridge.send(&ClientFrame::Bye);
         bridge.finish();
@@ -217,10 +217,20 @@ fn client_producer_abandoned_open_emits_real_recovery_once_for_both_submission_s
             dispatched,
             "open/resync/reattach must not dispatch a client continuation"
         );
-        let record = store(&fixture).load(&session).unwrap();
-        assert!(!record.transcript.iter().any(|row| {
-            row.text()
-                .is_some_and(|text| text.contains("recovered an interrupted turn"))
-        }));
+        let stored: Vec<_> = store(&fixture)
+            .load(&session)
+            .unwrap()
+            .transcript
+            .items()
+            .into_iter()
+            .filter(|item| is_recovery_note(&item.row))
+            .collect();
+        assert_eq!(stored.len(), 1, "there must be one durable recovery row");
+        assert_eq!(recovery_page(&journey[..first_page]), [&stored[0]]);
+        assert_eq!(
+            recovery_page(&journey[first_page..resync_page]),
+            [&stored[0]]
+        );
+        assert_eq!(recovery_page(&journey[resync_page..]), [&stored[0]]);
     }
 }

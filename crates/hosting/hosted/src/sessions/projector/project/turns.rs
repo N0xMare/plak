@@ -79,15 +79,17 @@ impl Applier<'_> {
                 self.push(TranscriptRow::warning(NoticeScope::Recovery, line));
             }
             FeedTurnOutcome::RecoveryRequired => {
-                self.push(
-                    TranscriptRow::error(
-                        NoticeScope::Recovery,
-                        crate::runtime::RECOVERY_PENDING_NOTE,
-                    )
-                    .with_remedy(
-                        plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {},
-                    ),
-                );
+                if !self.project_recovery_abandonment(turn_id)? {
+                    self.push(
+                        TranscriptRow::error(
+                            NoticeScope::Recovery,
+                            crate::runtime::RECOVERY_PENDING_NOTE,
+                        )
+                        .with_remedy(
+                            plakous_host_protocol::notice_remedy::NoticeRemedy::RecoverSession {},
+                        ),
+                    );
+                }
                 self.views.state.pause = Some(Anchored {
                     anchor,
                     value: Some(PauseCause::RecoveryRequired { turn_id: turn }),
@@ -207,8 +209,17 @@ impl Applier<'_> {
         }) else {
             return Ok(());
         };
+        self.project_recovery_abandonment(turn_id).map(drop)
+    }
+
+    /// The report can already be present when the reopen finalizes the
+    /// recorded terminal decision and abandons its unfinished work together.
+    fn project_recovery_abandonment(
+        &mut self,
+        turn_id: plakous::model::TurnId,
+    ) -> Result<bool, ProjectError> {
         let Some(checkpoint) = record_checkpoint(self.record) else {
-            return Ok(());
+            return Ok(false);
         };
         let header = *self.record.header();
         let ReadValue::Abandoned(Some(report)) = self.read(ReadRequest::Abandoned {
@@ -217,7 +228,7 @@ impl Applier<'_> {
             turn_id,
         })?
         else {
-            return Ok(());
+            return Ok(false);
         };
         let report = report.clone();
         self.push(TranscriptRow::warning(
@@ -231,7 +242,7 @@ impl Applier<'_> {
                 report,
             });
         }
-        Ok(())
+        Ok(true)
     }
 
     fn settle_turn_calls(&mut self, turn: &str, interrupted: bool, completed: bool) {

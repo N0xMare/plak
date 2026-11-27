@@ -103,13 +103,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .str("cause", report.cause().as_str());
         }
         log_ev(self.role.log.as_ref(), &self.role.config, record);
-        if let Some(report) = &report
-            && !terminal_published
-        {
-            let _ = self.role.events.send(ContentEvent::Row(TranscriptRow::info(
-                NoticeScope::Recovery,
-                super::super::events::abandoned_turn_operator_line(report),
-            )));
+        if let Some(report) = &report {
+            if self.role.events.has_keyed_root() {
+                self.publish_projected_transcript(self.role.config.attached_one_shot)
+                    .await;
+            }
+            announce_unkeyed_abandonment(&self.role.events, report);
         }
         if report.is_none() && !restored_working {
             let _ = self.role.events.send(ContentEvent::Row(TranscriptRow::info(NoticeScope::Recovery,
@@ -394,6 +393,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             abandoned: report,
             terminal_published,
         })
+    }
+}
+
+pub(super) fn announce_unkeyed_abandonment<P: plakous_host_protocol::ProtocolExtension>(
+    events: &super::super::Sender<P>,
+    report: &AbandonedTurnReport,
+) {
+    // The keyed transcript gets this notice only from the recovery record.
+    if !events.has_keyed_root() {
+        let _ = events.send(ContentEvent::Row(TranscriptRow::warning(
+            NoticeScope::Recovery,
+            super::super::events::abandoned_turn_operator_line(report),
+        )));
     }
 }
 

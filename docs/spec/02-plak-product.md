@@ -2451,7 +2451,7 @@ start and finish timestamps rather than time spent qualifying the operation.
 | process | subject | (b) the starting call's command through `feed_call`, redacted and bounded as a tool subject |
 | retry | every field | (d) a notice intent: a transport retry is not a commit |
 | milestone | every field | (d) a notice intent derived from durable tree attempts, questions and root adoption receipts; an `adopted` milestone's file count and identity come from the successful tree operation receipt, and an `adopt conflict` milestone's paths (not in the result) from the call's tool-boundary facts |
-| notice, recovery and turn scope | the line and its tone | (a) the `TurnTerminal` (claim, cause, whether a model round and a tool round completed, steering clause) and (b) the terminal record through `feed_terminal`; a recovered turn that completed uses the live completion wording. Abandoning a root whose `RecoveryRequired` terminal was already committed commits no fact of its own: the projector derives the recovery line from (b) the abandonment report its terminal record now carries, read through `feed_terminal` at the closing record. It identifies that record by its history note for a turn the views no longer hold open and no `TurnTerminal`, and derives the line only when that turn's terminal is `RecoveryRequired` and carries an abandonment; it does not depend on the queue's pause, which later facts may replace. The closure appends its note once per turn, so the line is derived once; its session-log record is at least once (§4.2) |
+| notice, recovery and turn scope | the line and its tone | (a) the `TurnTerminal` (claim, cause, whether a model round and a tool round completed, steering clause) and (b) the terminal record through `feed_terminal`; a recovered turn that completed uses the live completion wording. A `RecoveryRequired` terminal that already carries an abandonment report derives the recovery line instead of the pending-recovery notice. If a later closure abandons that turn, it commits no fact of its own: the projector identifies the closing record by its history note for a turn the views no longer hold open and no `TurnTerminal`. In both cases it reads the report through `feed_terminal` at the record that closed the work; it does not depend on the queue's pause, which later facts may replace. The closure appends its note once per turn, so the line is derived once; its session-log record is at least once (§4.2) |
 | error row of a failed turn | the rendered text | (b) the failure kind and message of the terminal record through `feed_terminal`, rendered by a pure function whose only classifier is the typed model error kind; a message without a kind, or with a kind the renderer does not frame, is shown raw and its words are never read for a category |
 | notice, compaction scope | the not-applied and outcome lines | (a) `WorkflowSettled` |
 | notice, queue scope (recorded rejection) | the line | (a) `CommandRejected` |
@@ -3652,7 +3652,9 @@ process applies it:
   line states whether earlier completed rounds remain. Truthfulness takes precedence
   over byte-identical notices.
 - `Failed`, `Refused` and `RecoveryRequired` derive their ordinary rows, the
-  error text rendered from the terminal record `feed_terminal` reads; a
+  error text rendered from the terminal record `feed_terminal` reads. A
+  `RecoveryRequired` terminal carrying an abandonment report derives the
+  recovery line instead of the pending-recovery notice. A
   context-capacity failure derives its capacity error row and a pause cause in
   the same transaction as its head (§2.6). A recorded `Failed` or `Cancelled`
   terminal that settled queued steering unapplied derives no steering clause.

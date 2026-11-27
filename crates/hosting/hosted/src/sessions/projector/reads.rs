@@ -500,7 +500,7 @@ pub async fn load_reads(
 }
 
 /// The abandonment a fenced turn's terminal record carries: only a
-/// `RecoveryRequired` terminal a later closure abandoned has one to report.
+/// `RecoveryRequired` terminal whose unfinished work was abandoned has one to report.
 /// A checkpoint that holds no terminal for the turn (its history continued
 /// from before a retained window) reports none rather than refusing.
 fn abandoned_read(

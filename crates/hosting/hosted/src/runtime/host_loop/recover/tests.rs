@@ -195,19 +195,69 @@ fn retained_approval_after_owner_loss(switch: bool) {
     );
 }
 
-fn assert_one_jsonl_recovery_note(events: &[HostEvent<TestExtension>], with_submission: bool) {
-    let notices = events
-        .iter()
-        .filter(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(row)) if row.text.contains("recovered an interrupted turn")))
-        .count();
-    assert_eq!(
-        notices, 1,
-        "JSONL recovery has one status note (with submission: {with_submission})"
-    );
+fn is_recovery_note(row: &TranscriptRow) -> bool {
+    row.text()
+        .is_some_and(|text| text.contains("recovered an interrupted turn"))
+}
+
+fn assert_recovery_notice(
+    events: &[HostEvent<TestExtension>],
+    saved: &sessions::SessionRecord,
+    keyed: bool,
+) {
+    let stored: Vec<_> = saved
+        .transcript
+        .items()
+        .into_iter()
+        .filter(|item| is_recovery_note(&item.row))
+        .collect();
+    assert_eq!(stored.len(), 1, "the closure derives exactly one saved row");
+    let mut rows = Vec::new();
+    let mut items = Vec::new();
+    for event in events {
+        match event {
+            HostEvent::Row(row) if is_recovery_note(row) => rows.push(row),
+            HostEvent::TranscriptPatch(patch) => {
+                items.extend(
+                    patch
+                        .upserts
+                        .iter()
+                        .filter(|item| is_recovery_note(&item.row)),
+                );
+            }
+            _ => {}
+        }
+    }
+    if keyed {
+        assert!(
+            rows.is_empty(),
+            "keyed recovery must not publish an unkeyed row"
+        );
+        assert_eq!(
+            items,
+            [&stored[0]],
+            "live and stored keys and tones must agree"
+        );
+    } else {
+        assert_eq!(
+            rows,
+            [&stored[0].row],
+            "JSONL recovery has one matching notice"
+        );
+    }
 }
 
 #[test]
 fn in_process_recovery_has_one_notice_with_or_without_submission() {
+    in_process_recovery_has_one_notice(false);
+}
+
+#[test]
+fn keyed_in_process_recovery_publishes_the_saved_notice() {
+    in_process_recovery_has_one_notice(true);
+}
+
+fn in_process_recovery_has_one_notice(keyed: bool) {
     for with_submission in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let (config, evidence) = scripted_host_with(
@@ -218,8 +268,12 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
         );
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host =
-            RootActor::open_blocking(config, &rx, super::super::Sender::over(tx), None).unwrap();
+        let sender = if keyed {
+            super::super::Sender::over_keyed_root(tx).0
+        } else {
+            super::super::Sender::over(tx)
+        };
+        let mut host = RootActor::open_blocking(config, &rx, sender, None).unwrap();
         if with_submission {
             let item = sessions::QueueItem::new("interrupted prompt");
             host.role.config.session.pending_queue.push(item.clone());
@@ -266,10 +320,6 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
         host.block(async |host| host.recover_session(RecoveryTrigger::Explicit).await)
             .unwrap();
         let events: Vec<_> = observed.try_iter().collect();
-        assert_one_jsonl_recovery_note(&events, with_submission);
-        assert_eq!(events.iter().filter(|event| matches!(event,
-            HostEvent::Row(row) if row.text().is_some_and(|text| text.contains("recovered an interrupted turn"))
-        )).count(), 1, "recovery must publish exactly one operator notice (with submission: {with_submission})");
         assert_eq!(
             events
                 .iter()
@@ -283,17 +333,7 @@ fn in_process_recovery_has_one_notice_with_or_without_submission() {
             .store
             .load(&host.role.config.session.id)
             .unwrap();
-        assert_eq!(
-            saved
-                .transcript
-                .iter()
-                .filter(|row| row
-                    .text()
-                    .is_some_and(|text| text.contains("recovered an interrupted turn")))
-                .count(),
-            1,
-            "the projector derives the fenced turn's recovery line once from its closure (with submission: {with_submission})"
-        );
+        assert_recovery_notice(&events, &saved, keyed);
         let dispatches = plakous_offline_crash_harness::evidence::read_evidence(&evidence)
             .unwrap()
             .iter()

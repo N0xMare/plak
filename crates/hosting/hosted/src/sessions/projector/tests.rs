@@ -178,29 +178,32 @@ impl Feed {
                 "the corpus provides every planned read: {request:?}"
             );
         }
-        // History of a turn the projector may not hold open asks for that
-        // turn's abandonment; a turn that was not fenced has none, which is
-        // what the loader answers. A test fencing a turn inserts its own.
-        if !record
+        // An unresolved terminal or a history record that may close one
+        // asks for an abandonment report. Tests supply it when present.
+        let has_terminal = record
             .facts()
             .iter()
-            .any(|fact| matches!(fact, FeedFact::TurnTerminal { .. }))
-        {
-            for fact in record.facts() {
-                if let FeedFact::HistoryAppended {
+            .any(|fact| matches!(fact, FeedFact::TurnTerminal { .. }));
+        for fact in record.facts() {
+            let turn_id = match fact {
+                FeedFact::HistoryAppended {
                     turn_id: Some(turn_id),
                     ..
-                } = fact
-                {
-                    let request = ReadRequest::Abandoned {
-                        branch,
-                        checkpoint,
-                        turn_id: *turn_id,
-                    };
-                    if self.reads.read(&request).is_none() {
-                        self.reads.insert(request, ReadValue::Abandoned(None));
-                    }
-                }
+                } if !has_terminal => *turn_id,
+                FeedFact::TurnTerminal {
+                    turn_id,
+                    outcome: FeedTurnOutcome::RecoveryRequired,
+                    ..
+                } => *turn_id,
+                _ => continue,
+            };
+            let request = ReadRequest::Abandoned {
+                branch,
+                checkpoint,
+                turn_id,
+            };
+            if self.reads.read(&request).is_none() {
+                self.reads.insert(request, ReadValue::Abandoned(None));
             }
         }
         self.records.push(record);
@@ -1696,6 +1699,65 @@ fn a_fenced_turns_closure_derives_its_line_after_the_pause_moved() {
     fenced_closure_derives_its_line_once(true);
 }
 
+#[test]
+fn recovery_required_can_announce_the_abandonment_at_its_terminal_key() {
+    let (mut feed, unresolved) = single_turn(End::RecoveryRequired, true, false);
+    let record = feed.records.last().unwrap();
+    let turn_id = record
+        .facts()
+        .iter()
+        .find_map(|fact| match fact {
+            FeedFact::TurnTerminal { turn_id, .. } => Some(*turn_id),
+            _ => None,
+        })
+        .unwrap();
+    let report = running_tool_abandonment();
+    feed.reads.insert(
+        ReadRequest::Abandoned {
+            branch: feed.branch,
+            checkpoint: record_checkpoint(record).unwrap(),
+            turn_id,
+        },
+        ReadValue::Abandoned(Some(report.clone())),
+    );
+    let recovered = project_all(&feed);
+    let key = unresolved
+        .rows
+        .iter()
+        .find(|(_, row)| row.text() == Some(crate::runtime::RECOVERY_PENDING_NOTE))
+        .map(|(key, _)| key)
+        .unwrap();
+    assert_eq!(
+        recovered.views.rows.get(key),
+        Some(&TranscriptRow::warning(
+            NoticeScope::Recovery,
+            crate::runtime::events::abandoned_turn_operator_line(&report),
+        ))
+    );
+    assert_eq!(recovered.views.rows.len(), unresolved.rows.len());
+    assert_eq!(
+        recovered.abandonments,
+        [ProjectedAbandonment {
+            session_id: feed.session,
+            turn_id,
+            report,
+        }]
+    );
+}
+
+fn running_tool_abandonment() -> plakous::agent::AbandonedTurnReport {
+    serde_json::from_value(serde_json::json!({
+        "model_round_completed": false,
+        "tool_round_completed": false,
+        "operations": [7],
+        "effects": [],
+        "uncommitted_tool_calls": [],
+        "claim": "RunningTool",
+        "cause": "Interrupted",
+    }))
+    .unwrap()
+}
+
 fn fenced_closure_derives_its_line_once(refused_between: bool) {
     let (mut feed, fenced) = single_turn(End::RecoveryRequired, true, false);
     let Some(PauseCause::RecoveryRequired { turn_id }) = fenced.pause_cause(&feed.intents) else {
@@ -1713,16 +1775,7 @@ fn fenced_closure_derives_its_line_once(refused_between: bool) {
     } else {
         fenced
     };
-    let report: plakous::agent::AbandonedTurnReport = serde_json::from_value(serde_json::json!({
-        "model_round_completed": false,
-        "tool_round_completed": false,
-        "operations": [7],
-        "effects": [],
-        "uncommitted_tool_calls": [],
-        "claim": "RunningTool",
-        "cause": "Interrupted",
-    }))
-    .unwrap();
+    let report = running_tool_abandonment();
     let mut note = text_item(ReadActor::User, "the closure's note");
     note.harness_authored = true;
     let (fact, items) = feed.history(

@@ -117,7 +117,6 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .target = Some(opened.locator().session_id());
-        let root_published = false;
         let restored_working = opened.has_recovered_turn();
         // A reopen that had to close an unfinished turn. Read before `opened`
         // is consumed; reported near `session.resumed`.
@@ -439,12 +438,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
         });
         if let Some(report) = &abandoned_turn {
             super::recover::log_abandoned_report(log.as_ref(), &config, report);
-            if !root_published {
-                let _ = events.send(ContentEvent::Row(TranscriptRow::info(
-                    NoticeScope::Recovery,
-                    super::super::events::abandoned_turn_operator_line(report),
-                )));
-            }
+            super::recover::announce_unkeyed_abandonment(&events, report);
             let _ = events.send(ContentEvent::Recovered {
                 claim: Some(report.claim().as_str().to_owned()),
                 cause: Some(report.cause().as_str().to_owned()),
