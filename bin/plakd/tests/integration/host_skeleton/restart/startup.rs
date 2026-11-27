@@ -408,9 +408,9 @@ fn directory_reads_wait_for_the_first_projection_and_watches_snapshot_it() {
     silent(&mut lister, &held);
     silent(&mut watcher, &held);
     held.release();
-    let listed = until_response(&mut lister, 1);
-    let rows = listed.last().unwrap()["outcome"]["ok"]["rows"].clone();
-    assert!(rows.to_string().contains(&session), "{listed:?}");
+    let answer = until_response(&mut lister, 1);
+    let rows = answer.last().unwrap()["outcome"]["ok"]["rows"].clone();
+    assert!(rows.to_string().contains(&session), "{answer:?}");
     let snapshot = loop {
         let next = frame(&mut watcher);
         if next["frame"] == "directory" {
