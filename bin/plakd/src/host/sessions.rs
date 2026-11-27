@@ -1266,6 +1266,8 @@ mod tests {
         store.commit(&mut record).unwrap();
         let sessions =
             ProductSessions::new(&Services::for_home(paths.clone()), None, None).unwrap();
+        // The first projection is built off the start, then read from memory.
+        sessions.directory.settle();
         let opens = crate::store::open_counts::get(&paths.product_database());
         #[cfg(feature = "test-support")]
         let loads = plakous_recursive_subagents_store::test_support::tree_load_count(
